@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Asset board</title>
+<style>
+/* The asset board. A rail of kinds on the left, a grid of cards in the middle, the chosen
+   asset on the right. Previews sit on a paper tint, so dark ink reads. */
+:root{
+  --bg:#0f1115; --col:#161920; --card:#1c2029; --card-h:#222734; --line:#272c37;
+  --fg:#d7dbe3; --dim:#8b93a3; --faint:#5f6775;
+  --accent:#5b8def; --high:#e5484d;
+  --paper:#e9e0cc; --r:7px;
+}
+*{box-sizing:border-box;min-width:0}
+html,body{height:100%}
+body{
+  margin:0;background:var(--bg);color:var(--fg);overflow:hidden;
+  display:flex;flex-direction:column;
+  font:13px/1.4 ui-sans-serif,"Segoe UI",system-ui,-apple-system,sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+button,input,select{font:inherit;color:inherit}
+.num{font-variant-numeric:tabular-nums}
+a{color:inherit;text-decoration:none}
+
+/* ── header ─────────────────────────────────────────────────────────── */
+header{
+  display:flex;align-items:center;flex-wrap:wrap;gap:7px 10px;
+  flex:0 0 auto;min-height:44px;padding:6px 14px;
+  border-bottom:1px solid var(--line);background:var(--col);
+}
+header > *{flex:0 0 auto}
+.brand{font-size:12px;font-weight:600;letter-spacing:.9px;color:var(--dim);text-transform:uppercase}
+#count{font-size:11.5px;color:var(--faint)}
+#search{
+  flex:1 1 150px;max-width:280px;min-width:110px;
+  height:26px;padding:0 9px;background:#0b0d11;border:1px solid var(--line);
+  border-radius:var(--r);outline:none;font-size:12px;
+}
+#search:focus{border-color:var(--accent)}
+.grow{flex:1 1 0;min-width:0}
+.icon{
+  display:inline-flex;align-items:center;
+  height:26px;padding:0 9px;border:1px solid var(--line);background:transparent;
+  border-radius:var(--r);color:var(--dim);cursor:pointer;font-size:11.5px;white-space:nowrap;
+}
+.icon:hover{background:var(--card-h);color:var(--fg)}
+
+/* ── layout ─────────────────────────────────────────────────────────── */
+main{flex:1 1 auto;min-height:0;display:flex}
+#rail{
+  flex:0 0 190px;overflow-y:auto;padding:10px 8px;border-right:1px solid var(--line);
+  background:var(--col);
+}
+#grid{
+  flex:1 1 auto;overflow-y:auto;padding:12px 14px;align-content:start;
+  display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:9px;
+  grid-auto-rows:max-content;
+}
+#pane{
+  flex:0 0 400px;overflow-y:auto;padding:12px 14px;border-left:1px solid var(--line);
+  background:var(--col);
+}
+#pane.wide{flex-basis:62vw}
+#rail::-webkit-scrollbar,#grid::-webkit-scrollbar,#pane::-webkit-scrollbar{width:8px}
+#rail::-webkit-scrollbar-thumb,#grid::-webkit-scrollbar-thumb,#pane::-webkit-scrollbar-thumb{
+  background:#2f3542;border-radius:6px}
+
+/* ── rail ───────────────────────────────────────────────────────────── */
+.rh{padding:9px 7px 3px;font-size:9.5px;letter-spacing:.8px;text-transform:uppercase;color:var(--faint)}
+.rk{
+  display:flex;align-items:center;gap:6px;padding:4px 7px;border-radius:5px;cursor:pointer;
+  font-size:12px;color:var(--dim);
+}
+.rk:hover{background:var(--card-h);color:var(--fg)}
+.rk.sel{background:var(--accent);color:#fff}
+.rk .n{margin-left:auto;font-size:10.5px;color:var(--faint)}
+.rk.sel .n{color:#cfe0ff}
+.rk.zero{opacity:.45}
+
+/* ── card ───────────────────────────────────────────────────────────── */
+.card{
+  background:var(--card);border:1px solid var(--line);border-radius:var(--r);
+  cursor:pointer;overflow:hidden;display:flex;flex-direction:column;
+}
+.card > *{flex:0 0 auto}
+.card:hover{background:var(--card-h)}
+.card.sel{border-color:var(--accent)}
+.thumb{
+  height:108px;background:var(--paper);display:flex;align-items:center;justify-content:center;
+  color:#6b5c46;font:11px ui-monospace,Consolas,monospace;text-align:center;padding:8px;
+  overflow:hidden;
+}
+.thumb img{max-width:100%;max-height:100%;object-fit:contain;image-rendering:pixelated}
+.thumb.txt{font-size:22px;letter-spacing:1px}
+.card .t{padding:6px 8px 2px;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.m{display:flex;flex-wrap:wrap;align-items:center;gap:4px;padding:2px 8px 7px;font-size:10px;color:var(--faint)}
+.pill{
+  padding:0 5px;border-radius:3px;background:#0b0d11;border:1px solid #2b3140;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:130px;
+}
+.pill.kind{color:#7fb0c4;border-color:#26414a}
+.pill.gen{color:#d6ab4e;border-color:#413720}
+.pill.unused{color:var(--high);border-color:#43282a}
+.pill.ph{font:10px ui-monospace,Consolas,monospace;color:#a58fd0;border-color:#3a3050}
+.none{grid-column:1 / -1;color:var(--faint);font-size:11px;text-align:center;padding:20px 0;font-style:italic}
+
+/* ── detail ─────────────────────────────────────────────────────────── */
+#pane h2{margin:0 0 6px;font-size:14px;overflow-wrap:anywhere}
+#pane .m{padding:0 0 10px}
+.pv{
+  background:var(--paper);border-radius:var(--r);display:flex;align-items:center;
+  justify-content:center;min-height:180px;padding:12px;overflow:hidden;
+}
+.pv img{max-width:100%;max-height:340px;object-fit:contain;image-rendering:pixelated}
+.pv.plain{background:#0b0d11;border:1px solid var(--line);color:var(--dim);font-size:12px}
+.pv iframe{width:100%;height:62vh;border:0;background:var(--paper);display:block}
+.pv.frame{padding:0;display:block;min-height:0}
+.sec{margin-top:12px}
+.sec > .h{font-size:9.5px;letter-spacing:.7px;text-transform:uppercase;color:var(--faint);margin-bottom:4px}
+.path{font:11px/1.5 ui-monospace,Consolas,monospace;color:var(--dim);overflow-wrap:anywhere}
+.uses{font-size:11.5px;color:#b9c1cd;line-height:1.6}
+.chips{display:flex;flex-wrap:wrap;gap:4px}
+.keys{font:11px/1.6 ui-monospace,Consolas,monospace;color:#b9c1cd}
+.keys b{color:var(--fg);font-weight:600}
+pre{
+  margin:8px 0 0;padding:9px;background:#0b0d11;border:1px solid var(--line);border-radius:var(--r);
+  font:11px/1.5 ui-monospace,Consolas,monospace;color:#b9c1cd;max-height:50vh;overflow:auto;
+  white-space:pre;
+}
+.act{display:flex;gap:5px;margin-top:12px;flex-wrap:wrap}
+.act button{
+  height:24px;padding:0 10px;font-size:11px;border:1px solid var(--line);
+  background:#0b0d11;border-radius:5px;color:var(--dim);cursor:pointer;
+}
+.act button:hover{color:var(--fg);border-color:#3d4557}
+.act .sp{flex:1}
+.hint{color:var(--faint);font-size:11.5px;font-style:italic;padding:20px 0;text-align:center}
+
+#toast{
+  position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:80;
+  background:#1a1e26;border:1px solid #333b4a;border-radius:8px;padding:8px 13px;
+  font-size:12px;box-shadow:0 10px 30px #000a;display:none;max-width:64vw;
+}
+#toast.on{display:block}
+#toast.bad{border-color:#5e2b2e;color:#ffb3b3}
+</style>
+</head>
+<body>
+
+<header>
+  <span class="brand">Assets</span>
+  <span id="count" class="num"></span>
+  <input id="search" type="search" placeholder="Search  /" autocomplete="off">
+  <span class="grow"></span>
+  <a class="icon" id="tickets" href="/" title="The Agent Board">Tickets</a>
+  <button class="icon" id="reload">Reload</button>
+</header>
+
+<main>
+  <nav id="rail"></nav>
+  <section id="grid"></section>
+  <aside id="pane"></aside>
+</main>
+<div id="toast"></div>
+
+<script>
+const TOKEN = "__TOKEN__";
+/* The project this page shows. A board server that serves many projects opens the page as
+   /assets?project=<name>, and every request of the page carries the same parameter. */
+const PROJECT = new URLSearchParams(location.search).get("project") || "";
+const withProject = (url) => PROJECT
+  ? url + (url.includes("?") ? "&" : "?") + "project=" + encodeURIComponent(PROJECT) : url;
+let DATA = null, KIND = "", SEL = "", FIT = null;   // FIT scales the open sheet to the pane
+
+const $ = (s) => document.querySelector(s);
+const el = (t, c, x) => { const n = document.createElement(t);
+  if (c) n.className = c; if (x != null) n.textContent = x; return n; };
+
+async function api(path, body) {
+  const r = await fetch(withProject(path), {method: body ? "POST" : "GET",
+    headers: {"X-Todo-Token": TOKEN, "Content-Type": "application/json"},
+    body: body ? JSON.stringify(body) : undefined});
+  const j = await r.json().catch(() => ({error: "bad response"}));
+  if (!r.ok) throw new Error(j.error || r.status);
+  return j;
+}
+
+/* An asset's file, for <img>, <audio> and <iframe>, which cannot send a header. */
+const src = (a) => withProject("/asset/" + a.id.split("/").map(encodeURIComponent).join("/")
+  + "?token=" + encodeURIComponent(TOKEN));
+
+let toastTimer = 0;
+function toast(msg, bad) {
+  const t = $("#toast");
+  t.textContent = msg; t.className = "on" + (bad ? " bad" : "");
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.className = ""; }, bad ? 6000 : 2500);
+}
+
+function size(n) {
+  return n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB"
+    : (n / 1048576).toFixed(1) + " MB";
+}
+
+async function load() {
+  try {
+    DATA = await api("/api/assets");
+  } catch (e) { toast("Cannot read the assets: " + e.message, true); return; }
+  const hash = decodeURIComponent(location.hash.slice(1));
+  if (hash && DATA.assets.some((a) => a.id === hash)) SEL = hash;
+  if (SEL && !DATA.assets.some((a) => a.id === SEL)) SEL = "";
+  draw();
+  document.querySelector(".card.sel")?.scrollIntoView({block: "center"});
+}
+
+function matches(a, q) {
+  if (KIND && a.kind !== KIND) return false;
+  if (!q) return true;
+  const hay = [a.id, a.name, a.kind, a.group, ...(a.usedBy || []), ...a.placeholders].join(" ").toLowerCase();
+  return q.split(/\s+/).every((w) => hay.includes(w));
+}
+
+/* The pane is redrawn only when the chosen asset changes, so a search does not reload a
+   sheet's iframe on every key. */
+function draw(pane = true) {
+  if (!DATA) return;
+  const q = $("#search").value.trim().toLowerCase();
+  const shown = DATA.assets.filter((a) => matches(a, q));
+  $("#count").textContent = shown.length === DATA.assets.length
+    ? DATA.assets.length + " files" : shown.length + " of " + DATA.assets.length;
+  drawRail(); drawGrid(shown);
+  if (pane) drawPane();
+}
+
+function drawRail() {
+  const rail = $("#rail"); rail.replaceChildren();
+  const count = {};
+  for (const a of DATA.assets) count[a.kind] = (count[a.kind] || 0) + 1;
+  const item = (label, kind, n) => {
+    const r = el("div", "rk" + (KIND === kind ? " sel" : "") + (n ? "" : " zero"));
+    r.append(el("span", "", label), el("span", "n num", String(n)));
+    r.onclick = () => { KIND = kind; draw(false); };
+    return r;
+  };
+  rail.append(item("All", "", DATA.assets.length));
+  let group = "";
+  for (const k of DATA.kinds) {
+    if (k.group !== group) { group = k.group; rail.append(el("div", "rh", group)); }
+    rail.append(item(k.kind, k.kind, count[k.kind] || 0));
+  }
+}
+
+function chips(a, box) {
+  box.append(el("span", "pill kind", a.kind));
+  for (const b of a.badges) box.append(el("span", "pill" + (b === "generated" ? " gen" : ""), b));
+  if (a.usedBy && !a.usedBy.length) box.append(el("span", "pill unused", "unused"));
+}
+
+function thumb(a) {
+  const t = el("div", "thumb");
+  if (["svg", "grid", "img"].includes(a.preview)) {
+    const img = el("img"); img.loading = "lazy"; img.alt = a.name; img.src = src(a);
+    t.append(img);
+  } else if (a.preview === "audio") { t.classList.add("txt"); t.textContent = "♪"; }
+  else if (a.preview === "json") { t.classList.add("txt"); t.textContent = "{ }"; }
+  else if (a.preview === "html") t.textContent = a.badges[0] || "sheet";
+  else t.textContent = "open only · " + size(a.bytes);
+  return t;
+}
+
+function drawGrid(shown) {
+  const grid = $("#grid"); grid.replaceChildren();
+  if (!shown.length) { grid.append(el("div", "none", "Nothing matches.")); return; }
+  for (const a of shown) {
+    const c = el("div", "card" + (a.id === SEL ? " sel" : ""));
+    c.title = a.id;
+    const m = el("div", "m"); chips(a, m);
+    c.append(thumb(a), el("div", "t", a.name), m);
+    c.onclick = () => { SEL = a.id; history.replaceState(null, "", "#" + encodeURIComponent(a.id)); draw(); };
+    grid.append(c);
+  }
+}
+
+function section(title, body) {
+  const s = el("div", "sec"); s.append(el("div", "h", title), body); return s;
+}
+
+/* One line per top-level key with its count, then the pretty text. */
+function jsonPreview(a, box) {
+  box.className = "pv plain"; box.textContent = "Reading…";
+  fetch(src(a)).then((r) => r.text()).then((text) => {
+    const wrap = el("div");
+    let data;
+    try { data = JSON.parse(text); } catch (e) { box.textContent = "Not JSON: " + e.message; return; }
+    const keys = el("div", "keys");
+    const entries = Array.isArray(data) ? [["(array)", data]] : Object.entries(data);
+    for (const [k, v] of entries) {
+      const line = el("div");
+      const n = Array.isArray(v) ? v.length + (v.length === 1 ? " entry" : " entries")
+        : v && typeof v === "object" ? Object.keys(v).length + " keys"
+        : typeof v === "string" ? (v.length > 60 ? v.slice(0, 60) + "…" : v) : String(v);
+      line.append(el("b", "", k), document.createTextNode("  " + n));
+      keys.append(line);
+    }
+    wrap.append(keys, el("pre", "", JSON.stringify(data, null, 2)));
+    box.replaceWith(wrap);
+  }).catch((e) => { box.textContent = "Cannot read it: " + e.message; });
+}
+
+function preview(a) {
+  const box = el("div", "pv");
+  if (["svg", "grid", "img"].includes(a.preview)) {
+    const img = el("img"); img.alt = a.name; img.src = src(a); box.append(img);
+  } else if (a.preview === "audio") {
+    box.className = "pv plain";
+    const au = el("audio"); au.controls = true; au.src = src(a); box.append(au);
+  } else if (a.preview === "html") {
+    /* A sheet is laid out at its artboard's size, so it is drawn at that size and scaled
+       down to the pane. The sandbox runs no script: the sheets are static SVG. */
+    box.className = "pv frame";
+    const f = el("iframe"); f.setAttribute("sandbox", ""); f.title = a.name; f.src = src(a);
+    box.append(f);
+    if (a.board) {
+      const [w, h] = a.board;
+      Object.assign(f.style, {width: w + "px", height: h + "px", transformOrigin: "0 0"});
+      FIT = () => { const s = box.clientWidth / w;
+        f.style.transform = "scale(" + s + ")"; box.style.height = Math.ceil(h * s) + "px"; };
+    }
+  } else if (a.preview === "json") {
+    jsonPreview(a, box);
+  } else {
+    box.className = "pv plain";
+    box.textContent = "Open only: a " + size(a.bytes) + " bundle. Use Open.";
+  }
+  return box;
+}
+
+async function openAs(a, how) {
+  try {
+    const r = await api("/api/asset-open", {id: a.id, how});
+    toast((r.how === "edit" ? "Editing " : r.how === "reveal" ? "Revealed " : "Opened ") + a.id);
+  } catch (e) { toast(e.message, true); }
+}
+
+function drawPane() {
+  const pane = $("#pane"); pane.replaceChildren();
+  FIT = null;
+  const a = DATA.assets.find((x) => x.id === SEL);
+  pane.classList.toggle("wide", !!a && a.preview === "html" && pane.classList.contains("wide"));
+  if (!a) { pane.append(el("div", "hint", "Pick an asset.")); return; }
+  const m = el("div", "m"); chips(a, m);
+  pane.append(el("h2", "", a.name), m, preview(a));
+
+  const act = el("div", "act");
+  for (const [how, label, tip] of [
+    ["open", "Open", "The program Windows opens this file with"],
+    ["edit", "Edit", "OCTOPUS_ASSET_EDITOR with {path}; Open when it is unset"],
+    ["reveal", "Reveal", "Show the file in Explorer"]]) {
+    const b = el("button", "", label); b.title = tip; b.onclick = () => openAs(a, how); act.append(b);
+  }
+  if (a.preview === "html") {
+    act.append(el("span", "sp"));
+    const w = el("button", "", pane.classList.contains("wide") ? "Narrow" : "Wide");
+    w.onclick = () => { pane.classList.toggle("wide"); drawPane(); };
+    act.append(w);
+  }
+  pane.append(act);
+
+  const path = el("div", "path");
+  path.append(el("div", "", a.id), el("div", "", a.path),
+    el("div", "", size(a.bytes) + " · " + new Date(a.mtime * 1000).toLocaleString()));
+  pane.append(section("File", path));
+  if (a.placeholders.length) {
+    const c = el("div", "chips");
+    for (const p of a.placeholders) c.append(el("span", "pill ph", "{{" + p + "}}"));
+    pane.append(section("Placeholders, filled with defaults here", c));
+  }
+  if (a.usedBy) {
+    const u = el("div", "uses");
+    if (!a.usedBy.length) u.append(el("span", "pill unused", "unused"));
+    for (const w of a.usedBy) u.append(el("div", "", w));
+    pane.append(section("Used by", u));
+  }
+  if (FIT) FIT();
+}
+
+$("#tickets").href = withProject("/");
+$("#search").addEventListener("input", () => draw(false));
+$("#reload").onclick = load;
+window.addEventListener("resize", () => FIT && FIT());
+document.addEventListener("keydown", (e) => {
+  if (e.key === "/" && document.activeElement !== $("#search")) { e.preventDefault(); $("#search").focus(); }
+  else if (e.key === "Escape" && document.activeElement === $("#search")) { $("#search").value = ""; draw(false); }
+});
+load();
+</script>
+</body>
+</html>

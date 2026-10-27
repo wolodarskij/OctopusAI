@@ -1,0 +1,89 @@
+{
+  "title": "Git: the git-commit, git-sync and git-branch permits, the git commands no session runs, and the commit policy of each launch mode",
+  "modePermits": {
+    "work": ["git-commit"],
+    "verify": ["git-commit", "git-sync"]
+  },
+  "permits": {
+    "git-commit": {
+      "grants": "commit to the local repository: commit, revert, cherry-pick and tag",
+      "deny": [
+        "Bash(git commit:*)",
+        "Bash(git revert:*)",
+        "Bash(git cherry-pick:*)",
+        "Bash(git tag:*)"
+      ]
+    },
+    "git-sync": {
+      "grants": "exchange commits with a remote: pull and push, and add or change a remote",
+      "deny": [
+        "Bash(git push:*)",
+        "Bash(git pull:*)",
+        "Bash(git remote add:*)",
+        "Bash(git remote set-url:*)"
+      ]
+    },
+    "git-branch": {
+      "grants": "change branches: switch, checkout, branch, merge, rebase and worktree",
+      "deny": [
+        "Bash(git switch:*)",
+        "Bash(git checkout:*)",
+        "Bash(git branch:*)",
+        "Bash(git worktree:*)"
+      ]
+    }
+  },
+  "deny": [
+    {
+      "tools": [
+        "Bash(git merge:*)",
+        "Bash(git rebase:*)"
+      ],
+      "unless": [
+        "git-branch",
+        "git-sync"
+      ]
+    },
+    {
+      "tools": [
+        "Bash(git push --force:*)",
+        "Bash(git push -f:*)",
+        "Bash(git push --force-with-lease:*)",
+        "Bash(git push * --force*)",
+        "Bash(git push * -f)",
+        "Bash(git push * -f *)",
+        "Bash(git reset --hard:*)",
+        "Bash(git reset * --hard*)",
+        "Bash(git clean:*)",
+        "Bash(git stash:*)",
+        "Bash(git restore:*)",
+        "Bash(git branch -D:*)",
+        "Bash(git branch * -D*)",
+        "Bash(git add -A)",
+        "Bash(git add -A *)",
+        "Bash(git add --all:*)",
+        "Bash(git add .)",
+        "Bash(git add . *)",
+        "Bash(git commit -a:*)",
+        "Bash(git commit -am:*)",
+        "Bash(git commit --all:*)",
+        "Bash(git commit * -a)",
+        "Bash(git commit * -a *)",
+        "Bash(git commit * -am*)",
+        "Bash(git commit * --all*)"
+      ],
+      "unless": []
+    }
+  ],
+  "brief": [
+    "vcs.plan",
+    "vcs.review",
+    "vcs.manager"
+  ],
+  "payload": [
+    {
+      "from": "rules/",
+      "to": ".agents/rules/octopus/git/"
+    }
+  ]
+}

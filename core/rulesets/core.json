@@ -1,0 +1,54 @@
+{
+  "title": "The ticket tree itself: the outside and projects permits and the paths every project has",
+  "toolingPaths": [
+    ".agents/",
+    ".claude/",
+    "TODO/",
+    "tools/"
+  ],
+  "gitignore": [
+    "TODO/.briefs/",
+    "TODO/.board.json",
+    "TODO/.sessions/",
+    ".octopus/SESSIONS.md"
+  ],
+  "oldNameAllowed": [
+    ".aitools/todo.py",
+    ".octopus/installed.json",
+    ".octopus/SESSIONS.md",
+    "changelist.log",
+    "CLAIMS.md",
+    ".claude/coordination/**"
+  ],
+  "oldNameAliases": [
+    ".aitools/todo.py close"
+  ],
+  "permits": {
+    "outside": {
+      "grants": "read or write files outside this project",
+      "deny": [],
+      "addDirEnv": "{SLUG}_OUTSIDE_DIR"
+    },
+    "projects": {
+      "grants": "call and create tickets in every registered project",
+      "deny": [],
+      "addDirRegistry": true
+    }
+  },
+  "optionalRules": {
+    "owner-wording": {
+      "title": "Never rewrite the owner's wording",
+      "default": true
+    }
+  },
+  "payload": [
+    {
+      "from": "skills/",
+      "to": ".agents/skills/"
+    },
+    {
+      "from": "rules/",
+      "to": ".agents/rules/octopus/core/"
+    }
+  ]
+}

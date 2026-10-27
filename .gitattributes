@@ -1,0 +1,11 @@
+# The starters keep the line ends their shell needs, also in a ZIP download of the repository.
+*.bat text eol=crlf
+*.command text eol=lf
+*.sh text eol=lf
+# The payload in core/ and the copies of it that this checkout's own install writes keep LF on
+# every platform, so the first run in a fresh clone writes each copy as git checked it out.
+/core/** text=auto eol=lf
+/.agents/** text=auto eol=lf
+/.claude/** text=auto eol=lf
+/AGENTS.md text eol=lf
+/CLAUDE.md text eol=lf

@@ -1,0 +1,5 @@
+{
+  "title": "Windows: sessions open in Windows Terminal, and terminal control works",
+  "terminal": "wt",
+  "sessions": true
+}

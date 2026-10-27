@@ -1,0 +1,25 @@
+{
+	"FileVersion": 3,
+	"Version": 2,
+	"VersionName": "2.0",
+	"FriendlyName": "Asset Text Export",
+	"Description": "Dumps any asset - a Blueprint with every graph, node and pin - to the engine's T3D text form, from a commandlet, the editor console, Blueprint, Python, AngelScript or an MCP toolset. Also writes a JSON summary of what a Blueprint declares, with each body as pseudocode. One source for UE 4.25 through 5.8.",
+	"Category": "Editor",
+	"CreatedBy": "Octopus AI",
+	"CreatedByURL": "",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"CanContainContent": true,
+	"IsBetaVersion": false,
+	"IsExperimentalVersion": false,
+	"Installed": false,
+	"EnabledByDefault": false,
+	"Modules": [
+		{
+			"Name": "AssetTextExport",
+			"Type": "Editor",
+			"LoadingPhase": "PreLoadingScreen"
+		}
+	]
+}

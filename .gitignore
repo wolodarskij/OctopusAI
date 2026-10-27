@@ -1,0 +1,25 @@
+# This checkout is also a project that Octopus AI serves: Octopus AI is installed into itself.
+# Git tracks the entry files and the rules and skills they load (AGENTS.md, CLAUDE.md, .agents/,
+# .claude/settings.json, .claude/skills/): they name no machine path, so an agent opened in a
+# fresh clone loads the rules. The rest holds machine paths, session ids, tickets and local
+# settings, and stays out: the first run of octopus.py writes it.
+/.aitools/
+/.octopus/
+/.claude/*
+!/.claude/settings.json
+!/.claude/skills/
+/.codex/
+/TODO/
+/CLAUDE.local.md
+
+# Build output and local tool state
+__pycache__/
+*.py[cod]
+Binaries/
+Intermediate/
+*.log
+.vs/
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini

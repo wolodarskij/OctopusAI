@@ -1,0 +1,14 @@
+{
+  "title": "TypeScript in the browser: tsc, ESLint, Vitest, the Vite dev server",
+  "checks": ["npm run typecheck", "npm run lint", "npm test"],
+  "granted": ["run the dev server and the browser preview"],
+  "lookOnScreen": "start the dev server and look: `npm run dev`, the browser preview, and the console with no errors",
+  "toolingPaths": ["package.json", "eslint.config.js", "tsconfig.json", "vite.config.ts"],
+  "gitignore": ["node_modules/", "dist/"],
+  "payload": [
+    {"from": "rules/", "to": ".agents/rules/octopus/browser-game/"},
+    {"from": "templates/eslint.core-purity.js", "to": "eslint.core-purity.js"},
+    {"from": "templates/launch.json", "to": ".claude/launch.json"},
+    {"from": "templates/run.bat", "to": "run.bat"}
+  ]
+}
