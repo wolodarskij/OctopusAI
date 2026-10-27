@@ -13,6 +13,7 @@ files in this directory, in this order:
 | 5 | `blocked` | always |
 | 6 | `repeat`, then `repeat.<role>` | a repeatable ticket; `<role>` is `test`, `verify` or `board`. A `manager` ticket gets other sections: see below |
 | 7 | `job.work-plan` or `job.<mode>` | `job.work-plan` for a `work` launch on a ticket that has `## Plan` |
+| 7a | `readme.<mode>` | the rule `readme-needs-owner-approval` is on for the project: `readme.work` for a `work` launch (also on a ticket with `## Plan`), `readme.plan` for a `plan` launch |
 | 8 | `permits.granted` or `permits.none` | the ticket has permits, or it has none |
 | 9 | `permits.ungranted` | a permit exists that the ticket does not have |
 | 10 | `permits.denied` | the launch denies a tool |
@@ -28,7 +29,7 @@ files in this directory, in this order:
 A `manager` ticket never finishes and never moves its own ticket, so its brief is only
 `header`, `messages`, `provider`, `where`, `repeat.manager`, the `permits.*` sections (never `projects`: `repeat.manager` carries the projects), `before`, `vcs.manager` (on the
 same condition as `vcs.<mode>`), `note` and `ticket`.
-It leaves out `boundary`, `blocked`, `repeat`, `job.*`, `finish.*` and `close.*`.
+It leaves out `boundary`, `blocked`, `repeat`, `job.*`, `readme.*`, `finish.*` and `close.*`.
 
 ## Where a section comes from
 
