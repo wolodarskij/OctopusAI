@@ -3690,7 +3690,10 @@ def _read_marks(s):
     s["asks"] = session_state.idle_asks(sid, shell)
     s["dialog"] = session_state.idle_dialog(sid, shell)
     s["error"] = session_state.idle_error(sid, shell)
-    s["says_finished"] = session_state.idle_finished(sid, shell)
+    # A statement about another ticket, a child or a blocker, is not the session's own
+    # finished line, also in a marker an older hook wrote.
+    said = session_state.idle_finished(sid, shell)
+    s["says_finished"] = said if session_state.about_ticket(said, s.get("id") or "") else ""
     s["unsure"] = session_state.idle_unsure(sid, shell)
     s["question"] = session_state.idle_question(sid, shell)
     s["judge"], s["judge_why"] = session_state.judged(sid, shell)
@@ -3751,11 +3754,13 @@ def read_turn(s, recheck=False, now=None):
     # whatever marker a missed `StopFailure` left: the error text is no message to judge.
     if live and act and act["ended"] and act["error"] and not s["dialog"] \
             and s["error"] != act["error"] and now - act["when"] >= MISSED_STOP:
-        session_state.mark_stale(sid, shell, act["text"], act["since"], act["error"])
+        session_state.mark_stale(sid, shell, act["text"], act["since"], act["error"],
+                                 ticket=s.get("id") or "")
         _read_marks(s)
         marker = s.get("idle_since")
     if live and not marker and act and act["ended"] and now - act["when"] >= MISSED_STOP:
-        session_state.mark_stale(sid, shell, act["text"], act["since"], act["error"])
+        session_state.mark_stale(sid, shell, act["text"], act["since"], act["error"],
+                                 ticket=s.get("id") or "")
         _read_marks(s)
         marker = s.get("idle_since")
     s["ended"] = not s.get("claude") or bool(marker and not s["dialog"])
@@ -3776,7 +3781,8 @@ def read_turn(s, recheck=False, now=None):
         if recheck:
             s["rejudged"] = session_state.rejudge(sid, shell, now)
         if s["ended"]:
-            started = session_state.ensure_judged(sid, shell, P.ROOT, path)
+            started = session_state.ensure_judged(sid, shell, P.ROOT, path,
+                                                  ticket=s.get("id") or "")
         else:
             started = session_state.ensure_judged_stale(sid, shell, P.ROOT, act)
         s["judging"] = started or session_state.judge_started(sid, shell)
@@ -4000,6 +4006,9 @@ def wait_state(s, t, now=None):
              reported `finished`                           finished (a manager: idle)
              ... while its ticket says the work is undone
              (`finish_undone`)                             input
+             ... while its ticket is blocked by other
+             tickets and it holds a recurring job, and
+             its last line is not `WORK IS FINISHED`       row 3
         2  the turn ended, and its last line asks          input
         3  it holds a recurring job, or its own subagent
              or background shell runs                      blocker when its ticket waits for
@@ -4069,7 +4078,12 @@ def wait_state(s, t, now=None):
             if s.get("says_finished") or s.get("reported") == "finished":
                 return "input", "%s: %s" % (claim, undone)
             return "input", undone
-    if ended and (s.get("says_finished") or s.get("reported") == "finished"):
+    # A session whose ticket is blocked by other tickets and that holds its own job to
+    # watch them still waits for them, unless its last line is the finished line.
+    waits = (bool(s.get("jobs")) and t is not None
+             and (t.state, t.status) == (lane("blocked"), S("blocked by other task"))
+             and s.get("says_finished") not in session_state.FINISHED_LINES)
+    if ended and not waits and (s.get("says_finished") or s.get("reported") == "finished"):
         if manager:
             return "idle", "manager: waits for the owner's orders"
         # The claim must agree with the ticket: a finished line over undone work closes

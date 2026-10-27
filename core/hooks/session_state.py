@@ -351,10 +351,27 @@ def _done_re():
         r"|%(id)s\s*:\s*(?:the\s+)?%(lane)s)(?!\w)" % {"id": tid, "lane": lane}, re.I)
 
 
-def says_done(text):
+_TICKET_ID = re.compile(r"\b[A-Z]+\d{3,}\b", re.I)
+
+
+def about_ticket(said, ticket=""):
+    """Whether what a message said to mark its session finished is about the session's own
+    work: a finished line, or a statement that names `ticket`. A statement about another
+    ticket, a child or a blocker, says nothing of the session's own work. With no `ticket`,
+    every statement counts."""
+    if not said:
+        return False
+    if said in FINISHED_LINES or not ticket:
+        return True
+    m = _TICKET_ID.search(said)
+    return bool(m) and m.group(0).upper() == ticket.upper()
+
+
+def says_done(text, ticket=""):
     """The statement in one of the message's last 3 non-empty lines that a ticket is in the
     verify or the closed lane, markdown aside, or "". A line that ends with `?` asks, and
-    states nothing."""
+    states nothing. With `ticket`, only a statement about that ticket counts
+    (`about_ticket`)."""
     try:
         pat = _done_re()
     except Exception:                                   # noqa: BLE001 - no project, no lanes
@@ -363,9 +380,10 @@ def says_done(text):
         ln = re.sub(r"[*_`]", "", ln).strip()
         if ln.rstrip(_TRAIL).endswith("?"):
             continue
-        m = pat.search(ln)
-        if m:
-            return " ".join(m.group(0).split())
+        for m in pat.finditer(ln):
+            said = " ".join(m.group(0).split())
+            if about_ticket(said, ticket):
+                return said
     return ""
 
 
@@ -389,16 +407,19 @@ def mark_idle(session_id, shell=0, asks=False, finished="", dialog=False, unsure
         encoding="utf-8")
 
 
-def mark_stop(session_id, shell, text, when=None):
-    """Record the end of a turn from its last message: the finished line or the done phrase,
-    a question on its last line, a `?` higher up, with the question. Returns whether no rule
-    read it, so the judge has to."""
+def mark_stop(session_id, shell, text, when=None, ticket=None):
+    """Record the end of a turn from its last message: the finished line or the statement
+    that its own ticket is done, a question on its last line, a `?` higher up, with the
+    question. `ticket` is the id of the session's ticket, "" for none; `None` looks it up.
+    Returns whether no rule read it, so the judge has to."""
+    if ticket is None:
+        ticket = own_ticket(session_id)
     drop_stale_report(session_id, shell)
     question = question_of(text)
     mark_idle(session_id, shell, asks=asks_last(text) and (question or True),
-              finished=says_finished(text) or says_done(text),
+              finished=says_finished(text) or says_done(text, ticket),
               unsure=asks(text) and (question or True), when=when)
-    return needs_judge(text)
+    return needs_judge(text, ticket)
 
 
 def drop_stale_report(session_id, shell=0):
@@ -974,11 +995,11 @@ def _marker_time(session_id, shell=0):
     return lines[0].strip() if lines else ""
 
 
-def needs_judge(text):
+def needs_judge(text, ticket=""):
     """Whether no rule reads this message: it is not empty, and it carries no finished line,
-    no statement that its ticket is done, and no question on its last line."""
+    no statement that its ticket `ticket` is done, and no question on its last line."""
     return bool((text or "").strip()) and not (
-        says_finished(text) or says_done(text) or asks_last(text))
+        says_finished(text) or says_done(text, ticket) or asks_last(text))
 
 
 def start_judge(session_id, shell, text, root, recap=False):
@@ -1495,14 +1516,15 @@ def recover(session_id, shell, text, when, error=""):
     return mark_stop(session_id, shell, text or "", when)
 
 
-def mark_stale(session_id, shell, text, when, error=""):
+def mark_stale(session_id, shell, text, when, error="", ticket=None):
     """Write the marker of a turn that ended by its transcript while no `Stop` marker
     exists: the hook missed it, or the owner's slash command (the board's `/recap`) took the
     prompt and removed it. The same words the `Stop` hook writes, at the time of the turn's
     last row, so the judge reads it as it reads any ended turn, and the message the judge
     reads is this one, not the one a stale turn kept. A turn that ended in an API error
     (`error`) gets the marker `StopFailure` would have written, and no judge: a verdict that
-    a judge gave on the error text is removed. Returns whether the judge has to read it."""
+    a judge gave on the error text is removed. `ticket` is as `mark_stop` takes it. Returns
+    whether the judge has to read it."""
     if error:
         mark_idle(session_id, shell, error=error, when=when)
         for p in (_judge_path(session_id, shell), _judge_path(session_id, 0),
@@ -1513,7 +1535,7 @@ def mark_stale(session_id, shell, text, when, error=""):
             except FileNotFoundError:
                 pass
         return False
-    judge_it = mark_stop(session_id, shell, text or "", when)
+    judge_it = mark_stop(session_id, shell, text or "", when, ticket)
     _last_path(session_id, shell).write_text(text or "", encoding="utf-8")
     return judge_it
 
@@ -1631,15 +1653,20 @@ def drop_recap(session_id, shell=0):
         return False
 
 
-def ensure_judged(session_id, shell, root, transcript=None):
+def ensure_judged(session_id, shell, root, transcript=None, ticket=None):
     """Start the judge on this terminal's last message when no rule read it, no verdict
     exists, and no judge was started on this turn. The message is the one the `Stop` hook
-    kept, else the transcript's. Returns whether a judge was started.
+    kept, else the transcript's. `ticket` is the id of the session's ticket, "" for none;
+    `None` looks it up. Returns whether a judge was started.
 
     A question on the last line is the owner's to answer, whatever the session waits for:
-    no judge reads it."""
+    no judge reads it. A marker that an older hook wrote from a statement about another
+    ticket read nothing of the session's own work."""
+    if ticket is None:
+        ticket = own_ticket(session_id)
     word = _idle_word(session_id, shell)
-    if word in ("dialog", "error", "finished", "asks"):
+    if word in ("dialog", "error", "asks") or (
+            word == "finished" and about_ticket(idle_finished(session_id, shell), ticket)):
         return False
     if judged(session_id, shell)[0] or judge_started(session_id, shell):
         return False
@@ -1648,7 +1675,7 @@ def ensure_judged(session_id, shell, root, transcript=None):
     text = _first_text((_last_path(session_id, shell), _last_path(session_id, 0)))
     if not text.strip() and transcript is not None:
         text = transcript_tail(transcript)[0] or ""
-    if not needs_judge(text):
+    if not needs_judge(text, ticket):
         return False
     start_judge(session_id, shell, text, root)
     return True
@@ -2065,7 +2092,16 @@ def _launch_of(session_id):
     return None, ""
 
 
-def close_finished(session_id, text, shell=0):
+def own_ticket(session_id):
+    """The id of the ticket this session was launched on, "" when none."""
+    try:
+        t, _ = _launch_of(session_id)
+    except Exception:                                   # noqa: BLE001 - no project, no tree
+        return ""
+    return t.id if t is not None else ""
+
+
+def close_finished(session_id, text, shell=0, launch=None):
     """At the end of a turn, start the detached closer for a launched session that is done:
     a `plan` session whose ticket is `ready to implement`, or a session of any launch mode
     whose last message ends with `WORK IS FINISHED` or says its ticket is in the verify or
@@ -2076,9 +2112,9 @@ def close_finished(session_id, text, shell=0):
     (`todo.finish_undone`) and no question was reported in the turn. When it does not, no
     closer starts: work is never finished while a question is open, and the board shows the
     session as `input`. A plan that leaves a decision, a name or a value open closes nothing
-    either."""
+    either. `launch` is `_launch_of(session_id)` when the caller has it already."""
     import todo
-    t, mode = _launch_of(session_id)
+    t, mode = launch or _launch_of(session_id)
     if t is None or mode not in todo.MODES or t.repeat == "manager":
         return False
     if says_finished(text):
@@ -2092,7 +2128,7 @@ def close_finished(session_id, text, shell=0):
         if todo.finish_undone(t, mode):
             return False
         return start_closer(t, mode)
-    if says_done(text):
+    if says_done(text, t.id):
         return start_closer(t, mode)
     return False
 
@@ -2227,7 +2263,11 @@ def _hook(payload, started=None):
             # `last_assistant_message` is a documented field of the `Stop` payload. The
             # transcript is not read: its format is no contract.
             text = str(payload.get("last_assistant_message") or "")
-            judge_it = mark_stop(sid, shell, text)
+            try:
+                launch = _launch_of(sid)
+            except Exception:                           # noqa: BLE001 - a hook never raises
+                launch = (None, "")
+            judge_it = mark_stop(sid, shell, text, ticket=launch[0].id if launch[0] else "")
             # `background_tasks` is not in the hook documentation. Claude Code 2.1.287 sends
             # it: the subagents and background shells that still run when the turn ends.
             mark_tasks(sid, shell, running_tasks(payload.get("background_tasks")))
@@ -2239,7 +2279,7 @@ def _hook(payload, started=None):
                 except Exception:                       # noqa: BLE001 - a hook never raises
                     pass
             try:
-                close_finished(sid, text, shell)
+                close_finished(sid, text, shell, launch)
             except Exception:                           # noqa: BLE001 - a hook never raises
                 pass
             start_reply_check(sid, shell, payload, text)
