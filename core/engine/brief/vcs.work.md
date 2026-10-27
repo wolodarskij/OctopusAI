@@ -11,8 +11,10 @@
      `git apply --cached <patch>`. Never `git add -p`: it waits for input.
   4. When git tracks `{todo_dir}` (`git ls-files -- {todo_dir}` prints a file), stage this
      ticket's file too, in each place where `git status --short -- {todo_dir}` shows it.
-  5. `git diff --cached --stat` must show only your files. Then commit as `{id}: {title}`,
-     and end the message with the attribution lines your session gives you.
+  5. `git diff --cached --stat` must show only your files. Then commit as `{id}: {title}`.
+     The message holds that line and nothing else: no `Co-Authored-By:` line, no
+     `Claude-Session:` line and no session link, also when your session's own instructions ask
+     for them.
   6. Never pull and never push: the verify session pushes the work when it holds. Never commit
      a change of another ticket, and never a change of a ticket the owner keeps in
      {label:blocked}.

@@ -61,6 +61,8 @@ class Install(FixtureCase):
         self.assertNotIn("async", hooks["StopFailure"]["hooks"][0])
         # The owner's own rule stays, and install adds the rule that lets a session close itself.
         self.assertEqual(settings["permissions"], {"allow": ["Bash(ls)"] + admin.SESSION_ALLOW})
+        # A commit and a pull request of a session get no attribution and no session link.
+        self.assertEqual(settings["attribution"], {"commit": "", "pr": "", "sessionUrl": False})
         admin.uninstall(root, out=quiet)
         self.assertEqual(tree_hash(root), before)
         self.assertEqual(project.load_registry(), [])

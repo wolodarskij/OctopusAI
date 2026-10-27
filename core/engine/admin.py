@@ -103,6 +103,11 @@ SESSION_ENV = dict({"CLAUDE_CODE_DISABLE_TERMINAL_TITLE": "1", "CLAUDE_CODE_FORC
 # `todo.py close <id> --mode <mode> --self`; the auto-mode check refuses it as a process kill unless a rule allows it.
 SESSION_ALLOW = ["Bash(python .octopus/todo.py close:*)", "PowerShell(python .octopus/todo.py close:*)"]
 
+# The `attribution` every project's `.claude/settings.json` carries: a commit and a pull request hold no
+# `Co-Authored-By` trailer, no attribution line and no `Claude-Session` link. Empty strings and `sessionUrl: false`,
+# not `false`, because Claude Code before v2.1.281 rejects `false` and skips the whole file.
+SESSION_ATTRIBUTION = {"commit": "", "pr": "", "sessionUrl": False}
+
 # The rules folder of the payload.
 RULES_DIR = ".claude/rules/octopus"
 # The second shim a project may hold; relocate rewrites the path it names.
@@ -860,17 +865,21 @@ def _install_settings(root, rec):
     allow = d.setdefault("permissions", {}).setdefault("allow", [])
     allow_added = [r for r in SESSION_ALLOW if r not in allow]
     allow.extend(allow_added)
+    old = rec.settings or {}
+    # The value before the first install, so uninstall can put it back; None when the file had none.
+    attribution = old["attribution"] if "attribution" in old else {"original": d.get("attribution")}
+    d["attribution"] = dict(SESSION_ATTRIBUTION)
     if created:
         rec.mkdirs(p)
     data = _json_bytes(d)
     _write_bytes(p, data)
-    old = rec.settings or {}
     rec.settings = {"created": old.get("created", created),
                     "original": old.get("original", original),
                     "written": _sha(data),
                     "hooks": sorted(set(old.get("hooks", [])) | set(added)),
                     "env": bool(old.get("env")) or env_added,
-                    "allow": sorted(set(old.get("allow", [])) | set(allow_added)), "command": cmd}
+                    "allow": sorted(set(old.get("allow", [])) | set(allow_added)),
+                    "attribution": attribution, "command": cmd}
 
 
 # ── uninstall ───────────────────────────────────────────────────────────────
@@ -986,6 +995,11 @@ def _uninstall_settings(root, rec):
             perms.pop("allow")
         if not perms:
             d.pop("permissions", None)
+    if "attribution" in s:
+        if s["attribution"].get("original") is None:
+            d.pop("attribution", None)
+        else:
+            d["attribution"] = s["attribution"]["original"]
     _write_bytes(p, _json_bytes(d))
 
 

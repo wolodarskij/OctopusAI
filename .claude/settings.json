@@ -89,5 +89,10 @@
       "Bash(python .octopus/todo.py close:*)",
       "PowerShell(python .octopus/todo.py close:*)"
     ]
+  },
+  "attribution": {
+    "commit": "",
+    "pr": "",
+    "sessionUrl": false
   }
 }
