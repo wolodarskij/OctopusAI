@@ -61,7 +61,7 @@
       "default": true
     },
     "readme-needs-owner-approval": {
-      "title": "A README change needs the owner's approval of its exact text; no text says double-click",
+      "title": "A project-wide README change needs the owner's approval of its exact text; no text says double-click",
       "default": true
     },
     "simplified-technical-english": {

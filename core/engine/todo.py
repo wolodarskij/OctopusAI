@@ -69,8 +69,8 @@ ONE ENGINE, MANY PROJECTS. Every path and every rule is read from the current pr
     octopus todo report T0001 event --why "editor restart"   ... or for an outside event
     octopus todo approve-readme README.md --session <id> --owner-order "<the order, in neutral words>"
                                               the owner approved the exact new text of a
-                                              README file: the README guard lets this session
-                                              write it
+                                              project-wide README file: the README guard lets
+                                              this session write it
 
 WORKING A TICKET IN ITS OWN SESSION. `work`, `plan`, `review` and `verify` write
 `TODO/.briefs/<id>.md` and launch `claude` in a new terminal on it. The ticket's `permits`
@@ -5150,7 +5150,7 @@ def cmd_review_old(args):
 
 
 def cmd_approve_readme(args):
-    """Record the owner's approval of a README file for one session, so the README guard
+    """Record the owner's approval of a project-wide README file for one session, so the README guard
     (`core/hooks/readme_guard.py`) lets that session write it. The session is `--session`,
     else the Claude session this command runs under."""
     import readme_guard
@@ -5945,8 +5945,9 @@ def _main(argv):
     p.set_defaults(fn=cmd_report)
 
     p = sub.add_parser("approve-readme", help="the owner approved the exact new text of a "
-                                              "README file: let this session write it")
-    p.add_argument("file", help="the README file, absolute or from the working directory")
+                                              "project-wide README file: let this session "
+                                              "write it")
+    p.add_argument("file", help="the project-wide README file, absolute or from the working directory")
     p.add_argument("--session", help="the session the approval is for: the id the README "
                                      "guard's refusal names. Default: this Claude session")
     p.add_argument("--owner-order", dest="owner_order", nargs="?", const=True, metavar="WORDS",

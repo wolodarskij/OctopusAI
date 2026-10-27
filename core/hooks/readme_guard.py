@@ -1,4 +1,4 @@
-"""readme_guard.py - a README file changes only after the owner approved its exact new text.
+"""readme_guard.py - a project-wide README file changes only after the owner approved its exact new text.
 
 The rule is `core/rules/readme-needs-owner-approval.md`. This guard makes it hold when an agent
 forgets the rule. It runs on `PreToolUse`:
@@ -6,7 +6,7 @@ forgets the rule. It runs on `PreToolUse`:
     Claude Code   `octopus hook`               Edit, Write, MultiEdit, NotebookEdit, Bash, PowerShell
     Codex         `octopus status-hook codex`  apply_patch, Bash
 
-A tool call that writes a README file is refused, unless
+A tool call that writes a project-wide README file is refused, unless
 the owner's approval of that file is recorded for the session, or the rule is switched off for
 the project that holds the file (`rule_holds`). The refusal tells the agent to
 show the owner the exact new text, ask, and record the yes:
@@ -17,7 +17,10 @@ The record of each session is one JSON file in `project.home()/readme-approvals/
 repository: `{"files": {<normalized path>: {"file", "words", "time"}}}`.
 
 A README file is a file named `README`, or `README.<ext>`, in any case, or a name that starts
-with `README` in capitals (`README_ru.md`). `readme_guard.py` is not one.
+with `README` in capitals (`README_ru.md`). It is project-wide when its folder is the root folder
+of a project (`project_root`): the nearest folder with `.octopus/project.json`, else the nearest
+folder with `.git`. A README file in any other folder is internal, and the guard lets every write
+to it. `readme_guard.py` is not one.
 
 A shell command is split into its commands, with the quotes taken off each word. Only a word in
 a write position counts: the target of a redirection; an argument of `rm`, `mv`, `tee`, `touch`
@@ -103,6 +106,39 @@ def is_readme_path(word, file_only=False):
     if re.search(r"\s", w) and not re.search(r"[\\/]", w):
         return False
     return not file_only or "." in name or bool(re.search(r"[\\/]", w))
+
+
+def project_root(path):
+    """The root folder of the project that holds the absolute `path`: the nearest folder above
+    it with `.octopus/project.json` (`project.find_root`), else the nearest folder with `.git`,
+    else None."""
+    folder = os.path.dirname(str(path))
+    try:
+        import project
+        root = project.find_root(folder)
+        if root is not None:
+            return str(root)
+    except Exception:                                   # noqa: BLE001 - a hook never raises
+        pass
+    d = Path(folder)
+    for c in [d] + list(d.parents):
+        if (c / ".git").exists():
+            return str(c)
+    return None
+
+
+def _same_folder(a, b):
+    return os.path.normcase(str(Path(a).resolve())) == os.path.normcase(str(Path(b).resolve()))
+
+
+def is_project_readme(path, cwd=None):
+    """Whether `path` names a project-wide README file: a README file in the root folder of a
+    project (`project_root`)."""
+    if not is_readme(path):
+        return False
+    full = absolute(path, cwd)
+    root = project_root(full)
+    return root is not None and _same_folder(os.path.dirname(full), root)
 
 
 def absolute(path, cwd=None):
@@ -324,6 +360,8 @@ def approve(session, path, words, cwd=None, base=None):
         raise ValueError("no session id: pass --session <id>, the id the refusal names")
     if not is_readme(path):
         raise ValueError("%s is not a README file" % path)
+    if not is_project_readme(path, cwd):
+        raise ValueError("%s is not a project-wide README file: it needs no approval" % path)
     if not (isinstance(words, str) and words.strip()):
         raise ValueError("--owner-order needs the owner's approval, stated in neutral words")
     d = Path(base) if base else state_dir()
@@ -379,7 +417,7 @@ def _approve_command(root, session, path):
 
 def reason(paths, session, root=None):
     """The refusal the agent reads."""
-    lines = ["Refused: %s is a README file. Every README change "
+    lines = ["Refused: %s is a project-wide README file. Every README change "
              "goes through the owner, and no agent makes one without the owner's approval."
              % ", ".join(paths),
              "Show the owner the exact new text of the change, ask, and wait for the answer. "
@@ -401,7 +439,8 @@ def decide(payload, base=None):
         waiting = [p for p in dict.fromkeys(found) if not approved(session, p, cwd, base)]
         if not waiting:
             return None
-        waiting = [p for p in (absolute(p, cwd) for p in waiting) if rule_holds(p)]
+        waiting = [p for p in (absolute(p, cwd) for p in waiting)
+                   if is_project_readme(p) and rule_holds(p)]
         if not waiting:
             return None
         root = None
