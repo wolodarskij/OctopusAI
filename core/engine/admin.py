@@ -7,7 +7,8 @@
     octopus status <path>                                     each installed file: same, edited, missing
                                                               (octopus.py adds the old-name scan)
     octopus packs <path> [list | add <pack> | remove <pack> | set <pack,pack,...>]
-    octopus rules <path> [list | on <rule> | off <rule> | default <rule>]   the optional rules
+    octopus rules [<rule> on|off|default] [--project <name>]  the optional rules, global or of one
+                                                              project
     octopus pack-registry [list | add <folder|url> | update <name> | remove <name>]  (packreg.py)
     octopus skills <path> [list | libraries | available | add | update | remove]   (skills.py)
     settings(root) / set_settings(root, **changes)            read and change project.json
@@ -33,6 +34,8 @@ entry with `replace` belongs to its pack: its copy replaces a hand copy, and `re
 AN OPTIONAL RULE (`optionalRules` of a ruleset) is copied only while it is on. Turning it off
 removes the copy install wrote, unless it was edited since; `set_rules` does both and writes
 the entry files again, so `AGENTS.md` and `CLAUDE.md` list only the rules that are on.
+`set_global_rules` switches a rule for every project: it does the same in each registered
+project that lists the rule's ruleset.
 
 UNINSTALL removes exactly what install recorded. It refuses a file whose hash changed since
 install. Removing a pack removes every pack that requires it too, and says so.
@@ -633,8 +636,9 @@ def _install_payload(root, rs, rec, values, out, only_replace=False):
     total = 0
     spec = _read_json(p, {})
     pj = _read_json(_project.config_path(root, PROJECT_FILE), {})
+    glob = _project.global_rules()
     off = {stem for stem, s in (spec.get("optionalRules") or {}).items()
-           if isinstance(s, dict) and not _project.rule_on(stem, s.get("default", True), pj)}
+           if isinstance(s, dict) and not _project.rule_on(stem, s.get("default", True), pj, glob)}
     for e in spec.get("payload", []):
         # The checkout's own install copies its own payload: git tracks the copies, and each
         # one follows its source in core/.
@@ -1442,19 +1446,24 @@ def packs_set(root, packs, out=print):
 
 def optional_rules(root):
     """Every optional rule of the project's rulesets, in ruleset order: name, ruleset, title,
-    default and whether it is on."""
+    default (its ruleset's), inherited (the global switch, else the default), whether it is
+    on, and source: "project", "global" or "default", where that state comes from."""
     root = Path(root).resolve()
     pj = settings(root)
+    glob = _project.global_rules()
     rules, _problems = _project.load_rules(root, pj)
     return [{"name": stem, "ruleset": s["ruleset"], "title": s["title"], "default": s["default"],
-             "on": _project.rule_on(stem, s["default"], pj)}
+             "inherited": glob.get(stem, s["default"]),
+             "on": _project.rule_on(stem, s["default"], pj, glob),
+             "source": _project.rule_source(stem, pj, glob)}
             for stem, s in rules["optionalRules"].items()]
 
 
 def set_rules(root, changes, out=print):
-    """Switch optional rules: `changes` maps a rule to True (on), False (off) or None (its
-    default). A switch equal to the default is not kept. Copies each rule turned on, removes
-    each rule turned off, and writes the entry files again. Returns the rules that changed."""
+    """Switch optional rules in one project: `changes` maps a rule to True (on), False (off) or
+    None (no switch of its own: the global switch, else the default). Copies each rule turned
+    on, removes each rule turned off, and writes the entry files again. Returns the rules that
+    changed."""
     root = Path(root).resolve()
     known = {r["name"]: r for r in optional_rules(root)}
     for stem, v in changes.items():
@@ -1466,7 +1475,7 @@ def set_rules(root, changes, out=print):
     pj = settings(root)
     switches = dict(pj.get("rules") or {})
     for stem, v in changes.items():
-        if v is None or v == known[stem]["default"]:
+        if v is None:
             switches.pop(stem, None)
         else:
             switches[stem] = v
@@ -1485,6 +1494,83 @@ def set_rules(root, changes, out=print):
     changed = [s for s in changes if now[s] != known[s]["on"]]
     for s in changed:
         out("%s: %s" % (s, "on" if now[s] else "off"))
+    return changed
+
+
+def global_rules():
+    """Every optional rule of the rulesets on this machine (core and every pack): name,
+    ruleset, title, default, the global switch (`switch`: true, false or None), whether it is
+    on for a project that has no switch of its own, its source ("global" or "default"), and
+    `projects`: each registered project that lists its ruleset, with its own state there."""
+    glob = _project.global_rules()
+    rows, seen = [], set()
+    names = sorted(p.stem for p in (CORE / "rulesets").glob("*.json"))
+    names += [n for n in _project.pack_names() if n not in names]
+    for rs in names:
+        p, _base = _ruleset_file(rs)
+        spec = _read_json(p, {}) if p else {}
+        for stem, s in (spec.get("optionalRules") or {}).items():
+            if stem in seen or not isinstance(s, dict):
+                continue
+            seen.add(stem)
+            default = bool(s.get("default", True))
+            rows.append({"name": stem, "ruleset": rs, "title": s.get("title", ""),
+                         "default": default, "switch": glob.get(stem),
+                         "on": glob.get(stem, default),
+                         "source": "global" if stem in glob else "default", "projects": []})
+    for row in _project.load_registry():
+        pj = _read_json(_project.config_path(row["path"], PROJECT_FILE), None)
+        if not isinstance(pj, dict):
+            continue
+        for r in rows:
+            if r["ruleset"] in (pj.get("rulesets") or []):
+                r["projects"].append({
+                    "name": row["name"],
+                    "on": _project.rule_on(r["name"], r["default"], pj, glob),
+                    "source": _project.rule_source(r["name"], pj, glob)})
+    return rows
+
+
+def set_global_rules(changes, out=print):
+    """Switch optional rules for every project: `changes` maps a rule to True (on), False (off)
+    or None (no global switch: its default). Then, in each registered project that lists the
+    rule's ruleset, copies each rule now on, removes each rule now off, and writes the entry
+    files again; a project's own switch still wins there. Returns the rules whose global state
+    changed."""
+    known = {r["name"]: r for r in global_rules()}
+    for stem, v in changes.items():
+        if stem not in known:
+            raise ValueError("no optional rule %r; one of %s"
+                             % (stem, ", ".join(known) or "none"))
+        if v is not None and not isinstance(v, bool):
+            raise ValueError("an optional rule is on, off or default")
+    switches = _project.global_rules()
+    for stem, v in changes.items():
+        if v is None:
+            switches.pop(stem, None)
+        else:
+            switches[stem] = v
+    _project.save_global_rules(switches)
+    sets = list(dict.fromkeys(known[s]["ruleset"] for s in changes))
+    for row in _project.load_registry():
+        root = Path(row["path"])
+        pj = _read_json(_project.config_path(root, PROJECT_FILE), None)
+        if not isinstance(pj, dict) or not (root / _cd(root) / INSTALLED).is_file():
+            continue
+        mine = [rs for rs in sets if rs in (pj.get("rulesets") or [])]
+        if not mine:
+            continue
+        rec = Record(root)
+        values = _values(root, pj)
+        n = sum(_install_payload(root, rs, rec, values, out) for rs in mine)
+        n += len(write_entries(root, rec, pj, out))
+        rec.save()
+        if n:
+            out("  %s: rules and entry files written" % row["name"])
+    now = {r["name"]: r["on"] for r in global_rules()}
+    changed = [s for s in changes if now[s] != known[s]["on"]]
+    for s in changed:
+        out("%s: %s for every project without its own switch" % (s, "on" if now[s] else "off"))
     return changed
 
 

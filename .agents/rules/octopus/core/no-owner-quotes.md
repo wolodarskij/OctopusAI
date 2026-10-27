@@ -1,6 +1,6 @@
 # The owner's orders, in neutral words
 
-*Always applies, in every project. Set by the owner, 2026-10-27. Governs every file: rules, skills, docs, tickets,
+*An optional rule, on by default in every project (Optional rules, in Global settings and in Project Settings). Set by the owner, 2026-10-27. Governs every file: rules, skills, docs, tickets,
 briefs, commit messages, comments and memory files.*
 
 **No file holds a word-for-word quote of the owner, and no file holds the owner's swearing.** A file that records an

@@ -56,12 +56,17 @@ Lists join in ruleset order without duplicates. A scalar that a later ruleset se
 defined twice is a problem that `check` reports; `permitOverrides` is the way to change one.
 
 **An optional rule is on or off in each project.** `optionalRules` names a rule file of the payload
-by its stem, `"optionalRules": {"<stem>": {"title": "...", "default": true}}`. A project switches
-it in `project.json`, `"rules": {"<stem>": false}`; a rule it does not name takes its `default`.
-Install copies the rule only while it is on, and turning it off removes the copy unless it was
-edited. `octopus rules <project> [list | on <rule> | off <rule> | default <rule>]` and the
-Optional rules checkboxes of the board's Project Settings view switch it, and write `AGENTS.md`
-and `CLAUDE.md` again.
+by its stem, `"optionalRules": {"<stem>": {"title": "...", "default": true}}`. The global switch,
+`{"rules": {"<stem>": false}}` in `rules.json` of the Octopus AI home directory, holds for every
+project. A project switches it in `project.json`, `"rules": {"<stem>": false}`, and its switch
+wins. A rule that neither names takes its `default`. Install copies the rule only while it is
+on, and turning it off removes the copy unless it was edited. `octopus rules` lists the rules
+with their state and where the state comes from. `octopus rules <rule> on|off|default` switches
+a rule globally, and `--project <name>` switches it in one project. The Optional rules sections
+of the board's Global settings and Project Settings views do the same. A switch writes
+`AGENTS.md` and `CLAUDE.md` again in each project that it changes. A guard of the rule and a
+brief section of the rule follow the switch: the README guard and the brief section
+`readme.<mode>` hold only while `readme-needs-owner-approval` is on.
 
 ## Placeholders
 

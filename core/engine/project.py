@@ -27,9 +27,11 @@ join in order without duplicates, a later scalar wins, a permit defined twice is
 unknown key is a problem.
 
 OPTIONAL RULES. A ruleset names the rule files of its payload that a project can switch on and
-off: `"optionalRules": {"<file stem>": {"title": "...", "default": true}}`. A project switches
-one in `project.json`, `"rules": {"<file stem>": false}`; a rule it does not name takes its
-default. `admin` copies an optional rule only while it is on (`rule_on`).
+off: `"optionalRules": {"<file stem>": {"title": "...", "default": true}}`. The global settings
+switch one for every project in `<home>/rules.json`, `{"rules": {"<file stem>": false}}`. A
+project switches one in `project.json`, `"rules": {"<file stem>": false}`, and its switch wins.
+A rule that neither names takes its ruleset's default. `admin` copies an optional rule only
+while it is on (`rule_on`); a guard of a rule asks `rule_enabled`.
 
 THE PACKS. `packs/` holds the packs Octopus AI ships. A pack added on this machine is a row of
 `<home>/packs.json`, outside the tree, because it names a machine path: a folder used in place,
@@ -631,13 +633,68 @@ def load_rules(root, project=None):
     return rules, problems
 
 
-def rule_on(stem, default, project):
-    """Whether the optional rule `stem` is on: the switch in the project.json dict `project`,
-    else `default`, the rule's own."""
-    switches = project.get("rules")
+def global_rules_file():
+    """The global switches of the optional rules. Outside the Octopus AI tree."""
+    return home() / "rules.json"
+
+
+def global_rules():
+    """The global switches: an optional rule's file stem -> true or false."""
+    try:
+        with io.open(global_rules_file(), "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    rows = data.get("rules") if isinstance(data, dict) else None
+    if not isinstance(rows, dict):
+        return {}
+    return {k: v for k, v in rows.items() if isinstance(v, bool)}
+
+
+def save_global_rules(switches):
+    p = global_rules_file()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = Path(str(p) + ".tmp")
+    with io.open(tmp, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(json.dumps({"rules": dict(sorted(switches.items()))}, indent=1) + "\n")
+    os.replace(tmp, p)
+
+
+def rule_source(stem, project, glob=None):
+    """Where the state of the optional rule `stem` comes from: "project" (the switch in the
+    project.json dict `project`), "global" (the global switch) or "default" (its ruleset's)."""
+    switches = (project or {}).get("rules")
     if isinstance(switches, dict) and isinstance(switches.get(stem), bool):
-        return switches[stem]
+        return "project"
+    if stem in (global_rules() if glob is None else glob):
+        return "global"
+    return "default"
+
+
+def rule_on(stem, default, project, glob=None):
+    """Whether the optional rule `stem` is on: the switch in the project.json dict `project`,
+    else the global switch (`glob`, read from `global_rules_file` when None), else `default`,
+    the rule's own."""
+    glob = global_rules() if glob is None else glob
+    source = rule_source(stem, project, glob)
+    if source == "project":
+        return project["rules"][stem]
+    if source == "global":
+        return glob[stem]
     return default
+
+
+def rule_enabled(root, stem):
+    """Whether the rule `stem` holds in the project at `root`, for a guard that enforces it. A
+    rule no ruleset of the project makes optional always holds. With no project (`root` None),
+    the global switch decides, else the rule holds."""
+    if root is None:
+        return global_rules().get(stem, True)
+    rules, _problems = load_rules(root)
+    spec = rules["optionalRules"].get(stem)
+    if spec is None:
+        return True
+    return rule_on(stem, spec["default"], rules.get("project") or {})
 
 
 class Project:

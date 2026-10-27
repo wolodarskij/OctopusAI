@@ -1,6 +1,6 @@
 # A README change needs the owner's approval
 
-*Always applies, in every project. Set by the owner, 2026-10-27: every README change goes through the owner, and
+*An optional rule, on by default in every project (Optional rules, in Global settings and in Project Settings). Set by the owner, 2026-10-27: every README change goes through the owner, and
 no agent makes one without the owner's approval.*
 
 **Change a README file only after the owner approved its exact new text.** A README file is a file named `README` or

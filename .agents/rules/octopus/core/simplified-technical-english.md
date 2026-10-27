@@ -1,6 +1,6 @@
 # Simplified Technical English
 
-*Always applies, in every project. This is how to write the words. The form of a report to the owner is `reporting-to-the-owner.md`.*
+*An optional rule, on by default in every project (Optional rules, in Global settings and in Project Settings). This is how to write the words. The form of a report to the owner is `reporting-to-the-owner.md`.*
 
 Write all text in Simplified Technical English (ASD-STE100): documents, code comments, tickets, chat messages, reports to the owner and commit messages. ASD-STE100 is the authority. When this page and the specification disagree, obey the specification.
 

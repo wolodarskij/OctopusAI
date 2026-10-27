@@ -36,8 +36,44 @@
     }
   },
   "optionalRules": {
+    "investigate-first": {
+      "title": "Investigate what something does before you answer",
+      "default": true
+    },
+    "local-information": {
+      "title": "Keep machine, person and project facts out of the Octopus AI repository",
+      "default": true
+    },
+    "no-narration-in-comments": {
+      "title": "A comment describes the code, never the history of the work",
+      "default": true
+    },
+    "no-owner-quotes": {
+      "title": "State the owner's orders in neutral words: no quote, no swearing",
+      "default": true
+    },
+    "owner-edits": {
+      "title": "Never undo the owner's own edits",
+      "default": true
+    },
     "owner-wording": {
       "title": "Never rewrite the owner's wording",
+      "default": true
+    },
+    "readme-needs-owner-approval": {
+      "title": "A README change needs the owner's approval of its exact text; no text says double-click",
+      "default": true
+    },
+    "simplified-technical-english": {
+      "title": "Write all text in Simplified Technical English",
+      "default": true
+    },
+    "tooling-is-its-own-task": {
+      "title": "A tool edit is its own task",
+      "default": true
+    },
+    "verify-before-asserting": {
+      "title": "Verify a claim before you assert it",
       "default": true
     }
   },

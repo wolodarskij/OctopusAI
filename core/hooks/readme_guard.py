@@ -7,7 +7,8 @@ forgets the rule. It runs on `PreToolUse`:
     Codex         `octopus status-hook codex`  apply_patch, Bash
 
 A tool call that writes a README file is refused, unless
-the owner's approval of that file is recorded for the session. The refusal tells the agent to
+the owner's approval of that file is recorded for the session, or the rule is switched off for
+the project that holds the file (`rule_holds`). The refusal tells the agent to
 show the owner the exact new text, ask, and record the yes:
 
     python .octopus/todo.py approve-readme <file> --session <id> --owner-order "<the order, in neutral words>"
@@ -42,6 +43,8 @@ if str(HERE.parent / "engine") not in sys.path:
     sys.path.insert(0, str(HERE.parent / "engine"))
 
 STATE_DIR = "readme-approvals"
+# The optional rule this guard enforces: off in a project, the guard lets every write there.
+RULE = "readme-needs-owner-approval"
 # A record that nothing touched for this long belongs to a session that is gone.
 STALE = 30 * 24 * 3600
 
@@ -357,6 +360,16 @@ def _prune(d):
         pass
 
 
+def rule_holds(path):
+    """Whether the README rule is on for the absolute `path`: in the project that holds the
+    file, else by the global switch (`project.rule_enabled`). A fault reads as on."""
+    try:
+        import project
+        return project.rule_enabled(project.find_root(os.path.dirname(path)), RULE)
+    except Exception:                                   # noqa: BLE001 - a hook never raises
+        return True
+
+
 def _approve_command(root, session, path):
     cli = ('python "%s"' % (Path(root) / ".octopus" / "todo.py").as_posix() if root
            else 'python "%s" todo' % (HERE.parent.parent / "octopus.py").as_posix())
@@ -388,7 +401,9 @@ def decide(payload, base=None):
         waiting = [p for p in dict.fromkeys(found) if not approved(session, p, cwd, base)]
         if not waiting:
             return None
-        waiting = [absolute(p, cwd) for p in waiting]
+        waiting = [p for p in (absolute(p, cwd) for p in waiting) if rule_holds(p)]
+        if not waiting:
+            return None
         root = None
         try:
             import project

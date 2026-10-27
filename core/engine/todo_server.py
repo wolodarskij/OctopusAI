@@ -1588,7 +1588,7 @@ def act_project(body):
     its models, efforts, defaultModel, defaultEffort), `groups` (store, required), `categories` (the
     project's own categories), `vcs` (vcs, vcsPull), `provider` (the default provider), `packAdd`
     and `packRemove` (a pack), `packsSet` (`packs`: every pack the project should have), `rules`
-    (`rules`: an optional rule -> true, false, or null for its default)."""
+    (`rules`: an optional rule -> true, false, or null for no switch of the project's own)."""
     import admin
     op, root, name, log = body.get("op"), P.ROOT, _current_name(), []
     if op == "meta":
@@ -1849,6 +1849,25 @@ def act_packs(body):
             "packs": packreg.available()}
 
 
+def act_rules(body):
+    """The optional rules of global settings (`admin.global_rules`). The ops: `list`; `set`
+    (`rules`: an optional rule -> true, false, or null for its default), which writes the rules
+    and the entry files of every registered project again."""
+    import admin
+    op, log = body.get("op") or "list", []
+    if op == "set":
+        changes = body.get("rules")
+        if not isinstance(changes, dict) or not all(v is None or isinstance(v, bool)
+                                                    for v in changes.values()):
+            raise ValueError("`rules` maps an optional rule to true, false or null")
+        if not admin.set_global_rules(changes, out=log.append):
+            log.append("no rule changed for a project without its own switch")
+    elif op != "list":
+        raise ValueError("unknown rule operation %r" % op)
+    return {"op": op, "log": log, "noSnapshot": True, "file": str(project.global_rules_file()),
+            "rules": admin.global_rules()}
+
+
 def act_skills(body):
     """The skills of the current project (`skills.py`). The ops: `list`; `available`
     (`library`, `git` or `folder`, and `ref`, `path`, `refresh`: the skills the source offers);
@@ -1992,11 +2011,11 @@ ACTIONS = {"move": act_move, "field": act_field, "launch": act_launch, "open": a
            "chat": act_chat, "groupDraft": act_groupDraft, "groupApply": act_groupApply,
            "project": act_project, "removeProject": act_removeProject, "vcs": act_vcs,
            "remoteControl": act_remoteControl, "providers": act_providers, "packs": act_packs,
-           "skills": act_skills, "artifactAdd": act_artifactAdd,
+           "rules": act_rules, "skills": act_skills, "artifactAdd": act_artifactAdd,
            "artifactRemove": act_artifactRemove}
 # Actions that name no project of their own.
 GLOBAL_ACTIONS = ("allSessions", "addProject", "pickFolder", "removeProject", "providers",
-                  "packs", "manager")
+                  "packs", "rules", "manager")
 # Actions that change the project's config on disk: the snapshot after them reads the
 # project loaded again, under the name the action returns when it renamed the project.
 CONFIG_ACTIONS = ("lanes", "project")

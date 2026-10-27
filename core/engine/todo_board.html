@@ -1049,9 +1049,9 @@ a.icon{display:inline-flex;align-items:center;text-decoration:none}
   </section>
   <section id="pOptRules">
     <h3>Optional rules</h3>
-    <p>Rules a ruleset lets this project switch on and off. Tick the rules this project uses. Apply copies each rule turned on into <code>.agents/rules/</code> and takes out each rule turned off, unless its copy was edited. A rule this project never switched follows its default.</p>
+    <p>Rules a ruleset lets this project switch on and off. A rule set to <i>global</i> follows Global settings, else its ruleset's default; <i>on</i> or <i>off</i> is this project's own switch, and it wins. Apply copies each rule turned on into <code>.agents/rules/</code> and takes out each rule turned off, unless its copy was edited. The entry files, the briefs and the guards of the rule follow.</p>
     <table>
-      <thead><tr><th></th><th>Rule</th><th>What it says</th><th>Ruleset</th><th>Default</th></tr></thead>
+      <thead><tr><th>Rule</th><th>What it says</th><th>Ruleset</th><th>Switch</th><th>State</th></tr></thead>
       <tbody id="pRulesOpt"></tbody>
     </table>
     <div class="row">
@@ -1200,6 +1200,18 @@ a.icon{display:inline-flex;align-items:center;text-decoration:none}
         <button class="icon" id="gaCancel">Cancel</button>
         <button class="icon go" id="gaSave" title="save, then run a short check: does it start, and does it answer">Save and check</button>
       </div>
+    </div>
+  </section>
+  <section id="gsRules">
+    <h3>Optional rules</h3>
+    <p>The rules a ruleset lets every project switch on and off. The switch here is the default of every project on this machine; a project's own switch in its Project Settings view wins. Apply copies each rule turned on into <code>.agents/rules/</code> of each project that follows this switch and takes out each rule turned off, unless its copy was edited; the entry files, the briefs and the guards of the rule follow. Saved in <code id="gsRuleFile"></code>, outside every project.</p>
+    <table>
+      <thead><tr><th>Rule</th><th>What it says</th><th>Ruleset</th><th>Switch</th><th>State</th><th>Projects with their own switch</th></tr></thead>
+      <tbody id="gsRuleRows"></tbody>
+    </table>
+    <div class="row">
+      <span class="say" id="gsRulesSay"></span>
+      <button class="icon go" id="gsRulesApply" disabled>Apply</button>
     </div>
   </section>
   <section id="gsPacks">
@@ -1387,7 +1399,7 @@ const el = (t, c, x) => { const n = document.createElement(t);
    call names it in the query string; `null` as the third argument names none, and a name
    there names another project. */
 let PROJECT = new URLSearchParams(location.search).get("project") || "";
-let PROJECTS = [], PROFILES = {}, ALLSESS = [], PACKS_ALL = [], PACKS_V = null;
+let PROJECTS = [], PROFILES = {}, ALLSESS = [], PACKS_ALL = [], PACKS_V = null, RULES_V = null;
 const withProject = (path, proj) => {
   const p = proj === undefined ? PROJECT : proj;
   return p ? path + (path.includes("?") ? "&" : "?") + "project=" + encodeURIComponent(p) : path;
@@ -3755,39 +3767,82 @@ function applyPacks() {
     return;
   projectOp({op: "packsSet", packs: packsTicked($("#pPacks"))}, "packs applied");
 }
-/* ── the Project view: the optional rules ── */
+/* ── the optional rules: a switch per rule, in the Project view and in Global settings ── */
+const onOff = b => b ? "on" : "off";
+const RULE_FROM = {project: "this project's switch", global: "Global settings",
+                   default: "the ruleset's default"};
+/* A select of one rule: "" follows the level above (`above`: on or off), else on or off. */
+function ruleSwitch(name, now, above, said) {
+  const s = el("select");
+  s.dataset.rule = name; s.dataset.now = now;
+  for (const [v, t] of [["", `${said} (${onOff(above)})`], ["on", "on"], ["off", "off"]]) {
+    const o = el("option", null, t);
+    o.value = v;
+    s.append(o);
+  }
+  s.value = now;
+  return s;
+}
+function switchesDiff(tb) {
+  const d = {};
+  for (const s of tb.querySelectorAll("select[data-rule]"))
+    if (s.value !== s.dataset.now) d[s.dataset.rule] = s.value === "" ? null : s.value === "on";
+  return d;
+}
+function switchesSay(tb, say, apply) {
+  const d = switchesDiff(tb), bits = [];
+  for (const [k, v] of Object.entries(d))
+    bits.push(`${k}: ${v === null ? "no own switch" : onOff(v)}`);
+  say.textContent = bits.join(" · ");
+  apply.disabled = !bits.length;
+}
 function drawOptRules(v) {
   const tb = $("#pRulesOpt");
   tb.innerHTML = "";
+  const say = () => switchesSay(tb, $("#pRulesSay"), $("#pRulesApply"));
   for (const r of v.optionalRules || []) {
-    const c = el("input");
-    c.type = "checkbox"; c.value = r.name; c.checked = r.on;
-    c.addEventListener("change", () => rulesSay(v));
-    tb.append(cells(el("tr"), tdOf(null, c), el("td", "dir", r.name), r.title,
-                    el("td", "st", r.ruleset), el("td", "st", r.default ? "on" : "off")));
+    const s = ruleSwitch(r.name, r.source === "project" ? onOff(r.on) : "", r.inherited, "global");
+    s.addEventListener("change", say);
+    tb.append(cells(el("tr"), el("td", "dir", r.name), r.title, el("td", "st", r.ruleset),
+                    tdOf(null, s), el("td", "st", `${onOff(r.on)} · ${RULE_FROM[r.source]}`)));
   }
   if (!(v.optionalRules || []).length)
-    tb.append(cells(el("tr"), el("td"), el("td", "st", "no optional rule")));
-  rulesSay(v);
-}
-function rulesDiff(v) {
-  const on = new Set([...$("#pRulesOpt").querySelectorAll("input[type=checkbox]:checked")]
-                     .map(i => i.value));
-  const d = {};
-  for (const r of v.optionalRules || [])
-    if (on.has(r.name) !== r.on) d[r.name] = on.has(r.name);
-  return d;
-}
-function rulesSay(v) {
-  const d = rulesDiff(v), bits = [];
-  const ons = Object.keys(d).filter(k => d[k]), offs = Object.keys(d).filter(k => !d[k]);
-  if (ons.length) bits.push("turns on " + ons.join(", "));
-  if (offs.length) bits.push("turns off " + offs.join(", "));
-  $("#pRulesSay").textContent = bits.join(" · ");
-  $("#pRulesApply").disabled = !bits.length;
+    tb.append(cells(el("tr"), el("td", "st", "no optional rule")));
+  say();
 }
 function applyRules() {
-  projectOp({op: "rules", rules: rulesDiff(PROJ)}, "rules applied");
+  projectOp({op: "rules", rules: switchesDiff($("#pRulesOpt"))}, "rules applied");
+}
+async function loadRules() {
+  try { drawRules(await api("/api/rules", {op: "list"}, null)); }
+  catch (e) { toast(String(e.message || e), true); }
+}
+function drawRules(v) {
+  RULES_V = v;
+  $("#gsRuleFile").textContent = v.file;
+  const tb = $("#gsRuleRows");
+  tb.innerHTML = "";
+  const say = () => switchesSay(tb, $("#gsRulesSay"), $("#gsRulesApply"));
+  for (const r of v.rules) {
+    const s = ruleSwitch(r.name, r.source === "global" ? onOff(r.on) : "", r.default, "default");
+    s.addEventListener("change", say);
+    const own = r.projects.filter(x => x.source === "project")
+                          .map(x => `${x.name} ${onOff(x.on)}`).join(", ");
+    tb.append(cells(el("tr"), el("td", "dir", r.name), r.title, el("td", "st", r.ruleset),
+                    tdOf(null, s), el("td", "st", `${onOff(r.on)} · ${RULE_FROM[r.source]}`),
+                    el("td", "st", own || "none")));
+  }
+  if (!v.rules.length) tb.append(cells(el("tr"), el("td", "st", "no optional rule")));
+  say();
+}
+async function applyGlobalRules() {
+  $("#gsRulesSay").textContent = "working…";
+  try {
+    const r = await api("/api/rules", {op: "set", rules: switchesDiff($("#gsRuleRows"))}, null);
+    drawRules(r);
+    PROJ = null;
+    toast("rules applied" + ((r.log || []).length ? " · " + r.log.join(" · ") : ""));
+  } catch (e) { $("#gsRulesSay").textContent = String(e.message || e); }
 }
 /* ── the Project view: the skills installed from a source ── */
 function drawSkills(v) {
@@ -3996,11 +4051,13 @@ function openGlobal() {
   VIEW = "global";
   PROVIDERS_V = null;
   PACKS_V = null;
+  RULES_V = null;
   render();
 }
 function globalView() {
   if (!PROVIDERS_V) loadProviders();
   if (!PACKS_V) loadPacks();
+  if (!RULES_V) loadRules();
 }
 async function loadProviders() {
   try { drawProviders(await api("/api/providers", null, null)); }
@@ -4227,6 +4284,7 @@ $("#globalset").addEventListener("click", openGlobal);
 $("#aPreset").addEventListener("change", presetPacks);
 $("#pPacksApply").addEventListener("click", applyPacks);
 $("#pRulesApply").addEventListener("click", applyRules);
+$("#gsRulesApply").addEventListener("click", applyGlobalRules);
 $("#skSrc").addEventListener("change", skillSourceShow);
 $("#skList").addEventListener("click", skillList);
 $("#skAdd").addEventListener("click", skillAdd);

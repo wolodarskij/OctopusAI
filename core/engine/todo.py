@@ -160,6 +160,8 @@ REPEAT_MEANING = {
     "manager": "stays open, waits for the owner's orders, and runs tickets in every project",
 }
 MANAGER = "manager"
+# The optional rule whose brief section `readme.<mode>` a launch gets only while it is on.
+README_RULE = "readme-needs-owner-approval"
 # The manager ticket Octopus AI ships. `ensure_manager` files it in the home project when that
 # project has none.
 MANAGER_TEMPLATE = HERE.parent / "templates" / "manager.md"
@@ -2592,6 +2594,8 @@ def build_brief(t, mode="work", note="", provider="claude"):
         out.append(sec("job.work-plan"))
     else:
         out.append(sec("job.%s" % mode))
+    if _project.rule_enabled(P.ROOT, README_RULE):
+        out.append(sec("readme.%s" % mode))
     out += permits
     out.append(sec("before.%s" % mode, "before"))
     out.append(sec("finish.%s" % mode))

@@ -29,9 +29,12 @@
                                                   .claude/ into .agents/, and write each
                                                   AI provider's entry file
     python octopus.py packs <path> [list | add <pack> | remove <pack> | set <pack,pack,...>]
-    python octopus.py rules <path> [list | on <rule> | off <rule> | default <rule>]
-                                                  switch the optional rules of the project's
-                                                  rulesets on and off
+    python octopus.py rules [<rule> on | off | default] [--project <name|path>]
+                                                  the optional rules: list them with their
+                                                  state, or switch one for every project
+                                                  (global) or for one project. The older
+                                                  `rules <path> [list | on|off|default <rule>]`
+                                                  still works
     python octopus.py pack-registry [list | add <folder|url> [--name] [--ref] [--path]
                                     | update <name> | remove <name>]
                                                   the packs every project can choose
@@ -296,25 +299,7 @@ def main(argv=None):
                 _admin().uninstall(Path(a.path), a.pack)
             return 0
         if cmd == "rules":
-            ap.add_argument("path")
-            ap.add_argument("action", nargs="?", default="list",
-                            choices=("list", "on", "off", "default"))
-            ap.add_argument("rule", nargs="?", help="the optional rule: its file name without .md")
-            a = ap.parse_args(rest)
-            if a.action == "list":
-                rows = _admin().optional_rules(Path(a.path))
-                for r in rows:
-                    print("%-3s  %-36s  %-14s  default %-3s  %s"
-                          % ("on" if r["on"] else "off", r["name"], r["ruleset"],
-                             "on" if r["default"] else "off", r["title"]))
-                if not rows:
-                    print("no optional rule")
-                return 0
-            if not a.rule:
-                ap.error("name the rule")
-            _admin().set_rules(Path(a.path), {a.rule: {"on": True, "off": False,
-                                                       "default": None}[a.action]})
-            return 0
+            return cmd_rules(ap, rest)
         if cmd == "relocate":
             ap.add_argument("path", help="the new directory of this checkout")
             ap.add_argument("--wait", action="store_true",
@@ -387,6 +372,55 @@ def main(argv=None):
         return 2
     print("error: unknown command %r; `octopus --help` lists them" % cmd, file=sys.stderr)
     return 2
+
+
+RULE_SWITCH = {"on": True, "off": False, "default": None}
+
+
+def cmd_rules(ap, rest):
+    """`rules [--project P]` lists the optional rules; `rules <rule> on|off|default [--project
+    P]` switches one, globally or in project P. `rules <path> [list | on|off|default <rule>]`
+    is the older form, for one project."""
+    ap.add_argument("words", nargs="*", help="<rule> on|off|default; nothing to list")
+    ap.add_argument("--project", help="a registered name or a path: that project's switch, "
+                                      "not the global one")
+    a = ap.parse_args(rest)
+    words, root = list(a.words), project.resolve(a.project) if a.project else None
+    if words and words[0] not in ("list",) + tuple(RULE_SWITCH) and Path(words[0]).is_dir() \
+            and (len(words) == 1 or words[1] in ("list",) + tuple(RULE_SWITCH)):
+        root, words = project.resolve(words[0]), words[1:]
+        if len(words) == 2:
+            words = [words[1], words[0]]
+    if words in ([], ["list"]):
+        if root is not None:
+            rows = _admin().optional_rules(root)
+            for r in rows:
+                print("%-3s  %-30s  %-8s  %-10s  %s"
+                      % ("on" if r["on"] else "off", r["name"], r["source"], r["ruleset"],
+                         r["title"]))
+        else:
+            rows = _admin().global_rules()
+            for r in rows:
+                own = ", ".join("%s %s" % (x["name"], "on" if x["on"] else "off")
+                                for x in r["projects"] if x["source"] == "project")
+                print("%-3s  %-30s  %-8s  %-10s  %s%s"
+                      % ("on" if r["on"] else "off", r["name"], r["source"], r["ruleset"],
+                         r["title"], "  (own switch: %s)" % own if own else ""))
+        if not rows:
+            print("no optional rule")
+        return 0
+    if len(words) != 2 or words[1] not in RULE_SWITCH:
+        ap.error("give <rule> on|off|default, or nothing to list")
+    change = {words[0]: RULE_SWITCH[words[1]]}
+    try:
+        if root is not None:
+            _admin().set_rules(root, change)
+        else:
+            _admin().set_global_rules(change)
+    except ValueError as exc:
+        print("error: %s" % exc, file=sys.stderr)
+        return 2
+    return 0
 
 
 def _pack_list(text):
