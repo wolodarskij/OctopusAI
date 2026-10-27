@@ -9,7 +9,7 @@ from support import FixtureCase
 class FileGroups(FixtureCase):
     def setUp(self):
         super().setUp()
-        self.root = self.make("Topics", "none",
+        self.root = self.make("Topics",
                               config={"groups": {"store": "files", "required": True}})
 
     def test_a_ticket_needs_a_group_and_the_group_needs_a_file(self):
@@ -59,7 +59,7 @@ class FileGroups(FixtureCase):
 
 class MapGroups(FixtureCase):
     def test_map_groups_and_an_auto_group(self):
-        root = self.make("Mapped", "none",
+        root = self.make("Mapped",
                          config={"autoGroups": [{"name": "Found by tests", "tag": "from-test"}]})
         t1 = self.new_ticket(root, "one", "--tags", "from-test")
         t2 = self.new_ticket(root, "two")
@@ -77,7 +77,7 @@ class MapGroups(FixtureCase):
 
 class Children(FixtureCase):
     def test_children_and_wait_follow_the_lanes(self):
-        root = self.make("Family", "none")
+        root = self.make("Family")
         parent = self.new_ticket(root, "parent")
         kid = self.new_ticket(root, "kid", "--parent", parent)
         rc, out, _ = self.todo(root, "children", parent)
@@ -94,7 +94,7 @@ class Children(FixtureCase):
         self.assertIn("## Children", out)
 
     def test_rulesets_prints_what_each_ruleset_adds(self):
-        root = self.make("Rules", "unreal")
+        root = self.make("Rules", ["unreal", "blueprint"])
         rc, out, err = self.todo(root, "rulesets")
         self.assertEqual(rc, 0, err)
         self.assertIn("Rules (rules)   .octopus/project.json", out)

@@ -79,7 +79,7 @@ class SaysFinished(unittest.TestCase):
 class SaysDone(FixtureCase):
     def setUp(self):
         super().setUp()
-        self.tok = project.use(self.make("Done", "none"))
+        self.tok = project.use(self.make("Done"))
 
     def tearDown(self):
         project.reset(self.tok)
@@ -105,7 +105,7 @@ class SaysDoneRenamed(FixtureCase):
     def test_a_renamed_verify_lane(self):
         lanes = copy.deepcopy(project.DEFAULT_LANES)
         lanes[3].update({"dir": "Review", "label": "Under review"})
-        tok = project.use(self.make("Renamed", "none", config={"lanes": lanes}))
+        tok = project.use(self.make("Renamed", config={"lanes": lanes}))
         try:
             self.assertTrue(session_state.says_done("T0069 is in Under review."))
             self.assertTrue(session_state.says_done("Moved T0069 to Review"))
@@ -117,7 +117,7 @@ class SaysDoneRenamed(FixtureCase):
 class Record(FixtureCase):
     def setUp(self):
         super().setUp()
-        self.root = self.make("Wait", "none")
+        self.root = self.make("Wait")
         self.tok = project.use(self.root)
         # No test starts the judge: a plain message would.
         patcher = mock.patch.object(session_state, "start_judge")
@@ -354,7 +354,7 @@ class Record(FixtureCase):
 class Judge(FixtureCase):
     def setUp(self):
         super().setUp()
-        self.root = self.make("Judge", "none")
+        self.root = self.make("Judge")
         self.tok = project.use(self.root)
         env = mock.patch.dict(os.environ)
         env.start()
@@ -528,7 +528,7 @@ class Transcript(FixtureCase):
 
     def setUp(self):
         super().setUp()
-        self.root = self.make("Transcript", "none")
+        self.root = self.make("Transcript")
         self.tok = project.use(self.root)
         self.path = self.tmp / "t.jsonl"
 
@@ -677,7 +677,7 @@ class Activity(FixtureCase):
 
     def setUp(self):
         super().setUp()
-        self.root = self.make("Activity", "none")
+        self.root = self.make("Activity")
         self.tok = project.use(self.root)
         self.path = self.tmp / "a.jsonl"
 
@@ -774,7 +774,7 @@ class Activity(FixtureCase):
 
 class FinishBrief(FixtureCase):
     def test_every_brief_asks_for_the_finished_line_but_a_managers(self):
-        root = self.make("Brief", "none")
+        root = self.make("Brief")
         tid = self.new_ticket(root, "Fix the parser")
         mgr = self.new_ticket(root, "Manager", "--repeat", "manager", "--permits", "projects")
         tok = project.use(root)
@@ -790,7 +790,7 @@ class FinishBrief(FixtureCase):
             project.reset(tok)
 
     def test_every_mode_closes_its_own_terminal_but_a_manager(self):
-        root = self.make("Brief", "none")
+        root = self.make("Brief")
         tid = self.new_ticket(root, "Fix the parser")
         rep = self.new_ticket(root, "Run the tests", "--repeat", "test")
         mgr = self.new_ticket(root, "Manager", "--repeat", "manager", "--permits", "projects")
@@ -916,7 +916,7 @@ class SelfClose(unittest.TestCase):
 class Jobs(FixtureCase):
     def setUp(self):
         super().setUp()
-        self.root = self.make("Jobs", "none")
+        self.root = self.make("Jobs")
         self.tok = project.use(self.root)
 
     def tearDown(self):
@@ -1019,7 +1019,7 @@ class TranscriptJobs(FixtureCase):
 
     def setUp(self):
         super().setUp()
-        self.root = self.make("TranscriptJobs", "none")
+        self.root = self.make("TranscriptJobs")
         self.tok = project.use(self.root)
         self.path = self.root / "t.jsonl"
         self.path.write_text("", encoding="utf-8")
@@ -1153,7 +1153,7 @@ class WaitState(FixtureCase):
 
     def setUp(self):
         super().setUp()
-        self.root = self.make("Wait", "none")
+        self.root = self.make("Wait")
         self.tok = project.use(self.root)
 
     def tearDown(self):
@@ -1542,7 +1542,7 @@ class ReadTurn(FixtureCase):
 
     def setUp(self):
         super().setUp()
-        self.root = self.make("ReadTurn", "none")
+        self.root = self.make("ReadTurn")
         self.tok = project.use(self.root)
         self.path = self.tmp / "s.jsonl"
         p = mock.patch.object(todo, "session_transcript", return_value=self.path)
@@ -1756,7 +1756,7 @@ class Reevaluate(FixtureCase):
 
     def setUp(self):
         super().setUp()
-        self.root = self.make("Reeval", "none")
+        self.root = self.make("Reeval")
         self.tok = project.use(self.root)
 
     def tearDown(self):

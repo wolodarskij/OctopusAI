@@ -21,7 +21,7 @@ def session(tid, mode="work", claude=1234):
 class Manager(FixtureCase):
     def setUp(self):
         super().setUp()
-        self.root = self.make("Boss", "none")
+        self.root = self.make("Boss")
         self.mid = self.new_ticket(self.root, "the manager", "--repeat", "manager",
                                    "--permits", "projects")
 
@@ -116,7 +116,7 @@ class Manager(FixtureCase):
         self.assertEqual(rc, 0, err)
 
     def test_the_brief_lists_the_projects_and_never_hands_over(self):
-        other = self.make("Other", "none")
+        other = self.make("Other")
         rc, out, err = self.todo(self.root, "brief", self.mid)
         self.assertEqual(rc, 0, err)
         brief = (self.root / out.strip()).read_text(encoding="utf-8")
@@ -130,8 +130,8 @@ class Manager(FixtureCase):
         self.assertNotIn("{projects}", brief)
 
     def test_work_adds_every_other_registered_root(self):
-        other = self.make("Other", "none")
-        third = self.make("Third", "none")
+        other = self.make("Other")
+        third = self.make("Third")
         rc, out, err = self.todo(self.root, "work", self.mid, "--dry-run")
         self.assertEqual(rc, 0, err)
         line = out.splitlines()[0]
@@ -142,7 +142,7 @@ class Manager(FixtureCase):
         self.assertNotIn(str(self.root.resolve()), dirs)
 
     def test_a_ticket_without_the_permit_adds_no_root(self):
-        self.make("Other", "none")
+        self.make("Other")
         tid = self.new_ticket(self.root, "plain")
         rc, out, err = self.todo(self.root, "work", tid, "--dry-run")
         self.assertEqual(rc, 0, err)
@@ -158,7 +158,7 @@ class Manager(FixtureCase):
 class ManagerDead(FixtureCase):
     def setUp(self):
         super().setUp()
-        self.root = self.make("Dead", "none")
+        self.root = self.make("Dead")
         self.mid = self.new_ticket(self.root, "the manager", "--repeat", "manager")
         self.tok = project.use(self.root)
 
@@ -197,7 +197,7 @@ class ManagerDead(FixtureCase):
 class Watchdog(FixtureCase):
     def setUp(self):
         super().setUp()
-        self.root = self.make(admin.SELF_NAME, "none")
+        self.root = self.make(admin.SELF_NAME)
         self.mid = self.new_ticket(self.root, "the manager", "--repeat", "manager")
         rc, _out, err = self.todo(self.root, "move", self.mid, "InProgress",
                                   "--status", "implementing")
@@ -285,7 +285,7 @@ class AutoClose(FixtureCase):
 
     def setUp(self):
         super().setUp()
-        self.root = self.make("Shut", "none")
+        self.root = self.make("Shut")
         self.done = self.new_ticket(self.root, "the finished one")
         self.asks = self.new_ticket(self.root, "the one that asks")
         self.mid = self.new_ticket(self.root, "the manager", "--repeat", "manager")
@@ -340,7 +340,7 @@ class AutoClose(FixtureCase):
 class BoardMove(FixtureCase):
     def setUp(self):
         super().setUp()
-        self.root = self.make("Drag", "none")
+        self.root = self.make("Drag")
         self.mid = self.new_ticket(self.root, "the manager", "--repeat", "manager")
         self.tok = project.use(self.root)
 
@@ -363,8 +363,8 @@ class ShippedManager(FixtureCase):
 
     def setUp(self):
         super().setUp()
-        self.root = self.make(admin.SELF_NAME, "none")
-        self.other = self.make("Away", "none")
+        self.root = self.make(admin.SELF_NAME)
+        self.other = self.make("Away")
         for root in (self.root, self.other):
             for f in (root / "TODO").rglob("T*.md"):
                 if "repeat: manager" in f.read_text(encoding="utf-8"):

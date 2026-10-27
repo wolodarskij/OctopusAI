@@ -9,7 +9,7 @@ from support import FixtureCase, project
 class Category(FixtureCase):
     def setUp(self):
         super().setUp()
-        self.root = self.make("Cats", "none")
+        self.root = self.make("Cats")
 
     def ticket_file(self, tid):
         return next((self.root / "TODO").rglob("%s-*.md" % tid))

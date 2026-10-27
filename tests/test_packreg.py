@@ -170,33 +170,31 @@ class PackSet(FixtureCase):
     def test_install_with_packs_takes_the_base_and_those_packs(self):
         root = self.tmp / "game"
         root.mkdir()
-        admin.install(root, None, "Sample Game", packs=["blueprint", "git"], out=quiet,
-                      manager=False)
+        admin.install(root, ["blueprint", "git"], "Sample Game", out=quiet, manager=False)
         pj = json.loads((root / ".octopus/project.json").read_text(encoding="utf-8"))
         self.assertEqual(pj["rulesets"][:2], ["core", "windows"])
         self.assertEqual(set(pj["rulesets"][2:]), {"unreal", "blueprint", "git"})
-        self.assertEqual(pj["profile"], "custom")
+        self.assertNotIn("profile", pj)
         self.assertEqual(project.load(root).problems, [])
         other = self.tmp / "other"
         other.mkdir()
-        admin.install(other, None, "Other Game", packs=["blueprint"], out=quiet, manager=False)
+        admin.install(other, ["blueprint"], "Other Game", out=quiet, manager=False)
         pj = json.loads((other / ".octopus/project.json").read_text(encoding="utf-8"))
-        self.assertEqual(pj["profile"], "unreal")
+        self.assertEqual(pj["rulesets"], ["core", "windows", "unreal", "blueprint"])
 
     def test_packs_set_adds_and_removes_to_match(self):
-        root = self.make("Sample Game", profile="unreal-angelscript")
+        root = self.make("Sample Game", packs=["unreal", "blueprint", "ue-angelscript"])
         added, removed = admin.packs_set(root, ["browser-game", "unreal"], out=quiet)
         self.assertEqual(added, ["browser-game"])
         self.assertEqual(set(removed), {"blueprint", "ue-angelscript"})
         pj = json.loads((root / ".octopus/project.json").read_text(encoding="utf-8"))
         self.assertEqual(pj["rulesets"], ["core", "windows", "unreal", "browser-game"])
-        self.assertEqual(pj["profile"], "custom")
         self.assertEqual(project.load(root).problems, [])
         added, removed = admin.packs_set(root, [], out=quiet)
         self.assertEqual(set(removed), {"unreal", "browser-game"})
         pj = json.loads((root / ".octopus/project.json").read_text(encoding="utf-8"))
         self.assertEqual(pj["rulesets"], ["core", "windows"])
-        self.assertEqual(pj["profile"], "none")
+        self.assertNotIn("profile", pj)
 
     def test_packs_set_keeps_the_projects_own_rulesets(self):
         root = self.make("Sample Game")

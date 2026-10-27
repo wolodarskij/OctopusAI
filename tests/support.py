@@ -59,11 +59,12 @@ class FixtureCase(unittest.TestCase):
                 os.environ[k] = v
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def make(self, name, profile="none", slug=None, register=True, config=None):
-        """A project directory with Octopus AI installed. `config` updates project.json."""
+    def make(self, name, packs=(), slug=None, register=True, config=None):
+        """A project directory with Octopus AI and `packs` installed. `config` updates
+        project.json."""
         root = self.tmp / name
         root.mkdir(parents=True, exist_ok=True)
-        admin.install(root, profile, name, slug, register=register, out=quiet, manager=False)
+        admin.install(root, list(packs), name, slug, register=register, out=quiet, manager=False)
         if config:
             p = root / ".octopus" / "project.json"
             d = json.loads(p.read_text(encoding="utf-8"))

@@ -34,7 +34,7 @@ def sess(sid, tid, wait=None, mode="work", **kw):
 class IfAny(FixtureCase):
     def setUp(self):
         super().setUp()
-        self.root = self.make("Sample Game", "none")
+        self.root = self.make("Sample Game")
         self.a = self.new_ticket(self.root, "Feature: the first")
         self.b = self.new_ticket(self.root, "Feature: the second")
         for tid in (self.a, self.b):
@@ -107,8 +107,8 @@ class ManagerText(unittest.TestCase):
 class FollowUps(FixtureCase):
     def setUp(self):
         super().setUp()
-        self.root = self.make("Sample Game", "none")
-        self.other = self.make("Other Game", "none")
+        self.root = self.make("Sample Game")
+        self.other = self.make("Other Game")
         self.fu = self.new_ticket(self.other, "Feature: the follow-up")
         self.parent = self.new_ticket(self.root, "Feature: every project",
                                       "--permits", "projects")
@@ -174,7 +174,7 @@ class FollowUps(FixtureCase):
 class JobAge(FixtureCase):
     def setUp(self):
         super().setUp()
-        self.make("Sample Game", "none")
+        self.make("Sample Game")
 
     def run_check(self, **kw):
         out, err = io.StringIO(), io.StringIO()
@@ -209,7 +209,7 @@ class JobAge(FixtureCase):
 class Wake(FixtureCase):
     def setUp(self):
         super().setUp()
-        self.root = self.make(admin.SELF_NAME, "none")
+        self.root = self.make(admin.SELF_NAME)
         self.mid = self.new_ticket(self.root, "the manager", "--repeat", "manager")
         rc, _out, err = self.todo(self.root, "move", self.mid, "InProgress",
                                   "--status", "implementing")
@@ -267,7 +267,7 @@ class Wake(FixtureCase):
 
 class Brief(FixtureCase):
     def test_the_manager_brief_starts_the_check(self):
-        root = self.make("Sample Game", "none")
+        root = self.make("Sample Game")
         mid = self.new_ticket(root, "the manager", "--repeat", "manager", "--permits",
                               "projects")
         tok = project.use(root)

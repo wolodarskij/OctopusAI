@@ -13,7 +13,7 @@ import todo_server  # noqa: E402
 class Lanes(FixtureCase):
     def setUp(self):
         super().setUp()
-        self.root = self.make("Lanes", "none")
+        self.root = self.make("Lanes")
         self.t1 = self.new_ticket(self.root, "one")
         self.t2 = self.new_ticket(self.root, "two")
 

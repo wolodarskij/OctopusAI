@@ -19,7 +19,7 @@ class Rulesets(FixtureCase):
         return project.load_rules(root)
 
     def test_core_rulesets_load_clean(self):
-        root = self.make("Plain", "none")
+        root = self.make("Plain")
         rules, problems = project.load_rules(root)
         self.assertEqual(problems, [])
         self.assertEqual(rules["rulesets"], ["core", "windows"])

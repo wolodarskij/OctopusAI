@@ -1,5 +1,6 @@
 {
   "title": "AngelScript: the rule for .as files, the script-graph skill, and offline tools that read the Script/ layer and the Blueprint export",
+  "detect": ["Script/**/*.as"],
   "requires": ["unreal"],
   "payload": [
     {"from": "rules/", "to": ".agents/rules/octopus/ue-angelscript/"},

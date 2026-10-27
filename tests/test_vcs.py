@@ -149,7 +149,7 @@ class Git(FixtureCase):
 
 class Settings(FixtureCase):
     def test_a_project_without_vcs_is_none_and_checks_clean(self):
-        root = self.make("Plain", "none")
+        root = self.make("Plain")
         p = project.Project(root)
         self.assertEqual((p.vcs, p.vcs_pull), ("none", "rebase"))
         self.assertIn("TODO/.briefs/", p.RULES["gitignore"])
@@ -158,13 +158,13 @@ class Settings(FixtureCase):
         self.assertEqual(rc, 0, out + err)
 
     def test_a_bad_vcs_value_fails_check(self):
-        root = self.make("Bad", "none", config={"vcs": "svn"})
+        root = self.make("Bad", config={"vcs": "svn"})
         rc, out, err = self.todo(root, "check")
         self.assertEqual(rc, 1)
         self.assertIn("`vcs` is 'svn'", out + err)
 
     def test_a_bad_vcs_pull_value_fails_check(self):
-        root = self.make("BadPull", "none", config={"vcs": "git", "vcsPull": "squash"})
+        root = self.make("BadPull", config={"vcs": "git", "vcsPull": "squash"})
         rc, out, err = self.todo(root, "check")
         self.assertEqual(rc, 1)
         self.assertIn("`vcsPull` is 'squash'", out + err)

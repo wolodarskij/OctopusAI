@@ -15,8 +15,8 @@ import todo_server  # noqa: E402
 class TwoProjects(FixtureCase):
     def setUp(self):
         super().setUp()
-        self.a = self.make("Alpha", "none")
-        self.b = self.make("Beta", "none")
+        self.a = self.make("Alpha")
+        self.b = self.make("Beta")
         self.ta = self.new_ticket(self.a, "first ticket of alpha")
         self.tb = self.new_ticket(self.b, "first ticket of beta")
 

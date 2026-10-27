@@ -1,7 +1,7 @@
 """admin.py - put Octopus AI into a project, take it out again, and change a project's config.
 
-    octopus new <path> --name <name> --profile <profile>      create the directory, then install
-    octopus install <path> --profile <profile>                install into a project that exists
+    octopus new <path> --name <name> [--packs <pack,pack>]    create the directory, then install
+    octopus install <path> [--packs <pack,pack>]              install into a project that exists
     octopus update <path> | --all                             write every changed payload file again
     octopus uninstall <path> [--pack <name>]                  remove what install wrote
     octopus status <path>                                     each installed file: same, edited, missing
@@ -18,7 +18,8 @@
 
 WHAT INSTALL WRITES, and records in `<project>/.octopus/installed.json` with each file's hash:
 
-    .octopus/project.json     from core/templates/project.json, with the profile's rulesets
+    .octopus/project.json     from core/templates/project.json, with the base rulesets and the
+                              chosen packs
     .octopus/todo.py          the per-project shim: `python .octopus/todo.py <command>`
     .claude/settings.json     the hook lines (`octopus hook`) and one env variable
     .codex/hooks.json         the status hook lines of Codex (`octopus status-hook`), through
@@ -27,7 +28,7 @@ WHAT INSTALL WRITES, and records in `<project>/.octopus/installed.json` with eac
 
 The registry (`projects.json`, outside the Octopus AI tree) gets the project.
 
-UPDATE is install with no profile: every payload file a pack changed is written again. A payload
+UPDATE is install with no packs named: every payload file a pack changed is written again. A payload
 entry with `replace` belongs to its pack: its copy replaces a hand copy, and `refresh`, which the
 `SessionStart` hook runs, brings it up to date in every project a session starts in.
 
@@ -64,7 +65,6 @@ import agents as _agents
 import project as _project
 from project import OCTOPUS, CORE, PACKS, CONFIG_DIR, PROJECT_FILE
 
-PROFILES_FILE = OCTOPUS / "profiles.json"
 INSTALLED = "installed.json"
 TEXT_SUFFIXES = {".md", ".json", ".py", ".bat", ".cmd", ".ps1", ".txt", ".js", ".ts", ".html",
                  ".css", ".yml", ".yaml", ".toml", ".ini", ".cfg", ""}
@@ -114,14 +114,22 @@ def _cd(root):
     return _project.config_dir(root)
 
 
-# The old name of each renamed profile -> its name now; `--profile` still takes the old one.
-PROFILE_ALIASES = {"browser": "browser-game"}
+# The rulesets every project lists before its packs.
+BASE_RULESETS = ("core", "windows")
+
+# A fixed set of packs an older call or config names by one word -> those packs. `--profile`, the
+# board's `profile` and a string in place of the pack list still take one.
+OLD_PROFILES = {"none": [], "unreal": ["unreal", "blueprint"],
+                "unreal-angelscript": ["unreal", "blueprint", "ue-angelscript"],
+                "browser-game": ["browser-game"], "browser": ["browser-game"]}
 
 
-def profiles():
-    """profile name -> list of rulesets."""
-    d = _read_json(PROFILES_FILE, {})
-    return {k: v["rulesets"] for k, v in d.get("profiles", {}).items()}
+def packs_of_profile(name):
+    """The packs of the old profile `name`. Raises ValueError on a name that never was one."""
+    if name not in OLD_PROFILES:
+        raise ValueError("no profile %r; name the packs instead (`octopus pack-registry` lists "
+                         "them)" % name)
+    return list(OLD_PROFILES[name])
 
 
 def hook_command(root=None):
@@ -195,10 +203,9 @@ class Record:
         self.settings = d.get("settings", {})
         self.entries = d.get("entries", {})
         self.tree = d.get("tree", {})
-        self.profile = d.get("profile", "")
 
     def save(self):
-        d = {"profile": self.profile, "files": self.files, "dirs": sorted(set(self.dirs)),
+        d = {"files": self.files, "dirs": sorted(set(self.dirs)),
              "settings": self.settings, "entries": self.entries, "tree": self.tree}
         _write_bytes(self.path, _json_bytes(d))
 
@@ -271,13 +278,13 @@ def _values(root, pj):
 
 # ── install ─────────────────────────────────────────────────────────────────
 
-def install(root, profile=None, name=None, slug=None, register=True, out=print, manager=True,
-            packs=None):
+def install(root, packs=None, name=None, slug=None, register=True, out=print, manager=True):
     """Install Octopus AI into the project at `root`. Returns the record. The checkout's own
     project, the manager's home, gets the manager ticket too when it had no config, unless
-    `manager` is false. `packs`, a list of pack
-    names, chooses the packs in place of a profile: the base rulesets, then those packs and
-    what they require."""
+    `manager` is false. `packs`, a list of pack names, makes the project's rulesets the base
+    rulesets, then those packs and what they require, then the project's own rulesets. With no
+    `packs`, a new project gets the base rulesets only and a project with a config keeps its
+    rulesets. An old profile name in place of the list takes its packs (`OLD_PROFILES`)."""
     root = Path(root).resolve()
     if not root.is_dir():
         raise ValueError("%s is not a directory" % root)
@@ -287,33 +294,22 @@ def install(root, profile=None, name=None, slug=None, register=True, out=print, 
     if existing is not None and (migrate_pack_names(root, rec, existing, out)
                                  + migrate_provider_keys(root, rec, existing, out)):
         _write_bytes(cfg_path, _json_bytes(existing))
-    profile = PROFILE_ALIASES.get(profile, profile)
-    profs = profiles()
-    if packs is not None:
-        chosen = order_packs(packs)
-        profile = profile_of(chosen)
-        profs = dict(profs)
-        profs.setdefault(profile, base_rulesets() + chosen)
-    if profile is None and existing is None:
-        raise ValueError("a new project needs --profile; one of %s" % ", ".join(profs))
-    if profile is not None and profile not in profs:
-        raise ValueError("no profile %r; one of %s" % (profile, ", ".join(profs)))
+    if isinstance(packs, str):
+        packs = packs_of_profile(packs)
+    chosen = order_packs(packs) if packs is not None else None
     if existing is None:
         pj = json.loads((CORE / "templates" / "project.json").read_text(encoding="utf-8"))
         pj["name"] = name or root.name
         pj["slug"] = slug or _slug(pj["name"])
-        pj["rulesets"] = list(profs[profile])
-        pj["profile"] = profile
+        pj["rulesets"] = base_rulesets() + (chosen or [])
         rec.put("%s/%s" % (CONFIG_DIR, PROJECT_FILE), _json_bytes(pj), "core")
     else:
         pj = existing
-        if profile is not None:
+        if chosen is not None:
             known = _known_rulesets()
             own = [r for r in pj.get("rulesets", []) if r not in known]
-            pj["rulesets"] = list(profs[profile]) + own
-            pj["profile"] = profile
+            pj["rulesets"] = base_rulesets() + chosen + own
             _write_bytes(cfg_path, _json_bytes(pj))
-    rec.profile = pj.get("profile", profile or "")
     _check_requires(pj["rulesets"])
     values = _values(root, pj)
     tpl = CORE / "templates"
@@ -328,7 +324,7 @@ def install(root, profile=None, name=None, slug=None, register=True, out=print, 
     rec.save()
     if register:
         _project.register(root, pj["name"])
-    out("installed %s into %s: %s" % (rec.profile or "config", root, ", ".join(pj["rulesets"])))
+    out("installed into %s: %s" % (root, ", ".join(pj["rulesets"])))
     return rec
 
 
@@ -350,7 +346,7 @@ def ensure_self(out=print):
     name = SELF_NAME
     if any(r["name"] == name and not is_checkout(r["path"]) for r in _project.load_registry()):
         name = "%s (%s)" % (SELF_NAME, OCTOPUS.name)
-    rec = install(OCTOPUS, "none", name, register=False, out=out)
+    rec = install(OCTOPUS, [], name, register=False, out=out)
     if (OCTOPUS / ".git").exists():
         set_settings(OCTOPUS, vcs="git")
     _project.register(OCTOPUS, name)
@@ -362,7 +358,8 @@ def migrate_pack_names(root, rec, pj, out=print):
     """Give the project the name each renamed pack it lists goes by now (`project.PACK_ALIASES`):
     in `pj` (the caller writes it), in the install record (the caller saves it), the files the
     pack installed under `.agents/rules/octopus/<old>/`, and its settings `.octopus/<old>.json`.
-    A renamed profile takes its new name too. Returns the old names it renamed."""
+    A `profile` key, the word of an older install, goes from both. Returns the old names it
+    renamed, and "profile" when it dropped that key."""
     root = Path(root)
     olds = [n for n in pj.get("rulesets", []) if _project.ruleset_name(root, n) != n]
     for old in olds:
@@ -393,13 +390,9 @@ def migrate_pack_names(root, rec, pj, out=print):
         out("  pack %s is called %s now" % (old, new))
     if olds:
         pj["rulesets"] = [_project.ruleset_name(root, n) for n in pj["rulesets"]]
-    old_prof = pj.get("profile")
-    prof = PROFILE_ALIASES.get(old_prof)
-    if prof:
-        pj["profile"] = prof
-        olds = olds + [old_prof]
-    if PROFILE_ALIASES.get(rec.profile):
-        rec.profile = PROFILE_ALIASES[rec.profile]
+    if "profile" in pj:
+        del pj["profile"]
+        olds = olds + ["profile"]
     rel = "%s/%s" % (_cd(root), PROJECT_FILE)
     if olds and rel in rec.files:
         rec.files[rel]["hash"] = _sha(_json_bytes(pj))
@@ -572,8 +565,8 @@ def _ruleset_file(name):
 
 
 def base_rulesets():
-    """The rulesets every project lists before its packs: those of the profile `none`."""
-    return list(profiles().get("none", ["core"]))
+    """The rulesets every project lists before its packs."""
+    return list(BASE_RULESETS)
 
 
 def order_packs(names):
@@ -607,12 +600,24 @@ def order_packs(names):
     return out
 
 
-def profile_of(packs):
-    """The profile whose packs are exactly `packs`, else "custom"."""
-    for name, rs in profiles().items():
-        if set(rs) - set(base_rulesets()) == set(packs):
-            return name
-    return "custom"
+def suggest_packs(folder):
+    """The packs the content of `folder` needs, and what they require, in `order_packs` order:
+    each pack with a `detect` glob that matches a path in the folder. [] for a folder that
+    does not exist."""
+    import packreg
+    folder = Path(folder)
+    if not folder.is_dir():
+        return []
+    hits = []
+    for row in packreg.available():
+        p = Path(row["dir"]) / "ruleset.json" if row.get("dir") else None
+        globs = _read_json(p, {}).get("detect", []) if p else []
+        if any(next(iter(folder.glob(g)), None) is not None for g in globs):
+            hits.append(row["name"])
+    try:
+        return order_packs(hits)
+    except ValueError:
+        return []
 
 
 def _requires(name):
@@ -738,7 +743,7 @@ def _owns_payload(name):
 
 def update(root, out=print):
     """Write the payload of every ruleset the project lists again, so what changed in a pack
-    reaches the project. The same as `install` with no profile."""
+    reaches the project. The same as `install` with no packs named."""
     return install(root, register=False, out=out)
 
 
@@ -1433,11 +1438,6 @@ def packs_set(root, packs, out=print):
         if n not in have:
             pack_add(root, n, out=out)
             added.append(n)
-    pj = settings(root)
-    prof = profile_of([n for n in pj.get("rulesets", []) if n in known])
-    if pj.get("profile") != prof:
-        pj["profile"] = prof
-        _save_pj(root, pj)
     return added, removed
 
 

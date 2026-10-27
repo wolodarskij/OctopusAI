@@ -14,7 +14,7 @@ import todo_server  # noqa: E402
 class RemoteControl(FixtureCase):
     def setUp(self):
         super().setUp()
-        self.root = self.make("Remote", "none")
+        self.root = self.make("Remote")
         self.tid = self.new_ticket(self.root, "a ticket")
 
     def argv(self):
@@ -47,7 +47,7 @@ class RemoteControl(FixtureCase):
         self.assertEqual(rc, 0, out + err)
 
     def test_the_project_default_and_the_ticket_override(self):
-        root = self.make("Quiet", "none", config={"remoteControl": False})
+        root = self.make("Quiet", config={"remoteControl": False})
         tid = self.new_ticket(root, "quiet")
         tok = project.use(root)
         try:
@@ -63,7 +63,7 @@ class RemoteControl(FixtureCase):
             project.reset(tok)
 
     def test_a_bad_project_value_is_a_problem(self):
-        root = self.make("Bad", "none", config={"remoteControl": "yes"})
+        root = self.make("Bad", config={"remoteControl": "yes"})
         self.assertTrue(any("remoteControl" in x for x in project.load(root).problems))
 
     def test_check_fails_a_bad_ticket_value(self):

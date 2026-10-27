@@ -30,7 +30,7 @@ def sess(sid, tid, wait=None, mode="work", **kw):
 class Report(FixtureCase):
     def setUp(self):
         super().setUp()
-        self.root = self.make("Sample Game", "none")
+        self.root = self.make("Sample Game")
         self.work = self.new_ticket(self.root, "Feature: the work")
         self.ask = self.new_ticket(self.root, "Feature: the question")
         self.wait = self.new_ticket(self.root, "Feature: the waiter")
@@ -137,7 +137,7 @@ class Report(FixtureCase):
 class Claim(FixtureCase):
     def setUp(self):
         super().setUp()
-        self.root = self.make("Sample Game", "none")
+        self.root = self.make("Sample Game")
         self.mid = self.new_ticket(self.root, "the manager", "--repeat", "manager",
                                    "--permits", "projects")
         self.tok = project.use(self.root)
@@ -186,7 +186,7 @@ class Claim(FixtureCase):
         self.assertEqual(T.ticket_session_id(self.ticket(), "work"), SID_A)
 
     def test_take_over_returns_another_manager_ticket_to_the_start_lane(self):
-        root2 = self.make("Other Game", "none")
+        root2 = self.make("Other Game")
         mid2 = self.new_ticket(root2, "the other manager", "--repeat", "manager")
         rc, _o, err = self.todo(root2, "move", mid2, "InProgress", "--status", "implementing")
         self.assertEqual(rc, 0, err)

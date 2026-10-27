@@ -37,7 +37,7 @@ class Hits(unittest.TestCase):
 class Check(FixtureCase):
     def setUp(self):
         super().setUp()
-        self.root = self.make("Names", "none")
+        self.root = self.make("Names")
         self.git("init", "-q")
 
     def git(self, *args):

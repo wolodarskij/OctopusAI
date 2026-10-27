@@ -18,7 +18,7 @@ import todo_server  # noqa: E402
 class BoardApi(FixtureCase):
     def setUp(self):
         super().setUp()
-        self.root = self.make("Api", "none")
+        self.root = self.make("Api")
         self.tid = self.new_ticket(self.root, "first one", "--source", "src/a.py")
         self.httpd = todo_server.make_server(0)
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
@@ -307,7 +307,7 @@ class BoardApi(FixtureCase):
         self.assertEqual(groups["Old"], [other])
 
     def test_group_apply_in_the_files_store(self):
-        root = self.make("Files", "none", config={"groups": {"store": "files"}})
+        root = self.make("Files", config={"groups": {"store": "files"}})
         tid = self.new_ticket(root, "loose one")
         self.use(root)
         props = todo_server.parse_group_drafts(
@@ -425,7 +425,7 @@ class BoardPage(unittest.TestCase):
     HEADER = ("projsel problems others reload addproj newtask chat viewbar repview filterbtn "
               "count gselbar gselN gselG gselPut gselOut gselClr collapse grpmore newgroup "
               "aigroup aigroups states live closefin assets").split()
-    PROJVIEW = ("pName pSlug pDesc pProfile pBoard pPath pRemove pMetaSave gitVcs gitState "
+    PROJVIEW = ("pName pSlug pDesc pBoard pPath pRemove pMetaSave gitVcs gitState "
                 "pRulesets pPacks gLaneRows pModels pEfforts pDefModel pDefEffort pModelsSave "
                 "pTermRs gBoardFile gTerm gFocus pPermits pStore pRequired pAuto pGroupsSave "
                 "pCats pCatsSave pProblems pProbSay pFileSay pFiles").split()
@@ -468,7 +468,7 @@ class TerminalCalls(FixtureCase):
 
     def setUp(self):
         super().setUp()
-        self.root = self.make("Api", "none")
+        self.root = self.make("Api")
         self.tid = self.new_ticket(self.root, "first one", "--source", "src/a.py")
         self.httpd = todo_server.make_server(0)
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()

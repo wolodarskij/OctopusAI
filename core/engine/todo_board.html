@@ -559,6 +559,8 @@ a.icon{display:inline-flex;align-items:center;text-decoration:none}
 #adlg label.r{display:flex;gap:8px;align-items:flex-start;font-size:12px;cursor:pointer}
 #adlg label.r input{margin:3px 0 0}
 #adlg label.r small{display:block;color:var(--dim);font-size:11px}
+#aHint{font-size:11px;color:var(--dim)}
+#aHint:empty{display:none}
 #adlg .row{display:flex;gap:7px;justify-content:flex-end;margin-top:6px}
 #adlg .row .grow{flex:1 1 0}
 #adlg .go{background:var(--accent);border-color:var(--accent);color:#fff}
@@ -1023,7 +1025,6 @@ a.icon{display:inline-flex;align-items:center;text-decoration:none}
       <label><span>Name</span><input id="pName" autocomplete="off" spellcheck="false"></label>
       <label><span>Slug</span><input id="pSlug" class="fact" readonly tabindex="-1"></label>
       <label class="wide"><span>Description</span><textarea id="pDesc" spellcheck="false"></textarea></label>
-      <label><span>Profile</span><input id="pProfile" class="fact" readonly tabindex="-1" title="the profile it was installed with; add and remove packs below"></label>
       <label><span>Board</span><input id="pBoard" class="fact" readonly tabindex="-1" title="the name this board serves it under"></label>
       <label class="wide"><span>Path</span><input id="pPath" class="fact" readonly tabindex="-1"></label>
     </div>
@@ -1312,12 +1313,12 @@ a.icon{display:inline-flex;align-items:center;text-decoration:none}
   <h3>Add project</h3>
   <p>Registers a project directory with this board. A directory that already holds
      <code>.octopus/project.json</code> is registered as it is, and the packs are then
-     ignored. Any other directory is created if needed and installed with the ticked packs.</p>
+     ignored. Any other directory is created if needed and installed with the ticked packs.
+     Every pack is optional; the Project view adds and removes packs later.</p>
   <div class="fld"><label for="aPath">Path (full path)</label>
     <div class="pick"><input type="text" id="aPath" autocomplete="off" spellcheck="false"><button class="icon" id="aBrowse" type="button" title="choose the directory in a folder dialog">Browse…</button></div></div>
   <label class="fld"><span>Name (optional)</span><input type="text" id="aName" autocomplete="off" spellcheck="false"></label>
-  <label class="fld"><span>Start from a profile</span><select id="aPreset" title="ticks the packs of a profile; change the ticks after"></select></label>
-  <div class="opt" id="aPacks"><b>Packs</b></div>
+  <div class="opt" id="aPacks"><b>Packs (optional)</b><small id="aHint"></small></div>
   <div class="row">
     <span id="aSay" class="grow"></span>
     <button class="icon" id="aX">Cancel</button>
@@ -1399,7 +1400,7 @@ const el = (t, c, x) => { const n = document.createElement(t);
    call names it in the query string; `null` as the third argument names none, and a name
    there names another project. */
 let PROJECT = new URLSearchParams(location.search).get("project") || "";
-let PROJECTS = [], PROFILES = {}, ALLSESS = [], PACKS_ALL = [], PACKS_V = null, RULES_V = null;
+let PROJECTS = [], ALLSESS = [], PACKS_ALL = [], PACKS_V = null, RULES_V = null;
 const withProject = (path, proj) => {
   const p = proj === undefined ? PROJECT : proj;
   return p ? path + (path.includes("?") ? "&" : "?") + "project=" + encodeURIComponent(p) : path;
@@ -3535,7 +3536,6 @@ function drawProjectView() {
   $("#pName").value = v.name;
   $("#pSlug").value = v.slug;
   $("#pDesc").value = v.description || "";
-  $("#pProfile").value = v.profile || "";
   $("#pBoard").value = v.board + (v.registered ? "" : " (not registered)");
   $("#pPath").value = v.path;
   /* the rulesets in merge order, then every pack Octopus AI ships */
@@ -4281,7 +4281,6 @@ async function runSetup(id, model) {
   }
 }
 $("#globalset").addEventListener("click", openGlobal);
-$("#aPreset").addEventListener("change", presetPacks);
 $("#pPacksApply").addEventListener("click", applyPacks);
 $("#pRulesApply").addEventListener("click", applyRules);
 $("#gsRulesApply").addEventListener("click", applyGlobalRules);
@@ -4563,7 +4562,6 @@ const reload = async () => {
 async function loadProjects() {
   const r = await api("/api/projects", null, null);
   PROJECTS = r.projects || [];
-  PROFILES = r.profiles || {};
   PACKS_ALL = r.packs || [];
   if (!PROJECT || !PROJECTS.some(p => p.name === PROJECT)) PROJECT = r.default || "";
   const sel = $("#projsel");
@@ -4662,25 +4660,24 @@ async function openManager() {
 $("#manager").addEventListener("click", openManager);
 
 /* ── the add project window ─────────────────────────────────────────── */
+/* Every pack starts unticked. A path ticks the packs its content needs, as a suggestion,
+   until the owner ticks or unticks one. */
+let ADD_TOUCHED = false, ADD_SUGGEST = 0;
 function openAddProject() {
-  const pre = $("#aPreset");
-  pre.innerHTML = "";
-  for (const [name, v] of Object.entries(PROFILES))
-    pre.append(new Option(`${name}: ${v.means || ""}`, name));
-  if (PROFILES.none) pre.value = "none";
+  ADD_TOUCHED = false;
+  $("#aHint").textContent = "";
   const box = $("#aPacks");
   box.querySelectorAll("label").forEach(n => n.remove());
   for (const p of PACKS_ALL) {
     const lb = el("label", "r"), c = el("input");
     c.type = "checkbox"; c.value = p.name;
-    c.addEventListener("change", () => tickPack(box, PACKS_ALL, c));
+    c.addEventListener("change", () => { ADD_TOUCHED = true; tickPack(box, PACKS_ALL, c); });
     const sp = el("span", null, p.name);
     sp.append(el("small", null, (p.title || "")
       + (p.requires.length ? ` · requires ${p.requires.join(", ")}` : "")));
     lb.append(c, sp);
     box.append(lb);
   }
-  presetPacks();
   $("#aPath").value = ""; $("#aName").value = ""; $("#aSay").textContent = "";
   openVeil("addproj");
   setTimeout(() => $("#aPath").focus(), 30);
@@ -4698,10 +4695,16 @@ async function addProject() {
     toast(`${r.project} added`);
   } catch (e) { $("#aSay").textContent = String(e.message || e); }
 }
-/* A profile is a preset: it ticks its packs, and the ticks can change after. */
-function presetPacks() {
-  const rs = (PROFILES[$("#aPreset").value] || {}).rulesets || [];
-  $("#aPacks").querySelectorAll("input[type=checkbox]").forEach(i => i.checked = rs.includes(i.value));
+async function suggestPacks() {
+  const path = $("#aPath").value.trim(), n = ++ADD_SUGGEST;
+  if (ADD_TOUCHED) return;
+  let packs = [];
+  try { packs = path ? (await api("/api/suggestPacks", {path}, null)).packs || [] : []; }
+  catch (e) { packs = []; }
+  if (n !== ADD_SUGGEST || ADD_TOUCHED) return;
+  $("#aPacks").querySelectorAll("input[type=checkbox]").forEach(i => i.checked = packs.includes(i.value));
+  $("#aHint").textContent = packs.length
+    ? `Ticked from the folder's content: ${packs.join(", ")}. Untick a pack to leave it out.` : "";
 }
 /* The server opens the folder dialog: a page cannot. The field stays editable. */
 async function browseProject() {
@@ -4711,13 +4714,17 @@ async function browseProject() {
   try {
     const r = await api("/api/pickFolder", {start: $("#aPath").value.trim()}, null);
     $("#aSay").textContent = "";
-    if (r.path) $("#aPath").value = r.path;
+    if (r.path) { $("#aPath").value = r.path; suggestPacks(); }
     $("#aPath").focus();
   } catch (e) { $("#aSay").textContent = String(e.message || e); }
   finally { b.disabled = false; }
 }
 $("#addproj").addEventListener("click", openAddProject);
 $("#aBrowse").addEventListener("click", browseProject);
+let ADD_TYPED = 0;
+$("#aPath").addEventListener("input", () => {
+  clearTimeout(ADD_TYPED); ADD_TYPED = setTimeout(suggestPacks, 400); });
+$("#aPath").addEventListener("change", suggestPacks);
 $("#aX").addEventListener("click", closeNote);
 $("#aOK").addEventListener("click", addProject);
 $("#adlg").addEventListener("keydown", e => {

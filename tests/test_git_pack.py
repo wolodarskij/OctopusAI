@@ -28,7 +28,7 @@ class GitPack(FixtureCase):
         """A project named Proj under `where`, with the git pack or without it."""
         root = self.tmp / where / "Proj"
         root.mkdir(parents=True)
-        admin.install(root, "none", "Proj", register=False, out=quiet)
+        admin.install(root, [], "Proj", register=False, out=quiet)
         if pack:
             admin.pack_add(root, "git", out=quiet)
         p = root / ".octopus" / "project.json"

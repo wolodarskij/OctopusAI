@@ -20,7 +20,7 @@ class Served(FixtureCase):
 
     def setUp(self):
         super().setUp()
-        self.root = self.make("Api", "none")
+        self.root = self.make("Api")
         self.httpd = todo_server.make_server(0)
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
 

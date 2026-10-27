@@ -1,5 +1,6 @@
 {
   "title": "Unreal Engine: engine, build and shared-editor rules, the editor restart skill, the MCP client and the editor launch tools, and the editor and PIE permits",
+  "detect": ["*.uproject"],
   "permits": {
     "editor": {"grants": "drive the shared Unreal editor over unreal-mcp, which is also how a Blueprint is touched", "deny": []},
     "pie": {"grants": "run Play-In-Editor", "deny": []}

@@ -19,8 +19,9 @@ WHAT IT WILL NOT DO. It binds `127.0.0.1` only, it refuses a request whose `Host
 loopback, and every mutating call carries a token minted at startup and handed to the page
 in its URL. No verb takes a path from the caller - a ticket is addressed by its id and
 resolved through `todo.py`, and a project by its registered name - except `addProject`,
-which registers a directory the owner types, and `pickFolder`, which only opens the
-owner's folder dialog at a directory.
+which registers a directory the owner types, `suggestPacks`, which only looks for the
+`detect` globs of each pack in it, and `pickFolder`, which only opens the owner's folder
+dialog at a directory.
 
 THE ARTIFACTS VIEW. `/view/<VIEW_TOKEN>/<project>/<path>` sends one file of a served project,
 and renders a Markdown file, for the board's Artifacts view (`artifacts.py`). It takes a
@@ -113,7 +114,6 @@ def _has_browser(p):
 def project_info(name, root):
     p = project.load(root)
     return {"name": name, "path": str(root), "slug": p.slug, "title": p.title,
-            "profile": p.cfg.get("profile", ""),
             "rulesets": list(p.RULES["rulesets"]), "browser": _has_browser(p),
             "problems": list(p.problems)}
 
@@ -1484,7 +1484,7 @@ def project_view():
     root = P.ROOT.resolve()
     return {
         "name": P.name, "board": _current_name(), "slug": P.slug,
-        "description": P.description, "profile": cfg.get("profile", ""),
+        "description": P.description,
         "path": str(P.ROOT), "config": "%s/%s" % (P.config_dir, project.PROJECT_FILE),
         "registered": any(Path(x["path"]).resolve() == root for x in project.load_registry()),
         "rulesets": [{"name": n, "title": r["contributions"].get(n, {}).get("title", ""),
@@ -1915,7 +1915,8 @@ def act_removeProject(body):
 
 def act_addProject(body):
     """Register a project with the board. A directory that holds `.octopus/project.json` is
-    registered as it is; any other is installed with the chosen profile first."""
+    registered as it is; any other is installed with the chosen `packs` first, none when the
+    body names none. An old `profile` in place of `packs` takes its packs."""
     import admin
     path = Path((body.get("path") or "").strip())
     if not str(path) or not path.is_absolute():
@@ -1924,17 +1925,14 @@ def act_addProject(body):
         row = project.register(path, body.get("name") or None)
         return {"project": row["name"], "noSnapshot": True}
     packs = body.get("packs")
-    profile = body.get("profile") or None
-    if packs is not None:
-        if not isinstance(packs, list) or not all(isinstance(x, str) for x in packs):
-            raise ValueError("`packs` is the list of pack names")
-        profile = None
-    elif profile not in admin.profiles():
-        raise ValueError("choose a profile: %s" % ", ".join(admin.profiles()))
+    if packs is None:
+        packs = admin.packs_of_profile(body["profile"]) if body.get("profile") else []
+    if not isinstance(packs, list) or not all(isinstance(x, str) for x in packs):
+        raise ValueError("`packs` is the list of pack names")
     path.mkdir(parents=True, exist_ok=True)
     lines = []
-    admin.install(path, profile, body.get("name") or None, None, register=True,
-                  out=lines.append, packs=packs)
+    admin.install(path, packs, body.get("name") or None, None, register=True,
+                  out=lines.append)
     return {"project": project.load(path).name, "log": lines, "noSnapshot": True}
 
 
@@ -1972,6 +1970,17 @@ def _ask_folder(start):
     return os.path.normpath(path) if path else ""
 
 
+def act_suggestPacks(body):
+    """The packs the content of the directory `path` needs, for the Add project window: those
+    whose `detect` globs match there, and what they require. [] for a path that is no
+    directory."""
+    import admin
+    path = Path((body.get("path") or "").strip())
+    if not str(path) or not path.is_absolute():
+        return {"packs": [], "noSnapshot": True}
+    return {"packs": admin.suggest_packs(path), "noSnapshot": True}
+
+
 def act_pickFolder(body):
     """Let the owner choose a directory in a native folder dialog, for the Add project window.
     `start` only opens the dialog there; nothing is read or written in it."""
@@ -2007,15 +2016,15 @@ ACTIONS = {"move": act_move, "field": act_field, "launch": act_launch, "open": a
            "new": act_new, "draft": act_draft, "restart": act_restart,
            "repeat": act_repeat, "screen": act_screen, "send": act_send, "log": act_log,
            "allSessions": act_allSessions, "reevaluate": act_reevaluate, "lanes": act_lanes,
-           "addProject": act_addProject, "pickFolder": act_pickFolder, "ticket": act_ticket, "edit": act_edit,
+           "addProject": act_addProject, "suggestPacks": act_suggestPacks, "pickFolder": act_pickFolder, "ticket": act_ticket, "edit": act_edit,
            "chat": act_chat, "groupDraft": act_groupDraft, "groupApply": act_groupApply,
            "project": act_project, "removeProject": act_removeProject, "vcs": act_vcs,
            "remoteControl": act_remoteControl, "providers": act_providers, "packs": act_packs,
            "rules": act_rules, "skills": act_skills, "artifactAdd": act_artifactAdd,
            "artifactRemove": act_artifactRemove}
 # Actions that name no project of their own.
-GLOBAL_ACTIONS = ("allSessions", "addProject", "pickFolder", "removeProject", "providers",
-                  "packs", "rules", "manager")
+GLOBAL_ACTIONS = ("allSessions", "addProject", "suggestPacks", "pickFolder", "removeProject",
+                  "providers", "packs", "rules", "manager")
 # Actions that change the project's config on disk: the snapshot after them reads the
 # project loaded again, under the name the action returns when it renamed the project.
 CONFIG_ACTIONS = ("lanes", "project")
@@ -2120,14 +2129,13 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/projects":
             ps = projects()
             import admin
-            profs = json.loads(admin.PROFILES_FILE.read_text(encoding="utf-8"))["profiles"]
             import packreg
             packs = [{"name": p["name"], "title": p["title"], "requires": p["requires"],
                       "source": p["source"]} for p in packreg.available() if p["dir"]]
             return self._send(200, {"projects": [project_info(n, r) for n, r in ps.items()],
                                     "default": DEFAULT[0] if DEFAULT[0] in ps else
                                     next(iter(ps), None),
-                                    "profiles": profs, "packs": packs,
+                                    "packs": packs,
                                     "baseRulesets": admin.base_rulesets(),
                                     "defaultSetup": providers.default_state()})
         if path == "/api/providers":
@@ -2241,11 +2249,11 @@ def make_server(port=0, ident=None):
 
 
 def _initialize(root):
-    """Install Octopus AI with the base profile into `root`, a folder in no project, and
-    register it. Returns the root as a string."""
+    """Install Octopus AI with no pack into `root`, a folder in no project, and register it.
+    The Project view adds packs later. Returns the root as a string."""
     import admin
     print("%s holds no Octopus AI project: installing Octopus AI into it" % root)
-    admin.install(root, "none", register=True)
+    admin.install(root, [], register=True)
     return str(Path(root).resolve())
 
 

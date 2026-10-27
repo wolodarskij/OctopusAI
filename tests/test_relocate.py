@@ -63,7 +63,7 @@ class RelocateProject(support.FixtureCase):
 
     def setUp(self):
         super().setUp()
-        self.root = self.make("Alpha", "unreal")
+        self.root = self.make("Alpha", ["unreal", "blueprint"])
         self.away = self.tmp / "Moved" / "OctopusAI"
 
     def test_every_path_follows_and_the_record_stays_in_step(self):
@@ -110,7 +110,7 @@ class Relocate(support.FixtureCase):
         self.new = self.tmp.resolve() / "Tools" / "OctopusAI"
         (self.old / "TODO" / ".sessions").mkdir(parents=True)
         (self.old / "octopus.py").write_text("", encoding="utf-8")
-        self.root = self.make("Alpha", "none")
+        self.root = self.make("Alpha")
         admin.relocate_project(self.root, admin.OCTOPUS, self.old, out=quiet)
         rows = project.load_registry() + [{"name": "Checkout", "path": str(self.old)}]
         project.save_registry(rows)

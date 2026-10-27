@@ -126,7 +126,7 @@ class PosixProc(unittest.TestCase):
 class Launch(FixtureCase):
     def setUp(self):
         super().setUp()
-        self.root = self.make("Wait", "none")
+        self.root = self.make("Wait")
         self.tok = project.use(self.root)
 
     def tearDown(self):

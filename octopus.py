@@ -17,8 +17,11 @@
     python octopus.py status-hook codex           the Codex hook: the status reminder
                                                   once every 5 minutes (status_reminder.py),
                                                   and the README guard on PreToolUse
-    python octopus.py new <path> --name <name> --profile <profile> | --packs <pack,pack>
-    python octopus.py install <path> --profile <profile> | --packs <pack,pack>
+    python octopus.py new <path> --name <name> [--packs <pack,pack>]
+                                                  create the directory and install into it;
+                                                  every pack is optional, and `packs` adds
+                                                  or removes one later
+    python octopus.py install <path> [--packs <pack,pack>]
     python octopus.py update <path> | --all       write again every payload file a pack changed
     python octopus.py uninstall <path> [--pack <name>]
     python octopus.py status <path>               each installed file; each open ticket or file
@@ -43,8 +46,7 @@
                                                   skills from a git repository, a folder,
                                                   or the Claude or Codex skill library
     python octopus.py lanes <path> [list | add <dir> ... | rename <dir> ... | remove <dir>]
-    python octopus.py projects [list | add <path> [--profile <p>] | remove <path>]
-    python octopus.py profiles
+    python octopus.py projects [list | add <path> [--packs <pack,pack>] | remove <path>]
     python octopus.py providers [list | show <id> | add <id> ... | edit <id> ... | remove <id>
                                 | check <id>]     the AI providers a launch can start: Claude
                                                   Code, Codex and custom CLIs.
@@ -215,26 +217,22 @@ def main(argv=None):
     try:
         if cmd in ("new", "install"):
             ap.add_argument("path")
-            ap.add_argument("--profile")
+            ap.add_argument("--profile", help=argparse.SUPPRESS)
             ap.add_argument("--name")
             ap.add_argument("--slug")
             ap.add_argument("--no-register", action="store_true")
             ap.add_argument("--no-manager", action="store_true",
                             help="file no manager ticket in the Octopus AI checkout's own project "
                                  "when it had no config")
-            ap.add_argument("--packs", help="the packs, comma-separated, in place of a profile; "
-                                            "`octopus pack-registry` lists them")
+            ap.add_argument("--packs", help="the optional packs, comma-separated; none when left "
+                                            "out. `octopus pack-registry` lists them")
             a = ap.parse_args(rest)
             path = Path(a.path)
-            packs = _pack_list(a.packs)
-            if a.profile and packs is not None:
-                ap.error("name a profile or packs, not both")
+            packs = _packs_arg(ap, a)
             if cmd == "new":
-                if not a.profile and packs is None:
-                    ap.error("--profile or --packs is required; `octopus profiles` lists them")
                 path.mkdir(parents=True, exist_ok=True)
-            _admin().install(path, a.profile, a.name, a.slug, register=not a.no_register,
-                             manager=not a.no_manager, packs=packs)
+            _admin().install(path, packs, a.name, a.slug, register=not a.no_register,
+                             manager=not a.no_manager)
             return 0
         if cmd == "update":
             ap.add_argument("path", nargs="?")
@@ -339,8 +337,9 @@ def main(argv=None):
         if cmd == "projects":
             ap.add_argument("action", nargs="?", default="list", choices=("list", "add", "remove"))
             ap.add_argument("path", nargs="?")
-            ap.add_argument("--profile", help="add: the profile of a directory with no config "
-                                              "(default none)")
+            ap.add_argument("--packs", help="add: the optional packs of a directory with no "
+                                            "config, comma-separated; none when left out")
+            ap.add_argument("--profile", help=argparse.SUPPRESS)
             ap.add_argument("--name", help="add: the project name")
             a = ap.parse_args(rest)
             if a.action == "list":
@@ -353,19 +352,12 @@ def main(argv=None):
                 root = Path(a.path).resolve()
                 if root.is_dir() and project.find_root(root) is None:
                     # A directory with no config gets everything a project needs first.
-                    _admin().install(root, a.profile or "none", a.name, register=False)
+                    _admin().install(root, _packs_arg(ap, a) or [], a.name, register=False)
                 row = project.register(project.resolve(str(root)), a.name)
                 print("registered %s  %s" % (row["name"], row["path"]))
             else:
                 n = project.unregister(Path(a.path))
                 print("%d project(s) removed from the registry" % n)
-            return 0
-        if cmd == "profiles":
-            import admin
-            d = json.loads(admin.PROFILES_FILE.read_text(encoding="utf-8"))["profiles"]
-            for name, v in d.items():
-                print("%-20s %s" % (name, ", ".join(v["rulesets"])))
-                print("%-20s %s" % ("", v.get("means", "")))
             return 0
     except ValueError as exc:
         print("error: %s" % exc, file=sys.stderr)
@@ -428,6 +420,16 @@ def _pack_list(text):
     if text is None:
         return None
     return [x.strip() for x in text.split(",") if x.strip()]
+
+
+def _packs_arg(ap, a):
+    """The packs `--packs` names, else the packs of an old `--profile`, else None."""
+    packs = _pack_list(a.packs)
+    if a.profile and packs is not None:
+        ap.error("name the packs only: --packs")
+    if a.profile:
+        return _admin().packs_of_profile(a.profile)
+    return packs
 
 
 def _print_check(r):

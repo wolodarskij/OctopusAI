@@ -12,7 +12,7 @@ import todo  # noqa: E402  (support puts core/engine on the path)
 class SessionTitle(FixtureCase):
     def setUp(self):
         super().setUp()
-        self.root = self.make("Alpha", "none")
+        self.root = self.make("Alpha")
 
     def title_of(self, ticket_title, mode="work"):
         tid = self.new_ticket(self.root, ticket_title)

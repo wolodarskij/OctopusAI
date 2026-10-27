@@ -1,14 +1,14 @@
 # Packs
 
 A pack is an optional part of Octopus AI. A project takes any number of packs at install time
-(`--packs a,b`), adds or removes one later (`octopus packs <project> add | remove <name>`), or sets
+(`--packs a,b`, or the checkboxes of the board's Add project window), or none, adds or removes one later (`octopus packs <project> add | remove <name>`), or sets
 them all at once (`octopus packs <project> set a,b`). The core runs with no pack.
 
 **A renamed pack keeps its old name as an alias.** `angelscript` is `ue-angelscript` and `browser` is
 `browser-game` (`PACK_ALIASES` in `core/engine/project.py`). The command line, a `project.json` and a
 `requires` may still say the old name. `octopus update` and the `SessionStart` hook move a project to the new
 name: its `rulesets`, its rules folder `.agents/rules/octopus/<name>/`, its install record and its settings
-file `.octopus/<name>.json`. The profile `browser` is `browser-game`.
+file `.octopus/<name>.json`.
 
 ## The layout of a pack
 
@@ -30,6 +30,7 @@ Every key is optional except `title`.
 | Key | Type | Meaning |
 |---|---|---|
 | `title` | string | one line: what the ruleset adds |
+| `detect` | list of path globs, relative to the project root | the board's Add project window ticks the pack, as a suggestion the owner can untick, when one glob matches a path in the chosen directory |
 | `requires` | list of pack names | install refuses the pack while one of these is absent, and uninstall of one of these removes this pack too |
 | `optionalRules` | map of a rule file stem to `{title, default}` | rules of the payload that a project switches on and off; `default` is `true` (on) or `false` (off) |
 | `hardRules` | list of strings | the rules a session obeys, listed in the brief |
@@ -138,8 +139,9 @@ The core supplies `vcs.work` and `vcs.verify`; the pack supplies `vcs.plan`, `vc
 
 ## Another engine
 
-A pack for another engine is a new directory under `packs/` with a `ruleset.json`. Add it to a
-profile in `profiles.json` when a new project should be able to choose it as a preset.
+A pack for another engine is a new directory under `packs/` with a `ruleset.json`. Give it
+`detect` globs, such as the engine's project file, so the Add project window suggests it for a
+directory of that engine.
 
 ## A pack added on this machine
 

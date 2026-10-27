@@ -22,7 +22,7 @@ def record(root):
 class Layout(support.FixtureCase):
 
     def test_install_keeps_one_copy_and_an_entry_for_each_provider(self):
-        root = self.make("Layout", "unreal")
+        root = self.make("Layout", ["unreal", "blueprint"])
         rules = agents.rule_files(root)
         self.assertIn(".agents/rules/octopus/core/todo-tracking.md", rules)
         self.assertIn(".agents/rules/octopus/unreal/unreal-engine.md", rules)
@@ -88,7 +88,7 @@ class Layout(support.FixtureCase):
         root = self.tmp / "Mine"
         (root / ".claude" / "skills" / "todo").mkdir(parents=True)
         (root / ".claude" / "skills" / "todo" / "SKILL.md").write_text("mine\n", encoding="utf-8")
-        admin.install(root, "none", "Mine", register=False, out=quiet, manager=False)
+        admin.install(root, [], "Mine", register=False, out=quiet, manager=False)
         self.assertEqual(read(root / ".claude" / "skills" / "todo" / "SKILL.md"), "mine\n")
         self.assertTrue((root / ".agents" / "skills" / "todo" / "SKILL.md").is_file())
 
@@ -96,7 +96,8 @@ class Layout(support.FixtureCase):
         root = self.tmp / "Back"
         root.mkdir()
         (root / "CLAUDE.md").write_text("Mine.\n", encoding="utf-8")
-        admin.install(root, "unreal", "Back", register=False, out=quiet, manager=False)
+        admin.install(root, ["unreal", "blueprint"], "Back", register=False, out=quiet,
+                      manager=False)
         admin.uninstall(root, out=quiet)
         self.assertEqual(read(root / "CLAUDE.md"), "Mine.\n")
         for rel in ("AGENTS.md", ".agents", ".claude", "TODO", ".octopus"):
@@ -110,7 +111,7 @@ class NoNarration(support.FixtureCase):
     RULE = ".agents/rules/octopus/core/reporting-to-the-owner.md"
 
     def test_every_entry_file_of_a_project_carries_the_rule(self):
-        root = self.make("Entries", "unreal")
+        root = self.make("Entries", ["unreal", "blueprint"])
         self.assertIn("@" + self.RULE, read(root / "CLAUDE.md").splitlines())
         self.assertIn(agents.NO_NARRATION, read(root / "AGENTS.md"))
         self.assertIn("I will use an edit tool to edit", agents.NO_NARRATION)
@@ -407,7 +408,7 @@ class Launch(support.FixtureCase):
         providers.save({"id": "local", "command": "local-cli", "dialect": "template",
                         "plan": ["--read-only"], "auto": ["--yes"],
                         "features": {"planMode": True}})
-        self.root = self.make("Launch", "unreal", config={
+        self.root = self.make("Launch", ["unreal", "blueprint"], config={
             "providers": {"codex": {"models": {"fast": "gpt-fast"}, "defaultEffort": "xhigh"}}})
         self.tid = self.new_ticket(self.root, "Bug: something")
 
@@ -488,7 +489,7 @@ class Initialization(support.FixtureCase):
 
     def test_new_files_no_manager_outside_the_checkout(self):
         root = self.tmp / "Managed"
-        rc, out, err = self.cli("new", root, "--name", "Managed", "--profile", "none")
+        rc, out, err = self.cli("new", root, "--name", "Managed")
         self.assertEqual(rc, 0, err)
         self.assertEqual(list((root / "TODO").rglob("T*.md")), [])
         admin.update(root, out=quiet)

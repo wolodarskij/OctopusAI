@@ -149,7 +149,7 @@ class Verdict(unittest.TestCase):
 class Recap(FixtureCase):
     def setUp(self):
         super().setUp()
-        self.root = self.make("Recap", "none")
+        self.root = self.make("Recap")
         self.tok = project.use(self.root)
 
     def tearDown(self):
@@ -174,7 +174,7 @@ class Recap(FixtureCase):
 class Question(FixtureCase):
     def setUp(self):
         super().setUp()
-        self.root = self.make("Question", "none")
+        self.root = self.make("Question")
         self.tok = project.use(self.root)
 
     def tearDown(self):
@@ -220,7 +220,7 @@ class WhichQuestion(FixtureCase):
 
     def setUp(self):
         super().setUp()
-        self.root = self.make("Which", "none")
+        self.root = self.make("Which")
         self.tok = project.use(self.root)
 
     def tearDown(self):
@@ -287,7 +287,7 @@ class Closes(FixtureCase):
 
     def setUp(self):
         super().setUp()
-        self.root = self.make("Closes", "none")
+        self.root = self.make("Closes")
         self.tid = self.new_ticket(self.root, "Fix the parser")
         self.mgr = self.new_ticket(self.root, "Manager", "--repeat", "manager",
                                    "--permits", "projects")
@@ -447,7 +447,7 @@ class Live(FixtureCase):
 
     def setUp(self):
         super().setUp()
-        self.root = self.make("Live", "none")
+        self.root = self.make("Live")
         self.tok = project.use(self.root)
         env = mock.patch.dict(os.environ)
         env.start()

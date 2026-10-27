@@ -16,7 +16,7 @@ import todo_server  # noqa: E402
 class Manifest(FixtureCase):
     def setUp(self):
         super().setUp()
-        self.root = self.make("Arts", "none")
+        self.root = self.make("Arts")
         (self.root / "Docs" / "Game").mkdir(parents=True)
         (self.root / "Docs" / "Game" / "page.html").write_text(
             "<html><head><title>The Page</title></head><body>x</body></html>", encoding="utf-8")
@@ -79,7 +79,7 @@ class Manifest(FixtureCase):
 class ViewRoute(FixtureCase):
     def setUp(self):
         super().setUp()
-        self.root = self.make("View Me", "none")
+        self.root = self.make("View Me")
         (self.root / "Docs").mkdir()
         (self.root / "Docs" / "page.html").write_text("<title>P</title>", encoding="utf-8")
         (self.root / "Docs" / "index.md").write_text("# Home\n", encoding="utf-8")

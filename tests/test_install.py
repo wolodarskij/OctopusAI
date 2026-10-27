@@ -1,15 +1,16 @@
-"""Install, uninstall, packs and profiles.   python -m unittest discover tests"""
+"""Install, uninstall and packs.   python -m unittest discover tests"""
 
 import json
 import unittest
 
 from support import FixtureCase, admin, project, quiet, tree_hash
 
-PROFILES = {
-    "none": ["core", "windows"],
-    "unreal": ["core", "windows", "unreal", "blueprint"],
-    "unreal-angelscript": ["core", "windows", "unreal", "blueprint", "ue-angelscript"],
-    "browser-game": ["core", "windows", "browser-game"],
+# The `--packs` of a new project -> the rulesets it gets.
+CHOICES = {
+    "": ["core", "windows"],
+    "git": ["core", "windows", "git"],
+    "blueprint": ["core", "windows", "unreal", "blueprint"],
+    "ue-angelscript,browser-game": ["core", "windows", "browser-game", "unreal", "ue-angelscript"],
 }
 
 
@@ -19,15 +20,15 @@ def owners(root):
 
 
 class Install(FixtureCase):
-    def test_new_with_each_profile_takes_exactly_its_packs(self):
-        self.assertEqual(admin.profiles(), PROFILES)
-        for name, rulesets in PROFILES.items():
-            root = self.tmp / ("p-" + name)
-            rc, _out, err = self.cli("new", root, "--name", "P " + name, "--profile", name)
+    def test_new_takes_exactly_the_packs_it_names(self):
+        for i, (packs, rulesets) in enumerate(CHOICES.items()):
+            root = self.tmp / ("p-%d" % i)
+            args = ["--packs", packs] if packs else []
+            rc, _out, err = self.cli("new", root, "--name", "P %d" % i, *args)
             self.assertEqual(rc, 0, err)
             pj = json.loads((root / ".octopus" / "project.json").read_text(encoding="utf-8"))
             self.assertEqual(pj["rulesets"], rulesets)
-            self.assertEqual(pj["profile"], name)
+            self.assertNotIn("profile", pj)
             p = project.load(root)
             self.assertEqual(p.problems, [])
             self.assertEqual(p.RULES["rulesets"], rulesets)
@@ -37,7 +38,7 @@ class Install(FixtureCase):
             has_editor = "editor" in p.PERMITS
             self.assertEqual(has_editor, "unreal" in rulesets)
         names = [r["name"] for r in project.load_registry()]
-        self.assertEqual(names, ["P " + n for n in PROFILES])
+        self.assertEqual(names, ["P %d" % i for i in range(len(CHOICES))])
 
     def test_install_then_uninstall_leaves_the_tree_as_it_was(self):
         root = self.tmp / "keep"
@@ -65,7 +66,7 @@ class Install(FixtureCase):
         self.assertEqual(project.load_registry(), [])
 
     def test_uninstall_of_one_pack_keeps_the_pack_below_it(self):
-        root = self.make("Layers", "unreal-angelscript")
+        root = self.make("Layers", ["unreal", "blueprint", "ue-angelscript"])
         rec = json.loads((root / ".octopus" / "installed.json").read_text(encoding="utf-8"))
         unreal_files = [k for k, v in rec["files"].items() if v["by"] == "unreal"]
         as_files = [k for k, v in rec["files"].items() if v["by"] == "ue-angelscript"]
@@ -79,7 +80,7 @@ class Install(FixtureCase):
                          ["core", "windows", "unreal", "blueprint"])
 
     def test_uninstall_of_a_required_pack_removes_its_dependents_and_says_so(self):
-        root = self.make("Chain", "unreal-angelscript")
+        root = self.make("Chain", ["unreal", "blueprint", "ue-angelscript"])
         said = []
         gone = admin.uninstall(root, "unreal", out=said.append)
         self.assertEqual(sorted(gone), ["blueprint", "ue-angelscript", "unreal"])
@@ -87,7 +88,7 @@ class Install(FixtureCase):
         self.assertEqual(project.load(root).RULES["rulesets"], ["core", "windows"])
 
     def test_uninstall_refuses_an_edited_file(self):
-        root = self.make("Edited", "unreal")
+        root = self.make("Edited", ["unreal", "blueprint"])
         rec = json.loads((root / ".octopus" / "installed.json").read_text(encoding="utf-8"))
         one = next(k for k, v in rec["files"].items() if v["by"] == "unreal")
         (root / one).write_text("changed by hand\n", encoding="utf-8")
@@ -98,7 +99,7 @@ class Install(FixtureCase):
         self.assertEqual(counts["edited"], 1)
 
     def test_packs_add_puts_a_pack_in_and_checks_requires(self):
-        root = self.make("Grow", "none")
+        root = self.make("Grow")
         with self.assertRaises(ValueError):
             admin.pack_add(root, "ue-angelscript", out=quiet)
         admin.pack_add(root, "unreal", out=quiet)
@@ -111,7 +112,7 @@ class Install(FixtureCase):
     def test_the_shim_runs_the_engine_for_its_own_project(self):
         import subprocess
         import sys
-        root = self.make("Shim", "none")
+        root = self.make("Shim")
         self.new_ticket(root, "shim ticket")
         r = subprocess.run([sys.executable, str(root / ".octopus" / "todo.py"), "query", "--ids"],
                            capture_output=True, text=True, cwd=str(self.tmp))
@@ -125,7 +126,7 @@ class PluginPayload(FixtureCase):
     """The blueprint pack owns the project's copy of the AssetTextExport plugin."""
 
     def test_install_puts_the_plugin_in_plugins_tools_and_asks_for_a_build(self):
-        root = self.make("Fresh", "unreal")
+        root = self.make("Fresh", ["unreal", "blueprint"])
         copy = root / "Plugins" / "Tools" / "AssetTextExport"
         for src in PLUGIN.rglob("*"):
             if src.is_file() and "__pycache__" not in src.parts:
@@ -152,7 +153,7 @@ class PluginPayload(FixtureCase):
         self.assertEqual(admin.status(root, out=quiet)["edited"], 0)
 
     def test_the_session_start_hook_restores_the_copy_to_the_pack(self):
-        root = self.make("Hooked", "unreal")
+        root = self.make("Hooked", ["unreal", "blueprint"])
         (root / ".octopus" / "build-pending").unlink()
         readme = root / "Plugins" / "Tools" / "AssetTextExport" / "README.md"
         readme.write_text("an old copy\n", encoding="utf-8")
@@ -166,7 +167,7 @@ class PluginPayload(FixtureCase):
         self.assertFalse((root / ".octopus" / admin.REFRESH_LOCK).exists())
 
     def test_uninstall_of_the_pack_takes_the_plugin_and_the_marker_out(self):
-        root = self.make("Out", "unreal")
+        root = self.make("Out", ["unreal", "blueprint"])
         admin.uninstall(root, "blueprint", out=quiet)
         copy = root / "Plugins" / "Tools" / "AssetTextExport"
         self.assertFalse((copy / "AssetTextExport.uplugin").exists())
@@ -193,7 +194,7 @@ class PackChange(FixtureCase):
         self._real = real
         admin._ruleset_file = lambda n: ((self.pack / "ruleset.json", self.pack) if n == "fake"
                                          else real(n))
-        self.root = self.make("Changed", "none", register=False)
+        self.root = self.make("Changed", register=False)
         admin.pack_add(self.root, "fake", out=quiet)
         (self.root / ".octopus" / "build-pending").unlink()
 
@@ -238,6 +239,7 @@ class PackRename(FixtureCase):
     project that still lists it to the new name."""
 
     def regress(self, root, old, new, profile=None):
+        """`profile` puts back the key an older install wrote."""
         """Put the project back as an install under the old pack name left it."""
         cd = root / ".octopus"
         pj = json.loads((cd / "project.json").read_text(encoding="utf-8"))
@@ -279,14 +281,14 @@ class PackRename(FixtureCase):
                       (root / "CLAUDE.md").read_text(encoding="utf-8"))
 
     def test_an_old_name_still_loads_as_the_new_pack(self):
-        root = self.make("Old", "unreal-angelscript")
+        root = self.make("Old", ["unreal", "blueprint", "ue-angelscript"])
         self.regress(root, "angelscript", "ue-angelscript")
         p = project.load(root)
         self.assertEqual(p.problems, [])
         self.assertEqual(p.RULES["rulesets"][-1], "ue-angelscript")
 
     def test_update_moves_a_project_to_the_new_name_and_its_settings_file(self):
-        root = self.make("Moved", "unreal-angelscript")
+        root = self.make("Moved", ["unreal", "blueprint", "ue-angelscript"])
         self.regress(root, "angelscript", "ue-angelscript")
         (root / ".octopus" / "angelscript.json").write_text('{"a": 1}', encoding="utf-8")
         admin.update(root, out=quiet)
@@ -298,13 +300,15 @@ class PackRename(FixtureCase):
             encoding="utf-8")
         self.assertNotIn("packs/angelscript/", rule)
 
-    def test_the_session_start_refresh_moves_the_browser_pack_and_profile(self):
-        root = self.make("Game", "browser-game")
+    def test_the_session_start_refresh_moves_the_browser_pack_and_drops_the_profile(self):
+        root = self.make("Game", ["browser-game"])
         self.regress(root, "browser", "browser-game", profile="browser")
         self.assertGreater(admin.refresh(root, out=quiet), 0)
         self.assert_moved(root, "browser", "browser-game")
         pj = json.loads((root / ".octopus" / "project.json").read_text(encoding="utf-8"))
-        self.assertEqual(pj["profile"], "browser-game")
+        self.assertNotIn("profile", pj)
+        rec = json.loads((root / ".octopus" / "installed.json").read_text(encoding="utf-8"))
+        self.assertNotIn("profile", rec)
         self.assertEqual(admin.refresh(root, out=quiet), 0)
 
     def test_the_command_line_takes_the_old_names(self):
@@ -312,8 +316,8 @@ class PackRename(FixtureCase):
         rc, _out, err = self.cli("new", root, "--name", "P old", "--profile", "browser")
         self.assertEqual(rc, 0, err)
         pj = json.loads((root / ".octopus" / "project.json").read_text(encoding="utf-8"))
-        self.assertEqual((pj["profile"], pj["rulesets"]),
-                         ("browser-game", ["core", "windows", "browser-game"]))
+        self.assertEqual(pj["rulesets"], ["core", "windows", "browser-game"])
+        self.assertNotIn("profile", pj)
         admin.uninstall(root, "browser", out=quiet)
         admin.pack_add(root, "unreal", out=quiet)
         admin.pack_add(root, "angelscript", out=quiet)

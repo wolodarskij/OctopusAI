@@ -1,5 +1,6 @@
 {
   "title": "Blueprint: offline .uasset and T3D readers, the Blueprint export for the language packs, Blueprint rules and skills, and the AssetTextExport plugin",
+  "detect": ["Content/**/*.uasset"],
   "requires": ["unreal"],
   "payload": [
     {"from": "rules/", "to": ".agents/rules/octopus/blueprint/"},

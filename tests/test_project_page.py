@@ -18,7 +18,7 @@ class ProjectPage(FixtureCase):
 
     def setUp(self):
         super().setUp()
-        self.root = self.make("Api", "none")
+        self.root = self.make("Api")
         self.tid = self.new_ticket(self.root, "first one", "--permits", "outside")
         self.httpd = todo_server.make_server(0)
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
@@ -50,11 +50,12 @@ class ProjectPage(FixtureCase):
     def test_the_view_carries_every_section(self):
         st, v = self.view()
         self.assertEqual(st, 200, v)
-        for key in ("name", "slug", "description", "profile", "rulesets", "packs", "lanes",
+        for key in ("name", "slug", "description", "rulesets", "packs", "lanes",
                     "models", "efforts", "defaultModel", "defaultEffort", "terminal",
                     "permits", "groups", "categories", "problems", "installed"):
             self.assertIn(key, v)
-        self.assertEqual((v["name"], v["slug"], v["profile"]), ("Api", "api", "none"))
+        self.assertEqual((v["name"], v["slug"]), ("Api", "api"))
+        self.assertNotIn("profile", v)
         self.assertEqual([r["name"] for r in v["rulesets"]], ["core", "windows"])
         browser = next(p for p in v["packs"] if p["name"] == "browser-game")
         self.assertFalse(browser["installed"])
@@ -125,7 +126,7 @@ class ProjectPage(FixtureCase):
         self.assertEqual(st, 200, r)
         self.assertEqual(self.config()["rulesets"],
                          ["core", "windows", "unreal", "blueprint", "browser-game"])
-        self.assertEqual(self.config()["profile"], "custom")
+        self.assertNotIn("profile", self.config())
         st, v = self.view()
         on = {p["name"] for p in v["packs"] if p["installed"]}
         self.assertEqual(on, {"unreal", "blueprint", "browser-game"})

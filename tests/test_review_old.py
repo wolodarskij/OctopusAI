@@ -16,7 +16,7 @@ def _ago(days):
 class ReviewOld(FixtureCase):
     def setUp(self):
         super().setUp()
-        self.root = self.make("Sweep", "none")
+        self.root = self.make("Sweep")
         self.ids = {}
         for name in ("old", "young", "blocked", "repeat", "reviewed", "active"):
             self.ids[name] = self.new_ticket(self.root, "%s ticket" % name)

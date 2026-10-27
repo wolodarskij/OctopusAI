@@ -9,8 +9,8 @@ from support import FixtureCase
 class NewLaunch(FixtureCase):
     def setUp(self):
         super().setUp()
-        self.a = self.make("Alpha", "none")
-        self.b = self.make("Beta", "none")
+        self.a = self.make("Alpha")
+        self.b = self.make("Beta")
 
     def launch(self, root, *extra):
         rc, out, err = self.todo(root, "new", "--title", "Feature: a follow-up",
@@ -56,8 +56,8 @@ class NewLaunch(FixtureCase):
 class ProjectsBrief(FixtureCase):
     def setUp(self):
         super().setUp()
-        self.a = self.make("Alpha", "none")
-        self.make("Beta", "none")
+        self.a = self.make("Alpha")
+        self.make("Beta")
 
     def brief(self, *extra):
         tid = self.new_ticket(self.a, "Feature: change every project", *extra)

@@ -1,5 +1,6 @@
 {
   "title": "Git: the git-commit, git-sync and git-branch permits, the git commands no session runs, and the commit policy of each launch mode",
+  "detect": [".git"],
   "modePermits": {
     "work": ["git-commit"],
     "verify": ["git-commit", "git-sync"]

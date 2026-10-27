@@ -71,7 +71,7 @@ class CliFlag(support.FixtureCase):
     def test_cli_accepts_flag(self):
         # A project of its own: the checkout is a project only where Octopus AI was
         # installed into it.
-        root = self.make("Alpha", "none")
+        root = self.make("Alpha")
         out = io.StringIO()
         with mock.patch.object(todo, "live_sessions", lambda recheck=False: list(LIVE)), \
                 contextlib.redirect_stdout(out):

@@ -58,7 +58,7 @@ PROJECT_FILE = "project.json"
 VERIFY_ENV = "OCTOPUS_VERIFY"
 
 RULESET_LISTS = ("hardRules", "checks", "toolingPaths", "writePaths", "readOnly", "granted",
-                 "gitignore", "oldNameAllowed", "oldNameAliases")
+                 "gitignore", "oldNameAllowed", "oldNameAliases", "detect")
 RULESET_KEYS = RULESET_LISTS + ("title", "lookOnScreen", "permits", "terminal", "sessions",
                                 "permitOverrides", "deny", "testerPermits", "modePermits", "brief",
                                 "payload", "requires", "optionalRules")

@@ -129,17 +129,17 @@ class Providers(FixtureCase):
 
     def test_a_project_picks_an_own_provider_as_its_default(self):
         providers.save(self.local())
-        root = self.make("Sample Game", "none", config={"provider": "local"})
+        root = self.make("Sample Game", config={"provider": "local"})
         p = project.load(root)
         self.assertEqual(p.problems, [])
         self.assertEqual(p.provider, "local")
         self.assertEqual(p.providers["local"]["defaultModel"], "small")
-        other = self.make("Other", "none", config={"provider": "nobody"})
+        other = self.make("Other", config={"provider": "nobody"})
         self.assertTrue(any("`provider`" in x for x in project.load(other).problems))
 
     def test_a_launch_on_an_own_provider_builds_its_command_and_sets_its_env(self):
         providers.save(self.local())
-        root = self.make("Sample Game", "none")
+        root = self.make("Sample Game")
         tid = self.new_ticket(root, "Feature: something")
         rc, out, err = self.todo(root, "work", tid, "--provider", "local", "--dry-run")
         self.assertEqual(rc, 0, err)
@@ -170,7 +170,7 @@ class Providers(FixtureCase):
 
     def test_the_old_project_keys_are_read_and_update_rewrites_them(self):
         providers.save(self.local())
-        root = self.make("Sample Game", "none",
+        root = self.make("Sample Game",
                          config={"agent": "local", "agents": {"codex": {"defaultEffort": "low"}}})
         p = project.load(root)
         self.assertEqual(p.problems, [])
@@ -186,7 +186,7 @@ class Providers(FixtureCase):
 
     def test_a_ticket_launched_under_the_old_line_keeps_its_provider(self):
         providers.save(self.local())
-        root = self.make("Sample Game", "none")
+        root = self.make("Sample Game")
         tid = self.new_ticket(root, "Feature: something")
         path = next((root / "TODO").rglob("%s-*.md" % tid))
         path.write_text(path.read_text(encoding="utf-8").replace(
@@ -199,7 +199,7 @@ class Providers(FixtureCase):
 
     def test_provider_names_the_ai_provider_and_agent_stays_its_alias(self):
         providers.save(self.local())
-        root = self.make("Sample Game", "none")
+        root = self.make("Sample Game")
         tid = self.new_ticket(root, "Feature: something")
         lines = []
         for flag in ("--provider", "--agent"):
@@ -231,7 +231,7 @@ class Providers(FixtureCase):
 class ProvidersApi(FixtureCase):
     def setUp(self):
         super().setUp()
-        self.root = self.make("Api", "none")
+        self.root = self.make("Api")
         self.httpd = todo_server.make_server(0)
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
 
@@ -306,7 +306,7 @@ class Migration(FixtureCase):
         self.assertEqual(data["checks"], {"local": {"ok": True}})
 
     def test_an_older_project_json_is_read_and_update_renames_its_keys(self):
-        root = self.make("Old", "none", config={
+        root = self.make("Old", config={
             "agent": "codex", "agents": {"codex": {"defaultEffort": "low"}}})
         p = project.load(root)
         self.assertEqual(p.problems, [])
@@ -321,14 +321,14 @@ class Migration(FixtureCase):
         self.assertEqual(admin.status(root, out=quiet)["edited"], 0)
 
     def test_a_settings_change_renames_the_old_keys_too(self):
-        root = self.make("Old", "none", config={"agent": "codex"})
+        root = self.make("Old", config={"agent": "codex"})
         admin.set_settings(root, title="Old Game")
         pj = admin.settings(root)
         self.assertEqual(pj.get("provider"), "codex")
         self.assertNotIn("agent", pj)
 
     def test_a_tickets_agent_field_is_read_and_rewritten_as_provider(self):
-        root = self.make("Old", "none")
+        root = self.make("Old")
         tid = self.new_ticket(root, "Feature: something")
         tok = project.use(root)
         try:
@@ -343,7 +343,7 @@ class Migration(FixtureCase):
             project.reset(tok)
 
     def test_a_projects_own_agent_section_still_replaces_the_provider_section(self):
-        root = self.make("Old", "none")
+        root = self.make("Old")
         own = root / ".octopus" / "brief"
         own.mkdir(parents=True, exist_ok=True)
         (own / "agent.md").write_text("## Our own words for {agent_label}\n", encoding="utf-8")
@@ -357,7 +357,7 @@ class Migration(FixtureCase):
     def test_a_shell_started_before_the_rename_is_still_found(self):
         import session_state
         import winproc
-        root = self.make("Old", "none")
+        root = self.make("Old")
         tid = self.new_ticket(root, "Feature: something")
         tok = project.use(root)
         try:

@@ -86,7 +86,7 @@ class Reference(FixtureCase):
         self.assertTrue(seen)
         # A project of its own for the ticket commands: the checkout is a project only where
         # Octopus AI was installed into it.
-        root = self.make("MyGame", "none")
+        root = self.make("MyGame")
         for script, cmd in sorted(seen):
             path = OCTOPUS / "octopus.py"
             pre = [] if script == "octopus.py" else ["todo", "--project", str(root)]
