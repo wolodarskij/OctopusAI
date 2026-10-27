@@ -3870,8 +3870,7 @@ def plan_open(t):
     """What the ticket's plan leaves open, so that a worker cannot carry out every step
     without asking: no `## Plan`, a difficulty still `unknown`, a line of the plan that asks
     (`?`) or names an open decision (`TBD`, `open question`, `the owner must decide`). ""
-    when nothing is open. The owner's order (2026-10-20): a plan that a worker cannot carry
-    out is not finished."""
+    when nothing is open. A plan that a worker cannot carry out is not finished."""
     m = re.search(r"^##\s+Plan\s*$", t.body, re.M)
     if not m:
         return "the ticket has no ## Plan"
@@ -3978,8 +3977,8 @@ def wait_state(s, t, now=None):
     answer, `event` when it waits for something outside the project to happen, such as an
     editor restart, `subagent` when it still does work that is not the owner's (the board
     says `working`), `blocker` when it waits for other tickets, `idle` when nothing says yet
-    what it waits for, and `finished` when it waits for nothing. The owner's order
-    (2026-10-18); the first row that matches decides:
+    what it waits for, and `finished` when it waits for nothing. The first row that matches
+    decides:
 
         0  Claude has exited                               finished
            no hook has run under this Claude and it has no

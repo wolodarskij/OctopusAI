@@ -1,6 +1,6 @@
 # Reporting to the owner
 
-*Always applies, in every project, to every chat message to the owner. Set by the owner. A project's own
+*Always applies, in every project, to every chat message to the owner. A project's own
 `.agents/rules/reporting-to-the-owner.md` adds to this rule and wins where the two differ.*
 
 **No unasked prose.** This rule is broken more often than any other, and each break costs the owner a
@@ -25,7 +25,7 @@ background task's progress the owner did not ask about · a defect this task was
 **Never narrate your own work, mid-task or at the end:** no plan or next step ("now I will…", "checking…"), no
 reasoning, no decision and why you took it, no assumption you dropped, no approach you discarded, no correction of
 yourself ("actually…", "on second look…"), no summary of steps. The line "I will use an edit tool to edit ..."
-never appears. The owner set this on 2026-10-08 and on 2026-10-26.
+never appears.
 
 **One status line is allowed: at the start of your run, and about once every 5 minutes.** It is one short
 sentence: what you work on now. Never write it at every step, and never more than that sentence. Claude Code
@@ -33,12 +33,10 @@ reminds you when about 5 minutes passed since your last message: answer the remi
 continue. Octopus AI sets the reminder in every project and every launch (`CLAUDE_CODE_SILENT_TURN_REMINDER_SECONDS=300`
 in `.claude/settings.json`). Codex gets the same reminder from a hook after a tool call
 (`.codex/hooks.json`). When no reminder comes, write the line when you see that about 5
-minutes passed. The owner set this on 2026-10-27: a short status line once in several minutes helps the owner, and
-a line at every step does not.
+minutes passed. A short status line once in several minutes helps the owner, and a line at every step does not.
 
-The owner set these orders too: a report holds nothing that is not related to the request, and it does not describe
-internal processes. No report comes unasked, because a report out of context misleads. An answer holds no unasked
-prose.
+A report holds nothing that is not related to the request, and it does not describe internal processes. No report
+comes unasked, because a report out of context misleads. An answer holds no unasked prose.
 
 ## The engine checks it
 

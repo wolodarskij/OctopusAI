@@ -25,7 +25,7 @@ board starts no second manager.
 | 2, "no registered project is the Octopus AI project" | the Octopus AI checkout is not registered | run the `projects add` command it printed, then step 1 again |
 
 **2. Read the brief it printed** (`instructions: <Octopus AI project>/TODO/.briefs/<id>.md`), in full. Its manager
-sections are the owner's standing orders to every manager. They outrank this skill, and they
+sections are the standing orders to every manager. They outrank this skill, and they
 hold for the rest of this session.
 
 **3. Start the 10-minute check,** as the brief says: when `CronList` shows no job that runs

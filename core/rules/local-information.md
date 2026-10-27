@@ -1,6 +1,6 @@
 # What enters the Octopus AI repository
 
-*An optional rule, on by default in every project (Optional rules, in Global settings and in Project Settings). Set by the owner, 2026-10-22. Governs every file tracked in the
+*An optional rule, on by default in every project (Optional rules, in Global settings and in Project Settings). Governs every file tracked in the
 Octopus AI repository, and every memory file of a session.*
 
 **The Octopus AI repository holds general tooling only:** the engine, the rules, the packs, the

@@ -1,11 +1,11 @@
 # The owner's orders, in neutral words
 
-*An optional rule, on by default in every project (Optional rules, in Global settings and in Project Settings). Set by the owner, 2026-10-27. Governs every file: rules, skills, docs, tickets,
+*An optional rule, on by default in every project (Optional rules, in Global settings and in Project Settings). Governs every file: rules, skills, docs, tickets,
 briefs, commit messages, comments and memory files.*
 
 **No file holds a word-for-word quote of the owner, and no file holds the owner's swearing.** A file that records an
-order of the owner states what the order requires, in neutral technical words. It can name the date and that the
-owner set it.
+order of the owner states what the order requires, in neutral technical words. A rule, a skill, a brief, a
+template and any other instruction or config file state only the rule: they never name who set the rule, or when.
 
 - Write the order as a rule or a statement: "Change a README file only after the owner approved its exact new
   text." Do not copy the sentence that the owner wrote in chat.

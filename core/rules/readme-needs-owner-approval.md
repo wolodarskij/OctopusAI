@@ -1,7 +1,6 @@
 # A README change needs the owner's approval
 
-*An optional rule, on by default in every project (Optional rules, in Global settings and in Project Settings). Set by the owner, 2026-10-27: every README change goes through the owner, and
-no agent makes one without the owner's approval.*
+*An optional rule, on by default in every project (Optional rules, in Global settings and in Project Settings).*
 
 **Change a README file only after the owner approved its exact new text.** A README file is a file named `README` or
 `README.<ext>` in any case, or a file whose name starts with `README` in capitals (`README_ru.md`), in any folder.
@@ -24,8 +23,6 @@ for this session: an `Edit`, a `Write`, a Codex patch, or a shell command that w
 the session and the command that records the approval. Never work around the refusal: ask the owner.
 
 ## Name the file and say to run it
-
-*Set by the owner, 2026-10-27: a text never asks the user to double-click a file; it says to run the file.*
 
 **No text tells the user to double-click.** Name the file, and say to run it: "Run `AgentBoard.bat`". This applies
 to docs, comments, messages, scripts and user interface text.

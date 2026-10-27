@@ -379,7 +379,7 @@ def _approve_command(root, session, path):
 
 def reason(paths, session, root=None):
     """The refusal the agent reads."""
-    lines = ["Refused: %s is a README file. The owner's order, 2026-10-27: every README change "
+    lines = ["Refused: %s is a README file. Every README change "
              "goes through the owner, and no agent makes one without the owner's approval."
              % ", ".join(paths),
              "Show the owner the exact new text of the change, ask, and wait for the answer. "

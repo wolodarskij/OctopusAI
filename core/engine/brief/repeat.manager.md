@@ -59,7 +59,7 @@ while any agent finished, waits or works. **It runs in every manager session:**
 
 ## How the manager works
 
-These are the owner's standing orders to every manager, in every project.
+These are the standing orders to every manager, in every project.
 
 - **A task is a ticket, never work in this window.** "Run a task", "do X" and
   "run X" mean: file a ticket and launch its session, or send the order to the

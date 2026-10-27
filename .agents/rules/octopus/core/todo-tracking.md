@@ -155,8 +155,7 @@ that work completes. `blocker`: the same, while its ticket waits for other ticke
 other task`, a ticket in its `blocked-by:`, an open child). `idle`: nothing says yet what it
 waits for. `finished`: it waits for nothing.
 
-**The engine decides the state in this order, and the first step that matches wins** (the
-owner's order, 2026-10-18):
+**The engine decides the state in this order, and the first step that matches wins:**
 
 | Step | The session | State |
 |---|---|---|
@@ -165,7 +164,7 @@ owner's order, 2026-10-18):
 | 0 | a dialog waits (a permission, a question, a plan to approve), or its turn ended in an API error (a rate limit, an overload, a network fault) | `input` |
 | 0 | it reported `event`, and did not end with `WORK IS FINISHED` | `event` |
 | 0 | it reported `report <id> input --why "<the question>" --mode <mode>` in this turn. A `WORK IS FINISHED` after it does not take the question back: work is never finished while a question is open | `input` |
-| 0 | a `plan` session's turn ended, its ticket is `ready to implement`, and the plan leaves a decision, a name or a value open: no `## Plan`, difficulty still `unknown`, a line of the plan that asks or names an open decision (the owner's order, 2026-10-20: a plan that a worker cannot carry out is not finished) | `input` |
+| 0 | a `plan` session's turn ended, its ticket is `ready to implement`, and the plan leaves a decision, a name or a value open: no `## Plan`, difficulty still `unknown`, a line of the plan that asks or names an open decision (a plan that a worker cannot carry out is not finished) | `input` |
 | 1 | its turn ended, and the last line of its last message is `WORK IS FINISHED` (every brief asks for it when the session has no question), or its last lines say its ticket is in Verification or Done, or it reported `finished` | `finished`; a manager `idle` |
 | 1 | the same, while its ticket says the work is undone: a `work` ticket not in Verification, Done or Blocked `blocked by other task`; a `plan` ticket not `ready to implement`; a `review` or `verify` ticket still `investigating` / `testing` | `input`, "said WORK IS FINISHED with the work undone" |
 | 2 | its turn ended, and the last line of its last message is a question | `input` |
@@ -365,7 +364,7 @@ the owner. It grants `projects`, so the session reaches every registered project
   is `cancelled` or `closed by other task`. `check` fails it in any of those.
 - **It runs only as `work`.** `plan`, `review` and `verify` refuse it.
 - **It ships with Octopus AI.** The ticket is `core/templates/manager.md`; its instructions,
-  the owner's standing orders for every manager, are the brief section `repeat.manager`.
+  the standing orders for every manager, are the brief section `repeat.manager`.
 - **It belongs to the Octopus AI project:** the registered project whose root is the Octopus
   AI checkout, which the first run registers. `manager`, `manager --start`, `manager --claim`
   and `watchdog` act on the manager of that project, from any project. `manager` files the

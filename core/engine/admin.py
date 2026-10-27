@@ -850,8 +850,7 @@ def _install_settings(root, rec):
     env_added = any(k not in env for k in SESSION_ENV)
     for k, v in SESSION_ENV.items():
         env.setdefault(k, v)
-    # The status reminder follows the owner's order in every project, whatever value an older
-    # install wrote.
+    # Every project gets the status reminder, whatever value an older install wrote.
     env.update(_agents.STATUS_ENV)
     allow = d.setdefault("permissions", {}).setdefault("allow", [])
     allow_added = [r for r in SESSION_ALLOW if r not in allow]
