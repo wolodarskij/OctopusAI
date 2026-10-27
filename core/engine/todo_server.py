@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import difflib
 import json
 import mimetypes
 import os
@@ -1026,6 +1027,39 @@ tags: %s
 %s
 """
 
+# What an editing session is asked for when the owner gives an instruction: it changes the
+# existing ticket only where the instruction says, and names only what it changes.
+INSTRUCT_PROMPT = """You change one existing ticket of the %s TODO tree. Do exactly what the
+owner's instruction says, and change nothing that the instruction does not name.
+
+Answer with ONE JSON object and no other text. Give only the keys that you change:
+  title        one line, no ticket id, at most 90 characters. A bug starts with "Bug: "
+               and a feature starts with "Feature: "
+  severity     %s
+  difficulty   %s
+  category     %s
+  source       a file and line
+  tags         a short space-separated list
+  sections     an object: the heading of each body section that you change (without "## ")
+               and its whole new text. A heading that the ticket does not have adds a new
+               section at the end of the body
+Write every new word in Simplified Technical English: short sentences, active voice, one
+meaning per word. Keep every other word of a section that you change.
+
+THE OWNER'S INSTRUCTION:
+%s
+
+THE TICKET:
+title: %s
+severity: %s
+difficulty: %s
+category: %s
+source: %s
+tags: %s
+
+%s
+"""
+
 _SECTION = re.compile(r"^##[ \t]+(.+?)[ \t]*$", re.M)
 
 
@@ -1062,6 +1096,80 @@ def splice_sections(body, description, evidence, title=""):
     for a, b, text in sorted(parts, reverse=True):
         body = body[:a] + text + body[b:]
     return body
+
+
+def drop_added_ends(text, prior):
+    """`text` (str) without the lines that it adds before the first line or after the last
+    line of `prior` (str), the body the text box held before the owner's latest change. Such
+    lines are the owner's note: the AI reads it and folds it into the fields and the
+    sections, so it must not also stay in the body as loose text. A line the owner changed
+    or added inside the body stays. An empty `prior` returns `text` unchanged."""
+    if not (prior or "").strip():
+        return text
+    a, b = prior.strip("\n").split("\n"), (text or "").strip("\n").split("\n")
+    drop = set()
+    for tag, i1, _i2, j1, j2 in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
+        if tag == "insert" and i1 in (0, len(a)):
+            drop.update(range(j1, j2))
+    return "\n".join(line for j, line in enumerate(b) if j not in drop)
+
+
+def replace_sections(body, sections):
+    """`body` (str) with the text of each section that `sections` ({heading: text}) names
+    replaced. A heading matches without regard to case. A heading the body does not have
+    becomes a new section at the end. Every other section keeps its text byte for byte.
+    Returns the new body."""
+    body = (body or "").strip("\n")
+    for head, text in sections.items():
+        head, text = str(head).strip().lstrip("#").strip(), str(text or "").strip()
+        if not head:
+            continue
+        heads = list(_SECTION.finditer(body))
+        ends = [m.start() for m in heads[1:]] + [len(body)]
+        span = next(((m.end(), e) for m, e in zip(heads, ends)
+                     if m.group(1).strip().lower() == head.lower()), None)
+        if span is None:
+            body += "%s## %s\n\n%s" % ("\n\n" if body else "", head, text)
+        else:
+            a, b = span
+            body = body[:a] + "\n\n" + text + ("\n\n" if b < len(body) else "") + body[b:]
+    return body
+
+
+def instructed_draft(answer, ticket, text):
+    """The edited ticket after an instruction: the form's `ticket` fields (dict) and body
+    `text` (str), with only the keys that `answer` (the session's JSON object) changes.
+    Returns a draft with every key, `body`, and `changed` (the names of the keys and the
+    sections that changed). Raises ValueError for a value the project does not allow."""
+    if not isinstance(answer, dict):
+        raise ValueError("the AI answered with no ticket object")
+    d = {k: str(ticket.get(k) or "") for k in ("title", "severity", "difficulty",
+                                               "category", "source", "tags")}
+    legal = {"severity": T.SEVERITIES, "difficulty": T.DIFFICULTIES,
+             "category": P.CATEGORIES}
+    changed = []
+    for k in d:
+        if k not in answer:
+            continue
+        v = str(answer[k] or "").strip()
+        if k in legal and v not in legal[k]:
+            raise ValueError("the AI gave %s %r, which is not one of %s · the ticket is "
+                             "unchanged" % (k, v, ", ".join(legal[k])))
+        if k == "title" and not v:
+            raise ValueError("the AI gave an empty title · the ticket is unchanged")
+        if v != d[k]:
+            d[k] = v
+            changed.append(k)
+    body = (text or "").strip("\n")
+    sections = answer.get("sections")
+    if isinstance(sections, dict):
+        for head, sec in sections.items():
+            new = replace_sections(body, {head: sec})
+            if new != body:
+                body = new
+                changed.append("## " + str(head).strip().lstrip("#").strip())
+    d.update(description="", evidence="", body=body, changed=changed)
+    return d
 
 
 def _norm_draft(d):
@@ -1130,15 +1238,31 @@ def act_draft(body):
     and evidence replace only the first section (What is wrong, or What it should do for a
     Feature: title) and the Evidence section, so the Plan, the Runs
     and the Results stay, and that draft carries the new body in `body`. Any further draft is
-    a new ticket split off it. Nothing is written: the owner reads the form and saves it."""
+    a new ticket split off it. `prior` is the body the text box held before the owner's
+    latest change: the lines the owner added above or below it are a note, which the
+    session folds in, so they leave the body (`drop_added_ends`).
+
+    With `ticket` and `instruction`, the session does only what the instruction says: it
+    names the fields and the sections it changes, and everything else keeps the form's
+    value (`instructed_draft`). `split` does not apply then. Nothing is written: the owner
+    reads the form and saves it."""
     ticket = body.get("ticket")
     ticket = ticket if isinstance(ticket, dict) else None
     text = (body.get("text") or (ticket or {}).get("body") or "").strip()
     if not text:
         raise ValueError("the ticket needs a body" if ticket else "write the note first")
+    cats = "; ".join("%s is %s" % (k, v) for k, v in P.CATEGORY_MEANING.items())
+    instruction = str(body.get("instruction") or "").strip() if ticket else ""
+    if instruction:
+        prompt = INSTRUCT_PROMPT % (
+            P.name, "/".join(T.SEVERITIES), "/".join(T.DIFFICULTIES),
+            "%s - %s" % ("/".join(P.CATEGORIES), cats), instruction,
+            *(str(ticket.get(k) or "") for k in ("title", "severity", "difficulty",
+                                                 "category", "source", "tags")), text)
+        return {"drafts": [instructed_draft(_json_in(_ask_provider(prompt, body, 240)),
+                                            ticket, text)]}
     split = bool(body.get("split"))
     shape = "a JSON array of ticket objects" if split else "ONE JSON object"
-    cats = "; ".join("%s is %s" % (k, v) for k, v in P.CATEGORY_MEANING.items())
     scales = ("/".join(T.SEVERITIES), "/".join(T.DIFFICULTIES), "/".join(P.CATEGORIES), cats)
     if ticket:
         prompt = EDIT_PROMPT % (
@@ -1156,7 +1280,8 @@ def act_draft(body):
         if not d["description"].strip():
             # A splice with no description would empty the first section.
             raise ValueError("the AI returned no description · the ticket is unchanged")
-        d["body"] = splice_sections(text, d["description"], d["evidence"],
+        d["body"] = splice_sections(drop_added_ends(text, body.get("prior")),
+                                    d["description"], d["evidence"],
                                     d["title"] or str(ticket.get("title") or ""))
     return {"drafts": drafts}
 

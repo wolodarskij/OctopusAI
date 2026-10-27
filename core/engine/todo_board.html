@@ -487,6 +487,8 @@ button.danger:hover{background:#3a1c1f!important;color:#ffb3b3!important}
 #nAIRow{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:8px}
 #nAIRow label.chk{margin-top:0}
 #nAIRow button{flex:none;margin-left:auto}
+#nAsk{flex:1;min-width:0}
+#nAsk[hidden]{display:none}
 /* one tab per drafted ticket, when Process with AI split the note */
 #nTabs{display:none;flex-wrap:wrap;margin:10px 0 0}
 #nTabs.on{display:flex}
@@ -1257,6 +1259,7 @@ a.icon{display:inline-flex;align-items:center;text-decoration:none}
   <textarea id="nText"></textarea>
   <div id="nAIRow">
     <label class="chk" id="nSplitRow"><input type="checkbox" id="nSplit"><span>Let AI split this into several tickets when needed</span></label>
+    <input id="nAsk" hidden placeholder="Instruction for the AI: what to change in this ticket, and nothing else">
     <button class="icon" id="nDraft">Process with AI</button>
   </div>
   <div class="grid2">
@@ -2488,13 +2491,15 @@ function formMode(mode, head) {
   fillSelect("#nProvider", offered, selected, null, providerLabel);
   fillChoices(selected, null, "n");
   const edit = mode === "edit";
+  $("#nAsk").value = "";
   $("#nHead").textContent = head;
   $("#nIntro").textContent = edit
     ? "Change the fields and the body. Save rewrites the ticket; its file keeps its name, "
       + "so the path every brief and session holds stays valid. Process with AI rewrites the "
       + "fields, the What is wrong or What it should do section and the Evidence section here; "
       + "with the split box ticked it "
-      + "may also draft new tickets, one tab each. Nothing is written until Save."
+      + "may also draft new tickets, one tab each. With an instruction in the field next to "
+      + "the button, it changes only what the instruction names. Nothing is written until Save."
     : "Write the note in your own words. Process with AI turns it into the fields below, "
       + "which you correct before the ticket is filed. Fill them by hand and that step is skipped.";
   $("#nText").placeholder = edit ? "The body of the ticket, markdown."
@@ -2517,7 +2522,8 @@ function newTask() {
 async function editTask(t) {
   try {
     const r = await api("/api/ticket", {id: t.id});
-    FORM = {mode: "edit", id: r.id, base: r.base, group: r.group, drafts: [], cur: 0};
+    FORM = {mode: "edit", id: r.id, base: r.base, group: r.group, drafts: [], cur: 0,
+            prior: r.body};
     formFields({...r, description: r.body});
     $("#nSplit").checked = false;
     formMode("edit", "Edit " + r.id);
@@ -2553,6 +2559,7 @@ function drawTabs() {
   const box = $("#nTabs"), n = FORM.drafts.length;
   box.innerHTML = "";
   box.classList.toggle("on", n > 1);
+  $("#nAsk").hidden = !isEdited(FORM.cur);
   $("#nOK").textContent = FORM.mode === "edit" ? (n > 1 ? `Save + create ${n - 1}` : "Save")
     : n > 1 ? `Create ${n} tickets` : "Create ticket";
   if (n < 2) return;
@@ -2587,8 +2594,10 @@ function dropDraft(i) {
 }
 /* Process with AI, in both modes, on the tab shown. The answer replaces that tab, and the
    drafts split off it follow it. On the tab of the ticket Edit opened, the server splices
-   the answer into the body, so that tab gets the whole new body. Group, repeat and permits
-   keep the form's values. */
+   the answer into the body, so that tab gets the whole new body; `FORM.prior` is the body
+   before the owner's latest change, so a note added above or below it leaves the body. With
+   an instruction on that tab, the AI changes only what the instruction names, and the split
+   box does not apply. Group, repeat and permits keep the form's values. */
 let drafting = false;
 async function draftTask() {
   const rewrite = isEdited(FORM.cur);
@@ -2605,7 +2614,8 @@ async function draftTask() {
     const req = {text: keep.description, split: $("#nSplit").checked,
                  provider: $("#nProvider").value, model: $("#nModel").value,
                  effort: $("#nEffort").value};
-    if (rewrite) req.ticket = keep;
+    const instruction = rewrite ? $("#nAsk").value.trim() : "";
+    if (rewrite) Object.assign(req, {ticket: keep, prior: FORM.prior || ""}, instruction ? {instruction} : {});
     const r = await api("/api/draft", req);
     /* A server older than this page answers an edit without `body`. Taking that answer
        would empty the text box, and Save would write the empty ticket. */
@@ -2620,7 +2630,15 @@ async function draftTask() {
     FORM.drafts = all.length > 1 ? all : [];
     formFields(rows[0]);
     drawTabs();
+    if (rewrite) FORM.prior = first.body;
     const verb = FORM.mode === "edit" ? "Save" : "file";
+    if (instruction) {
+      $("#nAsk").value = "";
+      $("#nSay").textContent = (first.changed || []).length
+        ? `changed ${first.changed.join(", ")} · read it, then Save; nothing is written until you do`
+        : "the AI changed nothing";
+      return;
+    }
     $("#nSay").textContent = rows.length > 1
       ? `split into ${rows.length} tickets · read each tab, then ${verb} them`
       : FORM.mode === "edit" ? "processed · read it, then Save; nothing is written until you do"
@@ -4761,6 +4779,9 @@ $("#newtask").addEventListener("click", newTask);
 $("#chat").addEventListener("click", startChat);
 $("#nX").addEventListener("click", () => closeNote());
 $("#nDraft").addEventListener("click", draftTask);
+$("#nAsk").addEventListener("keydown", e => {
+  if (e.key === "Enter" && !e.ctrlKey && !e.metaKey) { e.preventDefault(); draftTask(); }
+});
 $("#nOK").addEventListener("click", submitTask);
 $("#ndlg").addEventListener("keydown", e => {
   if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) submitTask();
