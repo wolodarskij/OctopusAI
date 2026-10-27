@@ -27,11 +27,15 @@ manager sessions and the session that runs the command are left out.
 
 SINCE THE LAST CALL. `--since-last` reads the snapshot of the last call
 (`sessions-snapshot.json` beside the registry, outside every repository) and writes it again.
-Finished then holds each session that finished since that call: one finished now that was
-not finished then, and one that was in the snapshot unfinished and whose terminal is gone,
-since a finished session closes its terminal at once. A session gone with its work undone
-(`todo.finish_undone`) is under Other. Without `--since-last`, Finished holds the sessions
-that are finished and still open, and no snapshot is read or written.
+The snapshot holds the time of that call, its live sessions, and the launches it reported
+as gone. Finished then holds each session that finished since that call: one finished now
+that was not finished then, one that was in the snapshot unfinished and whose terminal is
+gone, since a finished session closes its terminal at once, and one whose launch in its
+ticket's `sessions:` is at or after that time and whose terminal is gone, so an agent that
+started and finished between two calls is there too. A launch is reported once. A session
+gone with its work undone (`todo.finish_undone`) is under Other. Without `--since-last`,
+Finished holds the sessions that are finished and still open, and no snapshot is read or
+written.
 
 ONLY WHEN AN AGENT IS THERE. `--if-any` is `--since-last` that prints nothing only when the
 update has no row: no agent finished since that call, none waits for the owner, none works and
@@ -71,18 +75,41 @@ def snapshot_file():
     return project.home() / SNAPSHOT
 
 
+def now_stamp():
+    """The time now, in the format of a launch stamp in a ticket's `sessions:`."""
+    import datetime
+    return datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+
+
 def load_snapshot():
-    """`{key: row}` of the last `--since-last` call, {} when there is none."""
+    """The last `--since-last` call: `{"time": <stamp or "">, "sessions": {key: row},
+    "reported": {key: <launch stamp>}}`, every part empty when there is none. A snapshot of
+    the old format, rows only, has no time."""
     try:
         data = json.loads(snapshot_file().read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return {}
-    return data if isinstance(data, dict) else {}
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    if not isinstance(data.get("sessions"), dict):
+        data = {"sessions": {k: v for k, v in data.items() if isinstance(v, dict)}}
+    reported = data.get("reported")
+    return {"time": str(data.get("time") or ""), "sessions": data["sessions"],
+            "reported": reported if isinstance(reported, dict) else {}}
 
 
-def save_snapshot(rows):
+def save_snapshot(rows, gone=(), since=None):
+    """Write the snapshot: `since`, the time the call began (now when None), the live
+    `rows`, and the launches of the `gone` rows, kept while a later call can still take
+    them."""
+    since = since or now_stamp()
     keep = ("project", "session", "id", "mode", "title", "section", "state")
-    data = {r["key"]: {k: r.get(k) for k in keep} for r in rows if r.get("session")}
+    reported = dict(load_snapshot()["reported"])
+    reported.update((r["key"], r["launched"]) for r in gone if r.get("launched"))
+    data = {"time": since,
+            "sessions": {r["key"]: {k: r.get(k) for k in keep} for r in rows
+                         if r.get("session")},
+            "reported": {k: v for k, v in reported.items() if str(v) >= since}}
     f = snapshot_file()
     f.parent.mkdir(parents=True, exist_ok=True)
     f.write_text(json.dumps(data, indent=1), encoding="utf-8")
@@ -207,10 +234,32 @@ def _gone_row(name, T, e, t):
     return row
 
 
+def _launched_since(name, T, tickets, alive, snap):
+    """The gone rows of the launches at or after the snapshot's time whose terminal is gone
+    and that no earlier call reported."""
+    since = snap["time"]
+    if not since:
+        return []
+    out = []
+    for t in tickets:
+        if t.repeat == T.MANAGER:
+            continue
+        for e in t.sessions:
+            key = "%s|%s" % (name, e["session"])
+            if not e["launched"] or e["launched"] < since or e["session"] in alive \
+                    or key in snap["sessions"] or snap["reported"].get(key) == e["launched"]:
+                continue
+            row = {"project": name, "session": e["session"], "id": t.id, "mode": e["mode"],
+                   "title": t.title}
+            out.append(dict(_gone_row(name, T, row, t), launched=e["launched"]))
+    return out
+
+
 def collect(since_last=False, registry=None):
     """The rows of the report, and the rows of the live sessions for the next snapshot."""
     import todo as T
-    prev = load_snapshot() if since_last else {}
+    snap = load_snapshot() if since_last else {"time": "", "sessions": {}, "reported": {}}
+    prev = snap["sessions"]
     rows, live = [], []
     for r in (project.load_registry() if registry is None else registry):
         name = r["name"]
@@ -225,7 +274,8 @@ def collect(since_last=False, registry=None):
             tickets = T.load_all()
             by_id = {t.id: t for t in tickets}
             here = []
-            for s in T.live_sessions(tickets):
+            sessions = T.live_sessions(tickets)
+            for s in sessions:
                 t = by_id.get(s.get("id"))
                 if (t is not None and t.repeat == T.MANAGER) or T._is_own_session(s):
                     continue
@@ -234,7 +284,11 @@ def collect(since_last=False, registry=None):
             for key, e in prev.items():
                 if e.get("project") == name and key not in seen \
                         and e.get("section") != "finished" and e.get("session"):
-                    rows.append(_gone_row(name, T, e, by_id.get(e.get("id"))))
+                    t = by_id.get(e.get("id"))
+                    rows.append(dict(_gone_row(name, T, e, t), launched=next(
+                        (x["launched"] for x in (t.sessions if t else ())
+                         if x["session"] == e["session"]), "")))
+            rows += _launched_since(name, T, tickets, {s["session"] for s in sessions}, snap)
             live += here
         except Exception as exc:                        # noqa: BLE001 - the report goes on
             rows.append({"key": name, "project": name, "id": None, "title": "", "mode": "-",
@@ -291,9 +345,10 @@ def report(since_last=False, if_any=False, as_json=False, registry=None, out=Non
     """Print the update. With `if_any`, print nothing when it has no row. `save` False
     leaves the snapshot as it was. Returns 0."""
     out = sys.stdout if out is None else out
+    since = now_stamp()
     rows, live = collect(since_last, registry)
     if since_last and save:
-        save_snapshot(live)
+        save_snapshot(live, [r for r in rows if r.get("state") == "gone"], since)
     if if_any and not rows:
         return 0
     if as_json:
