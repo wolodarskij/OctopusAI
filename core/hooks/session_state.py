@@ -196,7 +196,8 @@ BUSY_EVENTS = ("UserPromptSubmit", "SessionStart")
 # A dialog in the middle of a turn: the notification types of one the owner must answer,
 # and the tools that open one.
 DIALOG_NOTIFICATIONS = ("permission_prompt", "elicitation_dialog", "elicitation_url_dialog")
-DIALOG_TOOLS = ("AskUserQuestion", "ExitPlanMode")
+ASK_TOOL = "AskUserQuestion"
+DIALOG_TOOLS = (ASK_TOOL, "ExitPlanMode")
 
 # The tools that schedule a prompt into the session and cancel it, and how long a recurring
 # job lives before Claude deletes it.
@@ -300,8 +301,10 @@ def asks_last(text):
     return bool(lines) and lines[-1].rstrip(_TRAIL).endswith("?")
 
 
-# The longest question the marker keeps for the board's hover.
+# The longest question the marker keeps for the board's hover, and the longest text of a
+# dialog: its questions with their options.
 QUESTION_CHARS = 200
+DIALOG_CHARS = 1000
 
 
 def question_of(text):
@@ -456,6 +459,21 @@ def clear_dialog(session_id, shell=0, before=None):
                 p.unlink()
             except FileNotFoundError:
                 pass
+
+
+def clear_answered(session_id, shell=0, before=None):
+    """Remove this terminal's `input` report, and an unknown terminal's, when it was written
+    before `before`: the owner answered the question dialog that the report announced, so the
+    session no longer waits for that answer. A report of another word stays."""
+    for p in (_report_path(session_id, shell), _report_path(session_id, 0)):
+        lines = _first_text((p,)).splitlines()
+        if not lines or lines[0].strip() != "input":
+            continue
+        try:
+            if before is None or p.stat().st_mtime < before:
+                p.unlink()
+        except OSError:
+            pass
 
 
 def _report_path(session_id, shell=0):
@@ -1485,6 +1503,36 @@ def transcript_activity(path):
             "call": call, "call_since": call_since}
 
 
+def last_answer(path):
+    """The time of the newest transcript row that holds the tool result of an
+    `AskUserQuestion` call: the owner answered that question dialog. 0 when no row does. It
+    reads the whole transcript, since a long turn puts the answer before the tail that
+    `transcript_activity` reads, and it parses only the rows that can hold a dialog."""
+    asks, when = set(), 0
+    try:
+        with open(path, "rb") as f:
+            for ln in f:
+                if b'"tool_use_id"' not in ln and ASK_TOOL.encode() not in ln:
+                    continue
+                try:
+                    d = json.loads(ln)
+                except ValueError:
+                    continue
+                msg = d.get("message") if isinstance(d, dict) else None
+                content = msg.get("content") if isinstance(msg, dict) else None
+                blocks = content if isinstance(content, list) else []
+                blocks = [b for b in blocks if isinstance(b, dict)]
+                if d.get("type") == "assistant":
+                    asks.update(b.get("id") for b in blocks
+                                if b.get("type") == "tool_use" and b.get("name") == ASK_TOOL)
+                elif any(b.get("type") == "tool_result" and b.get("tool_use_id") in asks
+                         for b in blocks):
+                    when = _stamp(d.get("timestamp")) or when
+    except OSError:
+        return 0
+    return when
+
+
 def _running_call(rows):
     """`(<Tool>: <what>, start)` of the newest tool call of the current turn that has no
     result yet: a foreground call that still runs. `("", 0)` when every call of the turn has
@@ -2149,36 +2197,58 @@ def start_closer(t, mode, now=False):
 
 
 def dialog_text(payload):
-    """What a dialog asks the owner, for the board's hover: the questions of an
-    `AskUserQuestion`, the approval of a plan, the message of a notification. `True` when
-    the payload names nothing."""
+    """What a dialog asks the owner, for the board's hover and the manager's update: each
+    question of an `AskUserQuestion` with its option labels, `Which lane? (Pipeline |
+    Blocked)`, the questions joined by ` / `; the approval of a plan; the message of a
+    notification. At most `DIALOG_CHARS` long. `True` when the payload names nothing."""
     tool = str(payload.get("tool_name") or "")
     tin = payload.get("tool_input")
     tin = tin if isinstance(tin, dict) else {}
-    if tool == "AskUserQuestion":
-        qs = [str(q.get("question") or "").strip() for q in tin.get("questions") or []
-              if isinstance(q, dict)]
-        text = " / ".join(q for q in qs if q)
+    if tool == ASK_TOOL:
+        qs = []
+        for q in tin.get("questions") or []:
+            if not isinstance(q, dict) or not str(q.get("question") or "").strip():
+                continue
+            opts = [str(o.get("label") or "").strip() for o in q.get("options") or []
+                    if isinstance(o, dict)]
+            opts = " | ".join(o for o in opts if o)
+            qs.append(str(q["question"]).strip() + (" (%s)" % opts if opts else ""))
+        text = " / ".join(qs)
     elif tool == "ExitPlanMode":
         text = "approve the plan"
     else:
         text = str(payload.get("message") or "").strip()
     text = " ".join(text.split())
-    if len(text) > QUESTION_CHARS:
-        text = text[:QUESTION_CHARS - 3] + "..."
+    if len(text) > DIALOG_CHARS:
+        text = text[:DIALOG_CHARS - 3] + "..."
     return text or True
+
+
+def notified_dialog(session_id, shell, payload):
+    """The text of a dialog that a notification announces. Claude Code also notifies an open
+    `AskUserQuestion` or plan approval as a permission prompt: then the marker that the
+    dialog's `PreToolUse` wrote keeps its questions and options, unless the notification names
+    another tool."""
+    tool = re.search(r"\bto use (\w+)", str(payload.get("message") or ""))
+    kept = idle_question(session_id, shell) if idle_dialog(session_id, shell) else ""
+    if kept and (tool is None or tool.group(1) in DIALOG_TOOLS):
+        return kept
+    return dialog_text(payload)
 
 
 def _after_tool(sid, payload, started):
     """`PostToolUse`: the turn goes on, so a dialog marker written before this hook started
-    is answered; `CronCreate` and `CronDelete` change the session's jobs. It fires after
+    is answered, and an answered `AskUserQuestion` also closes the `input` report written
+    before it; `CronCreate` and `CronDelete` change the session's jobs. It fires after
     every tool, so it reads the process table only when there is something to write."""
     tool = str(payload.get("tool_name") or "")
-    if tool not in (CRON_CREATE, CRON_DELETE) and not any(
+    if tool not in (CRON_CREATE, CRON_DELETE, ASK_TOOL) and not any(
             _dir().glob("%s.*.idle" % sid.lower())):
         return 0
     shell = owning_shell(_procs())
     clear_dialog(sid, shell, started)
+    if tool == ASK_TOOL:
+        clear_answered(sid, shell, started)
     tin = payload.get("tool_input")
     tin = tin if isinstance(tin, dict) else {}
     if tool == CRON_CREATE and tin.get("recurring", True) is not False:
@@ -2290,7 +2360,7 @@ def _hook(payload, started=None):
             prune()
         elif event == "Notification":
             if payload.get("notification_type") in DIALOG_NOTIFICATIONS:
-                mark_idle(sid, shell, dialog=dialog_text(payload))
+                mark_idle(sid, shell, dialog=notified_dialog(sid, shell, payload))
         elif event == "PreToolUse":
             if payload.get("tool_name") in DIALOG_TOOLS:
                 mark_idle(sid, shell, dialog=dialog_text(payload))

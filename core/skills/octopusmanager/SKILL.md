@@ -19,7 +19,7 @@ board starts no second manager.
 | Exit | Meaning | Do |
 |---|---|---|
 | 0 | this session is the manager | step 2 |
-| 3 | a manager runs already; the output names its project, ticket and session | ask the owner in one line: `A manager runs in <project> <id>: take over? (yes / no)`. On yes: `python .octopus/todo.py manager --claim --take-over`, which closes that session. On no: stop, and stay what you were |
+| 3 | a manager runs already; the output names its project, ticket and session | ask the owner with the `AskUserQuestion` tool: `A manager runs in <project> <id>: take over?`, options `yes` and `no`. On yes: `python .octopus/todo.py manager --claim --take-over`, which closes that session. On no: stop, and stay what you were |
 | 2, "no hook names the session" | its AI provider runs no Octopus AI hook (Codex) | `python "<octopus.py>" todo --project "<project>" brief <id>` with the id and the project it printed, then step 2. The watchdog cannot guard this session |
 | 2, "retired" | the owner retired the manager | say so in one line and stop |
 | 2, "no registered project is the Octopus AI project" | the Octopus AI checkout is not registered | run the `projects add` command it printed, then step 1 again |

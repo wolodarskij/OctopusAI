@@ -312,6 +312,32 @@ class Record(FixtureCase):
         self.hook("Notification", notification_type="idle_prompt")
         self.assertTrue(session_state.idle_asks(SID, 0))
 
+    def test_the_permission_prompt_of_a_question_dialog_keeps_its_question(self):
+        self.hook("PreToolUse", tool_name="AskUserQuestion", tool_input={"questions": [
+            {"question": "Which lane?", "options": [{"label": "Pipeline"}, {"label": "Blocked"}]}]})
+        self.hook("Notification", notification_type="permission_prompt",
+                  message="Claude needs your permission to use AskUserQuestion")
+        self.assertEqual(session_state.idle_question(SID, 0), "Which lane? (Pipeline | Blocked)")
+        self.hook("Notification", notification_type="permission_prompt",
+                  message="Claude needs your permission")
+        self.assertEqual(session_state.idle_question(SID, 0), "Which lane? (Pipeline | Blocked)")
+        self.hook("Notification", notification_type="permission_prompt",
+                  message="Claude needs your permission to use Bash")
+        self.assertEqual(session_state.idle_question(SID, 0),
+                         "Claude needs your permission to use Bash")
+
+    def test_an_answered_question_dialog_clears_the_input_report(self):
+        session_state.report(SID, 0, "input", "Which lane?")
+        self.hook("PreToolUse", tool_name="AskUserQuestion")
+        self.assertTrue(session_state.idle_dialog(SID, 0))
+        self.hook("PostToolUse", started=time.time() + 1, tool_name="AskUserQuestion")
+        self.assertFalse(session_state.idle_dialog(SID, 0))
+        self.assertEqual(session_state.reported(SID, 0), "")
+        # The answer of another dialog leaves an `event` report as it was.
+        session_state.report(SID, 0, "event", "editor restart")
+        self.hook("PostToolUse", started=time.time() + 1, tool_name="AskUserQuestion")
+        self.assertEqual(session_state.reported(SID, 0), "event")
+
     def test_the_tool_that_ran_after_the_dialog_clears_it(self):
         self.hook("Notification", notification_type="permission_prompt")
         session_state.report(SID, 0, "input")
@@ -712,6 +738,15 @@ class Activity(FixtureCase):
         self.assertEqual(a["text"], "Running the tests.")
         self.assertEqual(a["since"], session_state._stamp("2026-10-18T20:00:00Z"))
         self.assertGreater(a["when"], 0)
+
+    def test_the_answer_of_a_question_dialog_has_its_time(self):
+        self.write(self.call("Bash", command="ls"), self.RESULT)
+        self.assertEqual(session_state.last_answer(self.path), 0)
+        self.write(self.call("AskUserQuestion", questions=[{"question": "Which lane?"}]),
+                   self.RESULT, self.said("Done.\nWORK IS FINISHED"))
+        self.assertEqual(session_state.last_answer(self.path),
+                         session_state._stamp("2026-10-18T20:00:05Z"))
+        self.assertEqual(session_state.last_answer(self.tmp / "none.jsonl"), 0)
 
     def test_a_tool_result_last_runs(self):
         self.write(self.call("Read", file_path="D:/x/todo.py"), self.RESULT)

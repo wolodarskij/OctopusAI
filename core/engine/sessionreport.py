@@ -165,7 +165,8 @@ def _where(T, t):
 
 
 def _question(s):
-    q = (s.get("reported_why") or s.get("question")
+    """The question a waiting session asks: an open dialog's, with its options, first."""
+    q = ((s.get("dialog") and s.get("question")) or s.get("reported_why") or s.get("question")
          or (s.get("judge") == "input" and s.get("judge_why")) or s.get("why") or "")
     return q or "a question, not named"
 

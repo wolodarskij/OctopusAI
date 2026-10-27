@@ -3744,6 +3744,13 @@ def read_turn(s, recheck=False, now=None):
     act = session_state.transcript_activity(path) if path is not None else None
     live = bool(s.get("claude") and s.get("hooked"))
     _read_marks(s)
+    # The owner's answer in the question dialog closes the question that `report` announced
+    # before it, also when the hook missed the answer.
+    if s.get("reported") == "input" and path is not None:
+        answered = session_state.last_answer(path)
+        if answered:
+            session_state.clear_answered(sid, shell, answered)
+            _read_marks(s)
     marker = s.get("idle_since")
     if live and marker and not s["dialog"] and act and not act["ended"] \
             and act["since"] > marker + TURN_SLACK:
@@ -4980,6 +4987,12 @@ def cmd_send(args):
     if s is None:
         print("Error: %s has no open terminal" % args.id, file=sys.stderr)
         return 2
+    if s.get("dialog"):
+        # Keys typed into an open dialog would answer it: only the owner answers a dialog.
+        print("Error: a dialog waits for the owner in %s: %s. Only the owner answers it, in "
+              "that terminal" % (s["key"], s.get("question") or "a question, a permission "
+                                 "or a plan"), file=sys.stderr)
+        return 1
     keys = [x.strip() for x in (args.keys or "").split(",") if x.strip()]
     if not args.text and not keys:
         print("Error: give --text, --keys, or both", file=sys.stderr)

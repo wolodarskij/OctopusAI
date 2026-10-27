@@ -120,6 +120,8 @@ ticket that nobody can size.
 
 - `focus`, `screen`, `send` and `close` take a ticket id, or the first 8 or more characters of a
   session id for a session that has no ticket.
+- `send` refuses a session where a dialog waits (a question, a permission, a plan to approve):
+  only the owner answers a dialog, in that terminal.
 - A session has one of seven states: `running` (its turn runs; `sessions` names what it does
   now, its last tool call), `input` (waits for the owner's answer), `event` (waits for something
   outside the project, such as an editor restart), `working` (`subagent` in the JSON: its

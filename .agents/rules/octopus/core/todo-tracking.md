@@ -182,6 +182,11 @@ job either names: the hook's record of each `CronCreate` and `CronDelete`, and t
 transcript, where each `CronCreate`, its job id, each `CronDelete` and each firing of a job
 stand. A resumed Claude keeps its jobs. A job expires 7 days after it was made, unless it fired
 within the last 2 hours.
+**A Claude session asks the owner with the question dialog.** It runs `report <id> input --why
+"<the question>" --mode <mode>`, then asks with the `AskUserQuestion` tool, never in plain text:
+the dialog stops the turn, and the session is `input` until the owner answers. The answer, the
+dialog's tool result in the transcript, removes that report, so the session goes on and can finish. An AI provider with no question dialog asks on
+the last line of its message, and the line ends with `?`.
 **The transcript corrects the hook files.** A turn that began without the owner's prompt (a
 scheduled prompt, a call back after background work) runs, whatever the last `Stop` said. A turn
 that ended by its transcript and has no `Stop` marker gets the one the hook would have written.
@@ -221,10 +226,10 @@ the message, the recap or the list of what it waits for: for `input` the open qu
 `finished` the line that said the work was done, for `working` the line that names what it
 waits for. A verdict whose quote stands nowhere, or an `input` that quotes another ticket's
 question from a list, is rejected; the judge is asked once more and told why. The hover on
-`waits for input` names the question: the reported one, the dialog's, the one on the last line,
-or the judge's quote. It also reads the turns that ended before it existed. Its `finished` never
-closes a session that has no ticket. A session whose hook files are gone is read back from its
-transcript.
+`waits for input` names the question: the dialog's, with the options of each question, the
+reported one, the one on the last line, or the judge's quote. It also reads the turns that ended
+before it existed. Its `finished` never closes a session that has no ticket. A session whose
+hook files are gone is read back from its transcript.
 
 **An AI provider is the tool a launch starts** (Claude Code, Codex, a custom CLI); **an
 agent is one running session of it** on a ticket. `provider` in `project.json` names the AI

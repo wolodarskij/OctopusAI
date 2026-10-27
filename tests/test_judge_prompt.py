@@ -234,8 +234,11 @@ class WhichQuestion(FixtureCase):
 
     def test_a_dialog_keeps_its_question(self):
         ask = {"tool_name": "AskUserQuestion", "tool_input": {"questions": [
-            {"question": "Which lane?"}, {"question": "Which severity?"}]}}
-        self.assertEqual(session_state.dialog_text(ask), "Which lane? / Which severity?")
+            {"question": "Which lane?", "options": [
+                {"label": "Pipeline", "description": "not started"}, {"label": "Blocked"}]},
+            {"question": "Which severity?"}]}}
+        self.assertEqual(session_state.dialog_text(ask),
+                         "Which lane? (Pipeline | Blocked) / Which severity?")
         self.assertEqual(session_state.dialog_text({"tool_name": "ExitPlanMode"}),
                          "approve the plan")
         self.assertEqual(session_state.dialog_text(
@@ -246,7 +249,7 @@ class WhichQuestion(FixtureCase):
         self.assertTrue(session_state.idle_dialog(SID, 42))
         q = session_state.idle_question(SID, 42)
         self.assertEqual(todo.wait_state(self.base(dialog=True, asks=True, question=q), None),
-                         ("input", "dialog: Which lane? / Which severity?"))
+                         ("input", "dialog: Which lane? (Pipeline | Blocked) / Which severity?"))
 
     def test_a_report_names_its_question(self):
         self.assertEqual(todo.wait_state(self.base(reported="input",

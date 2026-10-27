@@ -55,7 +55,12 @@ comes unasked, because a report out of context misleads. An answer holds no unas
 - **The answer first, in the fewest words that carry it.** No restated question, no preamble, no closing line.
 - **A list or a table when there are several items.** No paragraphs of explanation around it.
 - **A ticket is named by id and title**, never by id alone.
-- **A question to the owner is one line** with its options, and nothing else around it.
+- **A question to the owner goes into the question dialog.** A Claude session asks with the `AskUserQuestion`
+  tool, never in plain text: up to 4 questions in one dialog, each with its options and a short description of
+  each option, the recommended option first. Put a longer list into several dialogs, one after the other. Put the
+  context the owner needs into the question and the option descriptions, or into a short message before the
+  dialog. An AI provider with no question dialog (Codex, a custom CLI) asks in one line with its options, as the
+  last line of its message.
 - **Never cite a document's section, rule or row number.** Say what it says.
 - **Name who decided.** Never "it was refused" or "it is not allowed": say which agent or which owner order.
 

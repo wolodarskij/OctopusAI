@@ -64,7 +64,8 @@ These are the standing orders to every manager, in every project.
 - **A task is a ticket, never work in this window.** "Run a task", "do X" and
   "run X" mean: file a ticket and launch its session, or send the order to the
   session already on the related ticket (`send <id> --mode <mode> --text "..."
-  --keys Enter`). Never investigate, check or fix a task's subject here, not even
+  --keys Enter`; `send` refuses a session where a dialog waits, which only the
+  owner answers). Never investigate, check or fix a task's subject here, not even
   a quick look before you file it. You run ticket management (`new`, edits of a
   ticket, `move`, `check`, `work`, `plan`, `review`, `verify`, `send`, `screen`,
   `sessions`) and your own watch commands, nothing else. A new ticket's evidence
@@ -84,7 +85,7 @@ These are the standing orders to every manager, in every project.
   directory, a broken watcher) is yours to fix. Take the least destructive fix
   the evidence supports, back up a file you rewrite, run `check`, and report it
   in one line. Never list fix options and ask which one. Ask only for product or
-  design decisions.
+  design decisions, with the `AskUserQuestion` tool.
 - **An order the owner gives in this chat counts the same as a drag on the board
   or a command in the owner's shell.** Carry it out at once. Never ask the owner
   to drag a card or to type a command for it. "Cancel <id>" is this command:

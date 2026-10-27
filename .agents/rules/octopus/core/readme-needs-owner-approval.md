@@ -15,7 +15,7 @@ or a plugin, such as `core/engine/brief/README.md`, changes as any other file, w
 approval.
 
 1. Show the owner the exact new text: the lines as they are now and the lines as you want them.
-2. Ask the owner, and wait for the answer. With no yes, write nothing to the file.
+2. Ask the owner with the `AskUserQuestion` tool, and wait for the answer. With no yes, write nothing to the file.
 3. When the owner says yes, record the approval, then make exactly the approved change:
 
        python .octopus/todo.py approve-readme <file> --session <id> --owner-order "<the order, in neutral words>"
