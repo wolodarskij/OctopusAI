@@ -100,7 +100,10 @@ permission prompt, an MCP elicitation (the `Notification` event), an `AskUserQue
 the approval of a plan (`PreToolUse` of `ExitPlanMode`). Each writes the marker with
 `dialog` on line 2. `PostToolUse` fires once the owner answered and the tool ran, and removes
 a `dialog` marker written before it started; a marker of any other word is the `Stop` hook's
-and stays.
+and stays. No hook fires when Claude Code denies a permission prompt by itself after its time
+runs out (auto mode does it after 2 minutes), nor when the owner chooses No or presses Esc:
+`todo.py read_turn` removes the marker when the transcript shows the dialog closed
+(`dialog_closed`).
 
 A session can end its turn while its own background work goes on: a subagent, or a shell
 command it ran in the background. Claude Code re-invokes it when that work completes, so it
@@ -1425,7 +1428,9 @@ def transcript_activity(path):
     the time of the row `doing` comes from, else of the last row; `error`, the `api_error`
     type of its last row, "" when the turn did not end in an API error; `call` and
     `call_since`, the tool call of a turn that runs which has no result yet and its start
-    (`_running_call`). `None` when there is no transcript or it holds no message.
+    (`_running_call`); `open_since`, the start of the oldest call of a turn that runs which
+    has no result yet, a dialog tool included (`_open_since`); `last_row`, the time of the
+    last row. `None` when there is no transcript or it holds no message.
 
     A tool result, a prompt and a tool call waiting for its result are a turn that runs. The
     owner's slash commands, their output and the summary of a compaction are bookkeeping."""
@@ -1483,6 +1488,7 @@ def transcript_activity(path):
             since = _stamp(d.get("timestamp")) or since
             break
     call, call_since = _running_call(rows) if not ended else ("", 0)
+    open_since = _open_since(rows) if not ended else 0
     if not any(t.strip() for t in texts):
         # A turn that runs: the last thing it wrote in it, above the tool calls since.
         for d in reversed(rows):
@@ -1498,7 +1504,8 @@ def transcript_activity(path):
                     break
     return {"text": "\n".join(t for t in texts if t.strip()), "ended": ended, "when": when,
             "doing": doing, "since": since, "error": api_error(last),
-            "call": call, "call_since": call_since}
+            "call": call, "call_since": call_since, "open_since": open_since,
+            "last_row": _stamp(last.get("timestamp"))}
 
 
 def last_answer(path):
@@ -1550,6 +1557,36 @@ def _running_call(rows):
         if b.get("id") not in results and b.get("name") not in DIALOG_TOOLS:
             return _doing_of(b), _stamp(d.get("timestamp"))
     return "", 0
+
+
+def _open_since(rows):
+    """The start of the oldest tool call of the current turn that has no result yet, a
+    dialog tool included. 0 when every call of the turn has its result."""
+    results, starts = set(), []
+    for d in reversed(rows):
+        content = (d.get("message") or {}).get("content")
+        blocks = [b for b in content if isinstance(b, dict)] if isinstance(content, list) else []
+        if d.get("type") == "user":
+            ids = [b.get("tool_use_id") for b in blocks if b.get("type") == "tool_result"]
+            if not ids:
+                break
+            results.update(ids)
+            continue
+        starts += [_stamp(d.get("timestamp")) for b in blocks
+                   if b.get("type") == "tool_use" and b.get("id") not in results]
+    return min(starts) if starts else 0
+
+
+def dialog_closed(act, since, slack=0):
+    """Whether the transcript activity `act` shows that the dialog marked at `since` is
+    closed: a row came after the marker, and the turn ended or no tool call that began by
+    `since` (with `slack` seconds) still waits for its result. No hook fires when Claude Code
+    denies a permission prompt by itself after its time runs out, nor when the owner
+    chooses No or presses Esc: the call that the dialog stopped then gets its result."""
+    if not act or not since or (act.get("last_row") or 0) <= since:
+        return False
+    opened = act.get("open_since") or 0
+    return bool(act.get("ended")) or not opened or opened > since + slack
 
 
 def recover(session_id, shell, text, when, error=""):

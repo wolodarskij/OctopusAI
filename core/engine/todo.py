@@ -3717,7 +3717,8 @@ def read_turn(s, recheck=False, now=None):
     (`updated`), what it does now (`doing`, `doing_since`), whether it is `stale`, the hook
     files' signals, the judge (`judging`, `judge_dead`, `rejudged`) and the recap (`recap`).
 
-    The transcript corrects the hook files. A row after the `Stop` marker that starts a turn
+    The transcript corrects the hook files. A `dialog` marker goes when the transcript shows
+    the dialog closed (`session_state.dialog_closed`). A row after the `Stop` marker that starts a turn
     (a scheduled prompt, Claude Code calling the session back after its background work)
     ends what the marker said: no prompt of the owner removed it. A turn that ended by the
     transcript and has no marker `MISSED_STOP` seconds later gets the marker the `Stop`
@@ -3751,6 +3752,12 @@ def read_turn(s, recheck=False, now=None):
         if answered:
             session_state.clear_answered(sid, shell, answered)
             _read_marks(s)
+    # A dialog that closed with no hook: Claude Code denied a permission prompt by itself, or
+    # the owner chose No or pressed Esc. No dialog is on the screen any more.
+    if live and s["dialog"] and session_state.dialog_closed(act, s.get("idle_since"),
+                                                            TURN_SLACK):
+        session_state.clear_dialog(sid, shell)
+        _read_marks(s)
     marker = s.get("idle_since")
     if live and marker and not s["dialog"] and act and not act["ended"] \
             and act["since"] > marker + TURN_SLACK:

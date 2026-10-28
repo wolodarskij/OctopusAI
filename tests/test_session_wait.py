@@ -748,6 +748,22 @@ class Activity(FixtureCase):
                          session_state._stamp("2026-10-18T20:00:05Z"))
         self.assertEqual(session_state.last_answer(self.tmp / "none.jsonl"), 0)
 
+    def test_a_dialog_closes_when_its_call_gets_its_result(self):
+        marked = session_state._stamp("2026-10-18T20:00:02Z")
+        self.write(self.call("Bash", command="rm -rf shots/*"))
+        self.assertFalse(session_state.dialog_closed(
+            session_state.transcript_activity(self.path), marked, 2))
+        # Claude Code denied the prompt by itself: the call has its result, and no hook fired.
+        self.write(self.call("Bash", command="rm -rf shots/*"), self.RESULT)
+        self.assertTrue(session_state.dialog_closed(
+            session_state.transcript_activity(self.path), marked, 2))
+        # Another call's result after the marker leaves the dialog's call open.
+        other = {"type": "user", "timestamp": "2026-10-18T20:00:05Z", "message": {
+            "content": [{"type": "tool_result", "tool_use_id": "t0", "content": "ok"}]}}
+        self.write(self.call("Bash", command="rm -rf shots/*"), other)
+        self.assertFalse(session_state.dialog_closed(
+            session_state.transcript_activity(self.path), marked, 2))
+
     def test_a_tool_result_last_runs(self):
         self.write(self.call("Read", file_path="D:/x/todo.py"), self.RESULT)
         a = session_state.transcript_activity(self.path)
