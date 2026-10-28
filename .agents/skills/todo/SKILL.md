@@ -11,8 +11,10 @@ description: Ask about tickets and act on them from chat - list, filter, count, 
 - **Answer from one call.** `query` takes every filter at once. Do not read `TODO/INDEX.md` to
   answer a question.
 - **Act, then say what happened.** "Start T0001" is the order to move it and launch it.
-- **Give the answer.** "How many are left?" is a number. "What next?" is three or four lines: id,
-  severity, and what breaks.
+- **Give the answer.** "How many are left?" is a number. "What next?" is three or four lines: the
+  ticket, its severity, and what breaks.
+- **Name every ticket by its project name, its id and its title:** `Sample Game T0044 "Bug: ..."`,
+  never by id alone.
 
 ## Questions
 

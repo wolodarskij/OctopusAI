@@ -16,3 +16,7 @@ problem that stopped the ticket, in one sentence · a question for the owner, in
 its options. Lists and tables, not paragraphs. `.agents/rules/octopus/core/reporting-to-the-owner.md`
 is the full rule.
 
+**Name every ticket by its project name, its id and its title:** `Sample Game T0044 "Bug: ..."`,
+never by id alone. This holds in every message, report, note and ticket text. A ticket file can
+leave out the project name when it names a ticket of the same project.
+

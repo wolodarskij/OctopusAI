@@ -337,7 +337,7 @@ Graded findings, each with evidence and the sweep that produced it, using the st
 `SKILL.md`. Close with a **Sweep boundary** section naming what was and was not swept — that is what
 makes an "orphaned" claim trustworthy, or honestly downgrades it to "suspect".
 
-Every Deprecated / Orphaned finding has a matching ticket in `TODO/`; name it by id and title.
+Every Deprecated / Orphaned finding has a matching ticket in `TODO/`; name it by its project name, its id and its title.
 
 ---
 

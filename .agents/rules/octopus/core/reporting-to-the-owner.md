@@ -55,7 +55,9 @@ comes unasked, because a report out of context misleads. An answer holds no unas
 
 - **The answer first, in the fewest words that carry it.** No restated question, no preamble, no closing line.
 - **A list or a table when there are several items.** No paragraphs of explanation around it.
-- **A ticket is named by id and title**, never by id alone.
+- **A ticket is named by its project name, its id and its title**, never by id alone: `Sample Game T0044 "Bug: ..."`.
+  This holds in every message, report, note and ticket text. A ticket file of a project can leave out the project
+  name when it names a ticket of the same project.
 - **A question to the owner goes into the question dialog.** A Claude session asks with the `AskUserQuestion`
   tool, never in plain text: up to 4 questions in one dialog, each with its options and a short description of
   each option, the recommended option first. Put a longer list into several dialogs, one after the other. Put the

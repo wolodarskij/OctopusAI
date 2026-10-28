@@ -135,6 +135,9 @@ since your last update, once. Print its output as it is. Each agent is one line:
     **Other**
     - <project> <id> "<title>" — <blocked on another ticket, waiting for an event, idle or stuck>
 
+- **Name every ticket by its project name, its id and its title,** as the lines
+  do: `<project> <id> "<title>"`, never by id alone. This holds in every message,
+  report, note and ticket text, also outside the update.
 - **Copy the lines; never summarize a ticket.** The outcome of a finished agent is
   the `outcome:` line its session wrote on the ticket. Add no measurement, no
   caveat, no side ticket and no result of your own to a line, and no sentence
