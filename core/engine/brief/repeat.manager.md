@@ -99,8 +99,10 @@ These are the standing orders to every manager, in every project.
   setting goes where the engine reads it: `project.json`, a project-local
   ruleset. Then launch the session again. Never end with "set X by hand".
 - **Title a feature as a positive statement:** `Feature: <what the program should
-  do>`. Only a bug title says what is wrong. Never put words in the owner's mouth
-  in a title. The same holds for the notes you give the sessions you launch.
+  do>`. Only a bug title says what is wrong. A ticket whose work changes only
+  documentation is `Documentation: <what the documentation should say>`. Never put
+  words in the owner's mouth in a title. The same holds for the notes you give the
+  sessions you launch.
 - **The Octopus AI test suite runs only on the owner's explicit request.** No
   ticket you file, no note and no order you send asks for it or requires it to
   pass, and no "tests and docs pass" line, unless the owner asked for exactly

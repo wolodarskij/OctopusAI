@@ -965,14 +965,19 @@ DRAFT_PROMPT = """You turn a note into %s for the %s TODO tree.
 Answer with %s and no other text. The keys of a ticket are:
   title        one line, no ticket id, at most 90 characters. A bug starts with "Bug: "
                and says what is wrong. A feature starts with "Feature: " and says what
-               the program should do, as a positive statement
+               the program should do, as a positive statement. A ticket whose work
+               changes only documentation (docs, doc pages, generated doc HTML) starts
+               with "Documentation: " and says what the documentation should state or
+               what in it is wrong. A ticket that changes code or content and also its
+               docs is a bug or a feature
   severity     %s - what the user, the saved data or another machine gets wrong
   difficulty   %s - what the fix costs; unknown when the note's own question is unanswered
   category     %s - %s
   source       a file and line if the note names one, otherwise an empty string
   tags         a short space-separated list, or an empty string
   description  one or two paragraphs: what is wrong for a bug, what the program should
-               do for a feature
+               do for a feature, what the documentation should say for a documentation
+               ticket
   evidence     the file and line read, or the command run, or an empty string
 %s
 Write every word in Simplified Technical English: short sentences, active voice, one
@@ -1003,14 +1008,19 @@ itself shows it is wrong.
 Answer with %s and no other text. The keys of a ticket are:
   title        one line, no ticket id, at most 90 characters. A bug starts with "Bug: "
                and says what is wrong. A feature starts with "Feature: " and says what
-               the program should do, as a positive statement
+               the program should do, as a positive statement. A ticket whose work
+               changes only documentation (docs, doc pages, generated doc HTML) starts
+               with "Documentation: " and says what the documentation should state or
+               what in it is wrong. A ticket that changes code or content and also its
+               docs is a bug or a feature
   severity     %s - what the user, the saved data or another machine gets wrong
   difficulty   %s - what the fix costs; unknown when the ticket's own question is unanswered
   category     %s - %s
   source       a file and line if the ticket names one, otherwise an empty string
   tags         a short space-separated list, or an empty string
   description  the new text of the first section, one or two paragraphs: what is wrong
-               for a bug, what the program should do for a feature
+               for a bug, what the program should do for a feature, what the documentation
+               should say for a documentation ticket
   evidence     the new text of the "Evidence" section, or an empty string
 %s
 Write every word in Simplified Technical English: short sentences, active voice, one
@@ -1033,8 +1043,9 @@ INSTRUCT_PROMPT = """You change one existing ticket of the %s TODO tree. Do exac
 owner's instruction says, and change nothing that the instruction does not name.
 
 Answer with ONE JSON object and no other text. Give only the keys that you change:
-  title        one line, no ticket id, at most 90 characters. A bug starts with "Bug: "
-               and a feature starts with "Feature: "
+  title        one line, no ticket id, at most 90 characters. A bug starts with "Bug: ",
+               a feature starts with "Feature: ", and a ticket whose work changes only
+               documentation starts with "Documentation: "
   severity     %s
   difficulty   %s
   category     %s
@@ -1065,9 +1076,10 @@ _SECTION = re.compile(r"^##[ \t]+(.+?)[ \t]*$", re.M)
 
 def splice_sections(body, description, evidence, title=""):
     """`body` with its first section replaced by `description`, and the text of its
-    `## Evidence` section by `evidence`. The first section is `## What is wrong` or `## What
-    it should do`, and its heading becomes the one `title` (str) names:
-    `T.body_section(title)`. Without either section, the text before the first heading is
+    `## Evidence` section by `evidence`. The first section is `## What is wrong`, `## What
+    it should do` or `## What the documentation should say`, and its heading becomes the one
+    `title` (str) names:
+    `T.body_section(title)`. Without one of these sections, the text before the first heading is
     the description, and the section takes its place. Without an Evidence section, one
     follows the first section. An empty `evidence` changes nothing. Every other section
     keeps its text byte for byte. Returns the new body."""
@@ -1085,7 +1097,7 @@ def splice_sections(body, description, evidence, title=""):
         parts.append((ev[0], ev[1], "\n\n%s%s" % (evidence, sep(ev[1]))))
     add_ev = "## Evidence\n\n%s" % evidence if evidence and not ev else ""
     first = [m for m in heads if m.group(1).strip().lower()
-             in (T.SECTION_BUG.lower(), T.SECTION_FEATURE.lower())][:1]
+             in [h.lower() for h in T.FIRST_SECTIONS]][:1]
     if first:
         a, b = first[0].start(), spans[first[0].group(1).strip().lower()][1]
     else:
@@ -1235,8 +1247,9 @@ def act_draft(body):
 
     `text` is the note in New task. With `ticket` (the edit form's fields) it is the whole
     body of that ticket, and the session rewrites the ticket: the first draft's description
-    and evidence replace only the first section (What is wrong, or What it should do for a
-    Feature: title) and the Evidence section, so the Plan, the Runs
+    and evidence replace only the first section (What is wrong, What it should do for a
+    Feature: title, or What the documentation should say for a Documentation: title) and the
+    Evidence section, so the Plan, the Runs
     and the Results stay, and that draft carries the new body in `body`. Any further draft is
     a new ticket split off it. `prior` is the body the text box held before the owner's
     latest change: the lines the owner added above or below it are a note, which the

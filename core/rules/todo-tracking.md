@@ -470,7 +470,7 @@ A group holds open tickets that one session can work together. `groups.store` in
 ```markdown
 ---
 id: T0001
-title: "Bug: <what is wrong>" or "Feature: <what the program should do>"
+title: "Bug: <what is wrong>", "Feature: <what the program should do>" or "Documentation: <what the documentation should say>"
 severity: High | Medium | Low
 difficulty: small | medium | large | unknown
 status: pipeline
@@ -491,12 +491,20 @@ One or two paragraphs. Name a function with its parameters and its return type.
 The file and line you read, or the command you ran.
 ```
 
-**The title says whether the ticket is a bug or a feature.** A bug title starts with `Bug: ` and
-says what is wrong: "Bug: The board drops a ticket that has no severity". A feature title starts
-with `Feature: ` and says, as a positive statement, what the program should do: "Feature: Illness
-should mutate a person". Never write a feature as a negative. A feature ticket has the section
-`## What it should do` in place of `## What is wrong`. `new`, the board's `New task` and its
-`Process with AI` write the section that the title names.
+**The title says whether the ticket is a bug, a feature or a documentation ticket.** A bug title
+starts with `Bug: ` and says what is wrong: "Bug: The board drops a ticket that has no severity". A
+feature title starts with `Feature: ` and says, as a positive statement, what the program should
+do: "Feature: Illness should mutate a person". Never write a feature as a negative. A feature
+ticket has the section `## What it should do` in place of `## What is wrong`.
+
+**A documentation ticket changes only documentation:** docs, doc pages, generated doc HTML, the
+comments of a doc tree. Its title starts with `Documentation: ` and says what the documentation
+should state, or what in it is wrong: "Documentation: The setup page names the board command". It
+has the section `## What the documentation should say` in place of `## What is wrong`. A ticket
+that changes code or content and also its docs is a bug or a feature.
+
+`new`, the board's `New task` and its `Process with AI` write the section that the title names.
+`check` accepts the three kinds, and it renames no ticket.
 
 Other fields: `category`, `parent`, `group`, `related`, `repeat`, `run`.
 

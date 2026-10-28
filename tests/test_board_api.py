@@ -181,6 +181,11 @@ class BoardApi(FixtureCase):
         self.assertEqual(todo_server.splice_sections("loose\n\n## Plan\n\np", "d", "",
                                                      "Feature: x"),
                          "## What it should do\n\nd\n\n## Plan\n\np")
+        doc = "## What the documentation should say\n\nold\n\n## Plan\n\np"
+        self.assertEqual(todo_server.splice_sections(doc, "new", "", "Documentation: x"),
+                         "## What the documentation should say\n\nnew\n\n## Plan\n\np")
+        self.assertEqual(todo_server.splice_sections(doc, "new", "", "Bug: x"),
+                         "## What is wrong\n\nnew\n\n## Plan\n\np")
 
     def test_draft_of_a_ticket_rewrites_two_sections_and_writes_nothing(self):
         before = self.ticket_file().read_text(encoding="utf-8")
@@ -336,14 +341,17 @@ class BoardApi(FixtureCase):
     def test_new_writes_the_section_that_the_title_names(self):
         for title, head in (("Bug: the board drops a ticket", "## What is wrong"),
                             ("Feature: Illness should mutate a person", "## What it should do"),
-                            ("feature: lower case prefix", "## What it should do")):
+                            ("feature: lower case prefix", "## What it should do"),
+                            ("Documentation: The setup page names the board command",
+                             "## What the documentation should say")):
             st, r = self.call("new", {"title": title, "description": "words"})
             self.assertEqual(st, 200, r)
             text = next((self.root / "TODO").rglob("%s-*.md" % r["id"])).read_text(
                 encoding="utf-8")
             self.assertIn("%s\n\nwords\n" % head, text)
-            other = ({"## What is wrong", "## What it should do"} - {head}).pop()
-            self.assertNotIn(other, text)
+            for other in {"## What is wrong", "## What it should do",
+                          "## What the documentation should say"} - {head}:
+                self.assertNotIn(other, text)
 
     def test_new_writes_the_category(self):
         st, r = self.call("new", {"title": "made here", "category": "internal tooling"})

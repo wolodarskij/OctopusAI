@@ -1270,7 +1270,7 @@ a.icon{display:inline-flex;align-items:center;text-decoration:none}
   <p id="nMENote"></p>
   <div class="seg" id="nTabs"></div>
   <div class="grid2">
-    <label class="wide"><span>Title</span><input id="nTitle" placeholder="Bug: what is wrong · Feature: what the program should do"></label>
+    <label class="wide"><span>Title</span><input id="nTitle" placeholder="Bug: what is wrong · Feature: what the program should do · Documentation: what the documentation should say"></label>
     <label><span>Severity</span><select id="nSev"></select></label>
     <label><span>Difficulty</span><select id="nDiff"></select></label>
     <label><span>Category</span><select id="nCat"></select></label>
@@ -2448,8 +2448,9 @@ $("#pdlgC").addEventListener("click", () => copy($("#pdlgB").textContent));
    reads and corrects every value before it is written. With the split box ticked it may
    return several drafts: each gets a tab, and one button writes them all. Edit opens an
    existing ticket with its whole body in the text box. There the first tab is that ticket:
-   `Process with AI` rewrites its fields and only its first section (What is wrong, or What
-   it should do for a Feature: title) and its Evidence section, so the Plan, the Runs and
+   `Process with AI` rewrites its fields and only its first section (What is wrong, What it
+   should do for a Feature: title, or What the documentation should say for a Documentation:
+   title) and its Evidence section, so the Plan, the Runs and
    the Results stay, and Save rewrites it. Every further tab is a new ticket split off it,
    filed by the same Save. */
 let FORM = {mode: "new", drafts: [], cur: 0};
@@ -2496,14 +2497,16 @@ function formMode(mode, head) {
   $("#nIntro").textContent = edit
     ? "Change the fields and the body. Save rewrites the ticket; its file keeps its name, "
       + "so the path every brief and session holds stays valid. Process with AI rewrites the "
-      + "fields, the What is wrong or What it should do section and the Evidence section here; "
+      + "fields, the What is wrong, What it should do or What the documentation should say "
+      + "section and the Evidence section here; "
       + "with the split box ticked it "
       + "may also draft new tickets, one tab each. With an instruction in the field next to "
       + "the button, it changes only what the instruction names. Nothing is written until Save."
     : "Write the note in your own words. Process with AI turns it into the fields below, "
       + "which you correct before the ticket is filed. Fill them by hand and that step is skipped.";
   $("#nText").placeholder = edit ? "The body of the ticket, markdown."
-    : "What is wrong, or what the program should do. Name the file and the function if you know them.";
+    : "What is wrong, what the program should do, or what the documentation should say. "
+      + "Name the file and the function if you know them.";
   $("#nText").classList.toggle("edit", edit);
   $("#nPermits").placeholder = Object.keys(DATA.permits || {}).join(" ");
   $("#nSay").textContent = DATA.serverStale ? STALE : "";

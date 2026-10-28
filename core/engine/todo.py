@@ -339,18 +339,27 @@ SEV_ORDER = {"High": 0, "Medium": 1, "Low": 2, "": 3}
 DIFFICULTIES = ("small", "medium", "large", "unknown")
 DIFF_ORDER = {"small": 0, "medium": 1, "large": 2, "unknown": 3}
 
-# A ticket is a bug or a feature, and its title says which. A bug title starts with `Bug: `
-# and says what is wrong. A feature title starts with `Feature: ` and says what the program
-# should do. The first section of the body follows the title.
-BUG_PREFIX, FEATURE_PREFIX = "Bug:", "Feature:"
+# A ticket is a bug, a feature or a documentation ticket, and its title says which. A bug
+# title starts with `Bug: ` and says what is wrong. A feature title starts with `Feature: `
+# and says what the program should do. A documentation title starts with `Documentation: `
+# and says what the documentation should state, or what in it is wrong; its work changes only
+# documentation. The first section of the body follows the title.
+BUG_PREFIX, FEATURE_PREFIX, DOC_PREFIX = "Bug:", "Feature:", "Documentation:"
 SECTION_BUG, SECTION_FEATURE = "What is wrong", "What it should do"
+SECTION_DOC = "What the documentation should say"
+FIRST_SECTIONS = (SECTION_BUG, SECTION_FEATURE, SECTION_DOC)
 
 
 def body_section(title):
     """The heading of the first body section for a ticket with this `title` (str): `What it
-    should do` for a feature, `What is wrong` for every other ticket. Returns a str."""
-    is_feature = (title or "").strip().lower().startswith(FEATURE_PREFIX.lower())
-    return SECTION_FEATURE if is_feature else SECTION_BUG
+    should do` for a feature, `What the documentation should say` for a documentation ticket,
+    `What is wrong` for every other ticket. Returns a str."""
+    head = (title or "").strip().lower()
+    if head.startswith(FEATURE_PREFIX.lower()):
+        return SECTION_FEATURE
+    if head.startswith(DOC_PREFIX.lower()):
+        return SECTION_DOC
+    return SECTION_BUG
 
 
 def priority(t):
@@ -5570,14 +5579,16 @@ def _main(argv):
 
     p = sub.add_parser("new", help="create a ticket")
     p.add_argument("--title", required=True,
-                   help='"Bug: <what is wrong>" or "Feature: <what the program should do>"')
+                   help='"Bug: <what is wrong>", "Feature: <what the program should do>" or '
+                        '"Documentation: <what the documentation should say>"')
     p.add_argument("--severity", choices=list(SEVERITIES))
     p.add_argument("--difficulty", choices=list(DIFFICULTIES))
     p.add_argument("--category", help="one of: " + ", ".join(P.CATEGORIES) +
                    "; absent derives it from --source")
     p.add_argument("--source")
     p.add_argument("--description", help="the text of the first section: What is wrong, "
-                   "or What it should do for a Feature: title")
+                   "What it should do for a Feature: title, or What the documentation "
+                   "should say for a Documentation: title")
     p.add_argument("--evidence")
     p.add_argument("--state", default=lane("start"), choices=list(P.STATES))
     p.add_argument("--status")
