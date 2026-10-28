@@ -45,7 +45,8 @@ comes unasked, because a report out of context misleads. An answer holds no unas
   the owner saw it already. The sentences that fail come to you as context with the next prompt. Write
   no sentence of those kinds again, and never repeat, correct or explain the earlier message. It never
   fails a question to the owner, the line `WORK IS FINISHED`, or a statement that a ticket is in
-  Verification or Done. `replyCheck: false` in `.octopus/project.json` turns it off.
+  Verification or Done. It does not run on a message whose last line is `WORK IS FINISHED`: that
+  session closes at once. `replyCheck: false` in `.octopus/project.json` turns it off.
 - **The outcome line.** A `work` or a `verify` session writes the result on its ticket (`move ...
   --outcome "..."`), at most 20 words, with no measurement, no caveat and no other ticket. The
   manager's update prints that line; nobody summarizes the ticket again.

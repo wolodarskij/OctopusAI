@@ -323,12 +323,13 @@ class Closes(FixtureCase):
     def test_a_planner_closes_once_the_plan_is_on_the_ticket(self):
         self.assertEqual(self.closer(self.tid, "plan", "Planning.")[0], False)
         self.move("ready to implement")
-        # The owner (2026-10-20): a plan that cannot be executed is no finished plan.
-        self.assertEqual(self.closer(self.tid, "plan", "The plan is on the ticket.\n"
-                                                       "WORK IS FINISHED"), (False, None))
-        self.plan("1. Draw the glyph.\n2. Which eight row bytes make it?\n")
-        self.assertEqual(self.closer(self.tid, "plan", "The plan is on the ticket.\n"
-                                                       "WORK IS FINISHED"), (False, None))
+        # T0171: the finished line closes at once, also over a plan left open.
+        for plan in (None, "1. Draw the glyph.\n2. Which eight row bytes make it?\n"):
+            if plan:
+                self.plan(plan)
+            started, argv = self.closer(self.tid, "plan", "The plan is on the ticket.\n"
+                                                          "WORK IS FINISHED")
+            self.assertEqual(argv[-1], "--now")
         self.plan()
         started, argv = self.closer(self.tid, "plan", "The plan is on the ticket.")
         self.assertTrue(started)
@@ -337,8 +338,7 @@ class Closes(FixtureCase):
         self.assertEqual(argv[-6:], ["close", self.tid, "--mode", "plan", "--when-finished",
                                      "--now"])
 
-    def test_a_believable_finished_line_closes_at_once_but_never_a_manager(self):
-        # T0085: the ticket agrees with the line, so the closer does not wait for the state.
+    def test_the_finished_line_closes_at_once_but_never_a_manager(self):
         self.assertFalse(self.closer(self.tid, "work", "Changed it.")[0])
         self.move("investigating")
         started, argv = self.closer(self.tid, "verify", "Measured.\nWORK IS FINISHED")
@@ -352,30 +352,29 @@ class Closes(FixtureCase):
                                          "--now"])
         self.assertFalse(self.closer(self.mgr, "work", "WORK IS FINISHED")[0])
 
-    def test_a_finished_line_over_undone_work_closes_nothing(self):
-        # A ticket left in InProgress `waiting` for the owner's glyph, then the line.
+    def test_the_finished_line_over_undone_work_closes_at_once(self):
+        # T0171: the ticket is not read; the line alone closes the session.
         self.move("waiting")
         text = ("To continue, launch work %s with --note holding the eight row bytes of the "
                 "glyph.\nWORK IS FINISHED" % self.tid)
-        self.assertEqual(self.closer(self.tid, "work", text), (False, None))
+        self.assertEqual(self.closer(self.tid, "work", text)[1][-1], "--now")
         self.move("investigating")
-        self.assertEqual(self.closer(self.tid, "review", "WORK IS FINISHED"), (False, None))
+        self.assertEqual(self.closer(self.tid, "review", "WORK IS FINISHED")[1][-1], "--now")
         sid = todo.launch_session_id(self.tid, "work")
         session_state.mark_stop(sid, 42, text)
         s = {"id": self.tid, "mode": "work", "ended": True, "claude": 1, "hooked": True,
              "says_finished": session_state.idle_finished(sid, 42)}
         self.move("waiting")
-        wait, why = todo.wait_state(s, todo.find(todo.load_all(), self.tid))
-        self.assertEqual(wait, "input")
-        self.assertTrue(why.startswith("said WORK IS FINISHED with the work undone"), why)
+        self.assertEqual(todo.wait_state(s, todo.find(todo.load_all(), self.tid)),
+                         ("finished", "said WORK IS FINISHED"))
 
-    def test_a_question_reported_in_the_turn_keeps_the_terminal_open(self):
+    def test_the_finished_line_closes_over_a_question_reported_in_the_turn(self):
         self.move("waiting", "Verification")
         sid = todo.launch_session_id(self.tid, "work")
         session_state.mark_stop(sid, 42, "Changed it.")
         session_state.report(sid, 42, "input", "Which glyph?")
-        self.assertEqual(self.closer(self.tid, "work", "Which glyph?\nWORK IS FINISHED", 42),
-                         (False, None))
+        started, argv = self.closer(self.tid, "work", "Which glyph?\nWORK IS FINISHED", 42)
+        self.assertEqual(argv[-1], "--now")
 
     def test_an_owner_conversation_closes_only_by_its_own_finished_line(self):
         # The manager hotfix (2026-10-20): a manager's ticket was killed while the owner talked.
@@ -400,7 +399,7 @@ class Closes(FixtureCase):
         live = [{"key": "%s/work" % self.tid, "id": self.tid, "mode": "work", "session": sid,
                  "shell": 42, "running": False, "wait": "finished"}]
         self.assertEqual(todo.autoclose_sessions(live, todo.load_all()), [])
-        # Its own believable line closes it at once.
+        # Its own finished line closes it at once.
         started, argv = self.closer(self.tid, "work", "Done.\nWORK IS FINISHED", 42)
         self.assertEqual(argv[-1], "--now")
         # The launch prompt clears the mark.

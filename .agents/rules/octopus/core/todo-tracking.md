@@ -160,23 +160,25 @@ waits for. `finished`: it waits for nothing.
 | Step | The session | State |
 |---|---|---|
 | 0 | its Claude exited | `finished` |
+| 0 | its turn ended, and the last line of its last message is `WORK IS FINISHED` (every brief asks for it when the session has no question). The engine reads nothing else: no report, no ticket, no plan, no job, no background work, no judge and no recap | `finished`; a manager `idle` |
 | 0 | no hook ran and it has no transcript: a question before its first turn, such as folder trust | `input` |
 | 0 | a dialog waits (a permission, a question, a plan to approve), or its turn ended in an API error (a rate limit, an overload, a network fault) | `input` |
-| 0 | it reported `event`, and did not end with `WORK IS FINISHED` | `event` |
-| 0 | it reported `report <id> input --why "<the question>" --mode <mode>` in this turn. A `WORK IS FINISHED` after it does not take the question back: work is never finished while a question is open | `input` |
-| 0 | a `plan` session's turn ended, its ticket is `ready to implement`, and the plan leaves a decision, a name or a value open: no `## Plan`, difficulty still `unknown`, a line of the plan that asks or names an open decision (a plan that a worker cannot carry out is not finished) | `input` |
-| 1 | its turn ended, and the last line of its last message is `WORK IS FINISHED` (every brief asks for it when the session has no question), or its last lines say its ticket is in Verification or Done, or it reported `finished` | `finished`; a manager `idle` |
-| 1 | the same, while its ticket says the work is undone: a `work` ticket not in Verification, Done or Blocked `blocked by other task`; a `plan` ticket not `ready to implement`; a `review` or `verify` ticket still `investigating` / `testing` | `input`, "said WORK IS FINISHED with the work undone" |
+| 0 | it reported `event`, and its last lines do not say its ticket is in Verification or Done | `event` |
+| 0 | it reported `report <id> input --why "<the question>" --mode <mode>` in this turn | `input` |
+| 1 | its turn ended, and its last lines say its ticket is in Verification or Done, or it reported `finished` | `finished`; a manager `idle` |
 | 2 | its turn ended, and the last line of its last message is a question | `input` |
 | 3 | it holds a recurring job, or its own subagent or background shell runs | `blocker` when its ticket waits for other tickets, else `working` |
 | 4 | its turn runs and wrote to its transcript within 5 minutes, or a tool call of its turn has no result yet | `running` |
 | 5 | its turn ended, or it wrote nothing for 5 minutes and no tool call runs: the judge reads its last message and its ticket | the verdict: `input`, `finished`, `working` or `blocker` |
 | 6 | the judge is unsure: the engine types `/recap` into the session once, and the judge reads the recap | the verdict on the recap; `idle` when it is unsure again or no recap comes within 2 minutes |
 
-Where its ticket stands is never a question to the owner. It decides a state only in the two
-steps above that read it, a plan left open and a finished line over undone work; elsewhere the
-judge reads it with the last message. A question on the last line is `input` whatever the session waits
-for. The finished line outranks a recurring job. A manager never finishes while its Claude
+Where its ticket stands is never a question to the owner, and it decides no state: the judge
+reads it with the last message. A ticket that does not show the work done (a `work` ticket not
+in Verification, Done or Blocked `blocked by other task`; a `plan` ticket not `ready to
+implement`, or a plan that leaves a decision, a name or a value open; a `review` or `verify`
+ticket still `investigating` / `testing`) is only a note in `sessions --why` and in the
+manager's update. A question on the last line is `input` whatever the session waits for. The
+finished line outranks every other signal. A manager never finishes while its Claude
 runs: it waits for the owner's orders. The engine finds the jobs in two records and counts every
 job either names: the hook's record of each `CronCreate` and `CronDelete`, and the session's
 transcript, where each `CronCreate`, its job id, each `CronDelete` and each firing of a job
@@ -202,9 +204,9 @@ marker lists its signals. `close --finished` and the board's `Close finished` cl
 terminal once the turn ends, and only when the session is `finished`. Every launch mode
 (`plan`, `work`, `review`, `verify`, and the runs of a repeatable ticket) ends this way.
 **A finished session closes even when it did not run it.** Its `Stop` hook closes it at once,
-with no wait for the state word, when its last message ends with a believable `WORK IS
-FINISHED` (step 1, and no question reported in the turn), and once it is `finished` when its
-last message says its ticket is in Verification or Done; the
+with no wait for the state word and with no other check, when the last line of its last
+message is `WORK IS FINISHED`, and once it is `finished` when its last message says its
+ticket is in Verification or Done; the
 judge's `finished` closes it; and the board closes every other session that is `finished` on
 two checks in a row, every 30 seconds. Only a session launched on a ticket closes this way.
 A session in `input`, `event`, `working`, `blocker` or `idle`, a running one, a manager's,

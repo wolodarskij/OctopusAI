@@ -3883,7 +3883,7 @@ def plan_open(t):
     """What the ticket's plan leaves open, so that a worker cannot carry out every step
     without asking: no `## Plan`, a difficulty still `unknown`, a line of the plan that asks
     (`?`) or names an open decision (`TBD`, `open question`, `the owner must decide`). ""
-    when nothing is open. A plan that a worker cannot carry out is not finished."""
+    when nothing is open. A note on the session in `sessions --why`, never its state."""
     m = re.search(r"^##\s+Plan\s*$", t.body, re.M)
     if not m:
         return "the ticket has no ## Plan"
@@ -3901,8 +3901,9 @@ def plan_open(t):
 
 
 def finish_undone(t, mode):
-    """Why a session's claim that it is finished is not believable, "" when it is. The claim
-    holds for a `work` session whose ticket is in the verify or the closed lane or blocked by
+    """Why the session's ticket does not show its work done, "" when it does: a note on the
+    session in `sessions --why` and the manager's update, never its state. The ticket shows it
+    for a `work` session whose ticket is in the verify or the closed lane or blocked by
     another task, a `plan` session whose ticket is `ready to implement` (or taken further)
     and whose plan leaves nothing open, and a `review` or `verify` session whose ticket has
     left `investigating` / `testing`. A session with no ticket or no launch mode, and a
@@ -3924,10 +3925,6 @@ def finish_undone(t, mode):
     if (t.state, t.status) == P.LAUNCH_LANE[mode]:
         return "%s is still in %s" % (t.id, where)
     return ""
-
-
-# The reason a session that claims it is finished with its work undone waits for the owner.
-UNDONE = "said %s with the work undone"
 
 
 def _asked(verb, s):
@@ -4000,22 +3997,15 @@ def wait_state(s, t, now=None):
            a dialog stops the turn: a permission, an
              AskUserQuestion, a plan to approve            input
            the turn ended in an API error (`StopFailure`)  input
-           the session reported `event` (a finished line
-             ends the wait)                                 event
-           the session reported `input` (a finished line
-             does not take the question back)              input
-           a plan session's turn ended, its ticket is
-             `ready to implement`, and the plan leaves a
-             decision, a name or a value open (`plan_open`) input
-        1  the turn ended, and its last line is `WORK IS
-             FINISHED`, or its last lines say its ticket
-             is in the verify or the closed lane, or it
-             reported `finished`                           finished (a manager: idle)
-             ... while its ticket says the work is undone
-             (`finish_undone`)                             input
+           the turn ended, and its last line is `WORK IS
+             FINISHED`: no other signal is read            finished (a manager: idle)
+           the session reported `event`                    event
+           the session reported `input`                    input
+        1  the turn ended, and its last lines say its
+             ticket is in the verify or the closed lane,
+             or it reported `finished`                     finished (a manager: idle)
              ... while its ticket is blocked by other
-             tickets and it holds a recurring job, and
-             its last line is not `WORK IS FINISHED`       row 3
+             tickets and it holds a recurring job          row 3
         2  the turn ended, and its last line asks          input
         3  it holds a recurring job, or its own subagent
              or background shell runs                      blocker when its ticket waits for
@@ -4029,8 +4019,9 @@ def wait_state(s, t, now=None):
              the board asked for                           input, finished, subagent/blocker
            no recap, or unsure again                       idle
 
-    Where the ticket stands decides nothing: the judge reads it with the last message. The
-    finished line outranks a job: the session said it is done. The judge's `finished` never
+    Where the ticket stands decides nothing: the judge reads it with the last message, and
+    `finish_undone` and `plan_open` are only notes in `wait_signals`. The finished line
+    outranks every other signal: the session said it is done. The judge's `finished` never
     finishes a session with no ticket, which the owner opened and talks to, nor a manager,
     which waits for the owner's orders."""
     provider = s.get("provider", "claude")
@@ -4059,46 +4050,30 @@ def wait_state(s, t, now=None):
         return "input", "its turn ended in an API error%s (%s): try again" % (
             time.strftime(" at %Y-%m-%d %H:%M", time.localtime(since)) if since else "",
             s["error"])
-    if s.get("reported") == "event" and not s.get("says_finished"):
-        return "event", "waits for %s" % (s.get("reported_why") or "an outside event")
     import session_state
-    said = s.get("says_finished")
-    said = said if isinstance(said, str) and said else session_state.FINISHED_LINE
-    claim = UNDONE % said if s.get("says_finished") else "reported finished with the work undone"
-    question = (s.get("reported_why") or s.get("question")
-                or (s.get("judge") == "input" and s.get("judge_why")) or "a question, not named")
-    # Work is never finished while a question is open: the finished line does not take back
-    # a question reported in the same turn.
-    if s.get("reported") == "input":
-        if s.get("says_finished"):
-            return "input", "%s: reported: %s" % (UNDONE % said, question)
-        return "input", "reported: %s" % question
     manager = t is not None and t.repeat == MANAGER
     ended = bool(s.get("ended"))
-    mode = s.get("mode") or ""
-    # A plan that leaves a decision, a name or a value open cannot be executed, so its
-    # planner is not finished, whatever it said and whatever the judge reads.
-    if ended and mode == "plan" and t is not None and not manager and (
-            t.state, t.status) == (lane("active"), S("ready to implement")):
-        undone = plan_open(t)
-        if undone:
-            if s.get("says_finished") or s.get("reported") == "finished":
-                return "input", "%s: %s" % (claim, undone)
-            return "input", undone
-    # A session whose ticket is blocked by other tickets and that holds its own job to
-    # watch them still waits for them, unless its last line is the finished line.
-    waits = (bool(s.get("jobs")) and t is not None
-             and (t.state, t.status) == (lane("blocked"), S("blocked by other task"))
-             and s.get("says_finished") not in session_state.FINISHED_LINES)
-    if ended and not waits and (s.get("says_finished") or s.get("reported") == "finished"):
+    said = s.get("says_finished")
+    said = session_state.FINISHED_LINE if said is True else said or ""
+    # The finished line ends the session: no report, ticket, job, judge or recap is read.
+    if ended and said in session_state.FINISHED_LINES:
         if manager:
             return "idle", "manager: waits for the owner's orders"
-        # The claim must agree with the ticket: a finished line over undone work closes
-        # nothing, and the owner sees it among the sessions that wait for input.
-        undone = finish_undone(t, mode)
-        if undone:
-            return "input", "%s: %s" % (claim, undone)
-        if s.get("says_finished"):
+        return "finished", "said %s" % said
+    if s.get("reported") == "event" and not said:
+        return "event", "waits for %s" % (s.get("reported_why") or "an outside event")
+    if s.get("reported") == "input":
+        return "input", "reported: %s" % (
+            s.get("reported_why") or s.get("question")
+            or (s.get("judge") == "input" and s.get("judge_why")) or "a question, not named")
+    # A session whose ticket is blocked by other tickets and that holds its own job to
+    # watch them still waits for them.
+    waits = (bool(s.get("jobs")) and t is not None
+             and (t.state, t.status) == (lane("blocked"), S("blocked by other task")))
+    if ended and not waits and (said or s.get("reported") == "finished"):
+        if manager:
+            return "idle", "manager: waits for the owner's orders"
+        if said:
             return "finished", "said %s" % said
         return "finished", "reported finished"
     if ended and s.get("asks"):
@@ -4227,6 +4202,8 @@ def wait_signals(s, t):
     else:
         out.append(["ticket", "%s / %s" % (P.STATE_LABEL.get(t.state, t.state), t.status)])
         out.append(["waits for", ", ".join(s.get("waits_for") or []) or "none"])
+        # A note for the owner only: no state follows from it.
+        out.append(["ticket check", finish_undone(t, s.get("mode") or "") or "agrees"])
     if sid and s.get("id"):
         try:
             out.append(["transcript", "written %s" % _ago(session_transcript(sid).stat().st_mtime)])
@@ -4851,8 +4828,8 @@ def close_when_finished(ident, mode=None, wait=SELF_CLOSE_WAIT, poll=2, now=Fals
     open, and so does one that is still busy after `wait` seconds. Returns the rc of the
     close, 1 when the close refused, else 0.
 
-    `now` is the `Stop` hook's word that the turn ended with a believable `WORK IS
-    FINISHED`: the terminal closes at once, with no wait for the state word, while that turn
+    `now` is the `Stop` hook's word that the turn ended with `WORK IS FINISHED`: the
+    terminal closes at once, with no wait for the state word, while that turn
     is still the last one. A session found in a new turn, or whose last turn no longer says
     it, gets the wait for `finished` instead."""
     import time
@@ -5011,7 +4988,7 @@ def cmd_close(args):
     if getattr(args, "when_finished", False):
         # The detached closer that `--self` starts: its parent has exited, so the session
         # is no longer an ancestor of this process. `--now`: the `Stop` hook read a
-        # believable `WORK IS FINISHED`.
+        # `WORK IS FINISHED`.
         return close_when_finished(args.id, mode, now=getattr(args, "now", False))
     sessions = live_sessions()
     if getattr(args, "self", False):

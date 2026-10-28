@@ -32,10 +32,10 @@ as gone. Finished then holds each session that finished since that call: one fin
 that was not finished then, one that was in the snapshot unfinished and whose terminal is
 gone, since a finished session closes its terminal at once, and one whose launch in its
 ticket's `sessions:` is at or after that time and whose terminal is gone, so an agent that
-started and finished between two calls is there too. A launch is reported once. A session
-gone with its work undone (`todo.finish_undone`) is under Other. Without `--since-last`,
-Finished holds the sessions that are finished and still open, and no snapshot is read or
-written.
+started and finished between two calls is there too. A launch is reported once. A gone
+session whose ticket does not show its work done (`todo.finish_undone`) carries that as a
+note. Without `--since-last`, Finished holds the sessions that are finished and still open,
+and no snapshot is read or written.
 
 ONLY WHEN AN AGENT IS THERE. `--if-any` is `--since-last` that prints nothing only when the
 update has no row: no agent finished since that call, none waits for the owner, none works and
@@ -224,14 +224,12 @@ def _row(name, T, s, t):
 def _gone_row(name, T, e, t):
     """The row of a session in the snapshot whose terminal is gone."""
     row = dict(e, key="%s|%s" % (name, e["session"]), state="gone", lane=_where(T, t))
-    undone = T.finish_undone(t, e.get("mode") or "") if t is not None else ""
-    if undone:
-        row.update(section="other", text="its terminal closed with the work undone: %s"
-                   % _where(T, t))
-        return row
     res = _last_result(T, e["session"]) if t is None else ""
+    text = finished_text(T, t, res) or "its terminal closed"
+    # A note only: the ticket check never moves the agent out of Finished.
+    undone = T.finish_undone(t, e.get("mode") or "") if t is not None else ""
     row.update(section="finished",
-               text=_cut(finished_text(T, t, res) or "its terminal closed", TEXT_WIDTH))
+               text=_cut("%s; note: %s" % (text, undone) if undone else text, TEXT_WIDTH))
     return row
 
 

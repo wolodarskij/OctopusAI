@@ -96,13 +96,13 @@ class Report(FixtureCase):
         rows, _text = self.run_report(True)
         self.assertEqual(self.section(rows, "finished"), [])
 
-    def test_a_gone_session_with_its_work_undone_is_other(self):
+    def test_a_gone_session_with_its_work_undone_is_finished_with_a_note(self):
         self.run_report(True)
         rest = [s for s in self.sessions if s["session"] != SID_A]
         rows, text = self.run_report(True, rest)
-        self.assertEqual(self.section(rows, "finished"), [])
-        self.assertIn(self.work, self.section(rows, "other"))
-        self.assertIn("closed with the work undone", text)
+        self.assertIn(self.work, self.section(rows, "finished"))
+        self.assertNotIn(self.work, self.section(rows, "other"))
+        self.assertIn("note: %s is in" % self.work, text)
 
     def test_a_finished_agent_is_its_outcome_line(self):
         rc, _o, err = self.todo(self.root, "outcome", self.done, "The board shows the outcome")

@@ -81,12 +81,10 @@ A launched session that is done closes its own terminal: the `Stop` hook of a `p
 whose ticket is `ready to implement`, and of a session of any launch mode whose last message
 ends with `WORK IS FINISHED` or says its ticket is in the verify or closed lane, starts
 `todo.py close <id> --when-finished`, which closes it once its turn has ended and it is
-`finished` (`close_finished`). A believable `WORK IS FINISHED` (the ticket agrees,
-`todo.finish_undone`, and no question was reported in the turn) adds `--now`: the terminal
-closes at once, with no wait for the state word. An unbelievable one starts no closer, and
-the session waits for `input` ("said WORK IS FINISHED with the work undone"); so does a
-planner whose plan leaves a decision, a name or a value open (`todo.plan_open`). A judge
-that writes `finished` starts the waiting closer. The board closes every other `finished`
+`finished` (`close_finished`). A last line `WORK IS FINISHED` adds `--now`: the terminal
+closes at once, with no wait for the state word. Nothing else is read then: no report, no
+ticket, no job, no judge and no reply check. A judge that writes `finished` starts the
+waiting closer. The board closes every other `finished`
 launched session (`todo.autoclose_sessions`). A session the owner has written to closes
 only by its own `WORK IS FINISHED`. A manager never closes.
 `todo.py live_sessions` turns them, with the ticket's lane, into the session's `wait`.
@@ -2156,25 +2154,18 @@ def close_finished(session_id, text, shell=0, launch=None):
     the closed lane. Its terminal closes whether or not it ran `close --self` and whether or
     not the board runs. Returns whether it started.
 
-    `WORK IS FINISHED` closes at once (`--now`) when the ticket agrees with it
-    (`todo.finish_undone`) and no question was reported in the turn. When it does not, no
-    closer starts: work is never finished while a question is open, and the board shows the
-    session as `input`. A plan that leaves a decision, a name or a value open closes nothing
-    either. `launch` is `_launch_of(session_id)` when the caller has it already."""
+    `WORK IS FINISHED` closes at once (`--now`), and nothing else is read: no report and no
+    ticket. `launch` is `_launch_of(session_id)` when the caller has it already."""
     import todo
     t, mode = launch or _launch_of(session_id)
     if t is None or mode not in todo.MODES or t.repeat == "manager":
         return False
     if says_finished(text):
-        if reported(session_id, shell) == "input" or todo.finish_undone(t, mode):
-            return False
         return start_closer(t, mode, now=True)
     if owner_talks(session_id, shell):
         # The owner talks to it: only its own `WORK IS FINISHED` ends the session.
         return False
     if mode == "plan" and todo.plan_done(t):
-        if todo.finish_undone(t, mode):
-            return False
         return start_closer(t, mode)
     if says_done(text, t.id):
         return start_closer(t, mode)
@@ -2352,7 +2343,9 @@ def _hook(payload, started=None):
                 close_finished(sid, text, shell, launch)
             except Exception:                           # noqa: BLE001 - a hook never raises
                 pass
-            start_reply_check(sid, shell, payload, text)
+            # The finished line closes the session: no next prompt reads a reply note.
+            if not says_finished(text):
+                start_reply_check(sid, shell, payload, text)
             prune()
         elif event == STOP_FAILURE:
             # `error` is a documented field of the `StopFailure` payload: the error type.

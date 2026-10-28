@@ -880,7 +880,7 @@ class SelfClose(unittest.TestCase):
         self.assertEqual(self.closer([self.sess(running=True, wait=None)], wait=0), (0, []))
 
     def closer_now(self, states, wait=60):
-        """The `--now` closer the `Stop` hook starts on a believable `WORK IS FINISHED`."""
+        """The `--now` closer the `Stop` hook starts on `WORK IS FINISHED`."""
         seq = iter(states)
         closed = []
         with mock.patch.object(todo, "live_sessions",
@@ -1256,21 +1256,19 @@ class WaitState(FixtureCase):
                                         says_finished=True), t),
                 ("finished", "said WORK IS FINISHED"))
 
-    def test_a_reported_question_waits_for_input_even_after_the_finished_line(self):
-        # T0085, the owner: work is never finished while a question is open.
+    def test_a_reported_question_waits_for_input_until_the_finished_line(self):
+        # T0171: the finished line outranks a question reported earlier in the turn.
         t = self.ticket("closed", "done")
         self.assertEqual(todo.wait_state(session(reported="input", why="Which lane?",
                                                  jobs=["e4810603"]), t),
                          ("input", "reported: Which lane?"))
         self.assertEqual(todo.wait_state(session(reported="input", why="Which glyph?",
                                                  says_finished=True), t),
-                         ("input", "said WORK IS FINISHED with the work undone: "
-                                   "reported: Which glyph?"))
+                         ("finished", "said WORK IS FINISHED"))
 
     # -- step 1: the finished line ----------------------------------------------------
 
     def test_the_finished_line_finishes_where_the_ticket_agrees(self):
-        # T0085: the line holds where the ticket shows the work of the launch mode done.
         done = {"work": (self.ticket("verify", "waiting"), self.ticket("closed", "done"),
                          self.ticket("blocked", "blocked by other task", ["T0002"])),
                 "plan": (self.ticket("active", "ready to implement"),
@@ -1288,9 +1286,8 @@ class WaitState(FixtureCase):
         self.assertEqual(self.wait(session(reported="finished", tid=None), None), "finished")
         self.assertEqual(self.wait(session(says_finished=True, mode=""), None), "finished")
 
-    def test_the_finished_line_over_undone_work_waits_for_input(self):
-        # T0085: a session left its ticket in InProgress `waiting` for the owner's
-        # glyph, ran `close --self` and ended with the line.
+    def test_the_finished_line_and_a_finished_report_finish_over_undone_work(self):
+        # T0171: the ticket is only a note in the signals, never a state.
         undone = {"work": (self.ticket("active", "waiting"),
                            self.ticket("active", "implementing"),
                            self.ticket("start", "pipeline"),
@@ -1302,16 +1299,16 @@ class WaitState(FixtureCase):
             for t in tickets:
                 for s in (session(mode=mode, says_finished=True),
                           session(mode=mode, reported="finished")):
-                    wait, why = todo.wait_state(s, t)
-                    self.assertEqual(wait, "input", (mode, t.state, t.status))
-                    self.assertIn("with the work undone: T0001 is", why)
-        self.assertEqual(
-            todo.wait_state(session(says_finished=True), self.ticket("active", "waiting")),
-            ("input", "said WORK IS FINISHED with the work undone: T0001 is in %s waiting"
-             % todo.lane("active")))
+                    self.assertEqual(self.wait(s, t), "finished", (mode, t.state, t.status))
+        t = self.ticket("active", "waiting")
+        s = session(says_finished=True)
+        s["wait"], s["why"] = todo.wait_state(s, t)
+        self.assertEqual((s["wait"], s["why"]), ("finished", "said WORK IS FINISHED"))
+        self.assertIn(["ticket check", "T0001 is in %s waiting" % todo.lane("active")],
+                      todo.wait_signals(s, t))
 
-    def test_a_plan_that_leaves_something_open_waits_for_input(self):
-        # The owner (2026-10-20): a plan is never finished if it cannot be executed.
+    def test_a_plan_that_leaves_something_open_is_only_a_note(self):
+        # T0171: `plan_open` decides no state; the finished line finishes the planner.
         opened = {PLAN + "3. The glyph: TBD.\n": "the plan leaves open: 3. The glyph: TBD.",
                   PLAN + "3. Which eight row bytes make the glyph?\n":
                       "the plan leaves open: 3. Which eight row bytes make the glyph?",
@@ -1320,15 +1317,14 @@ class WaitState(FixtureCase):
                   "## What is wrong\n\nx\n": "the ticket has no ## Plan"}
         for body, why in opened.items():
             t = self.ticket("active", "ready to implement", body=body)
-            for s in (session(mode="plan"), session(mode="plan", says_finished=True),
+            self.assertEqual(todo.plan_open(t), why, body)
+            for s in (session(mode="plan", says_finished=True),
                       session(mode="plan", judge="finished", judge_why="planned")):
-                wait, got = todo.wait_state(s, t)
-                self.assertEqual(wait, "input", body)
-                self.assertTrue(got.endswith(why), (got, why))
+                self.assertEqual(self.wait(s, t), "finished", body)
         t = self.ticket("active", "ready to implement", difficulty="unknown")
+        self.assertEqual(todo.plan_open(t), "its difficulty is still unknown")
         self.assertEqual(todo.wait_state(session(mode="plan", says_finished=True), t),
-                         ("input", "said WORK IS FINISHED with the work undone: its "
-                                   "difficulty is still unknown"))
+                         ("finished", "said WORK IS FINISHED"))
         # Nothing open, or the open-questions line says there are none: the plan is done.
         for body in (PLAN, PLAN + "Open questions: none.\n"):
             t = self.ticket("active", "ready to implement", body=body)
