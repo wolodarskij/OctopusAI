@@ -131,6 +131,24 @@ at once. The filing session names every follow-up on its own ticket, under `## F
 owner never launches them by hand. The brief of a ticket that holds `projects` carries the
 registered projects and their commands.
 
+## A defect of an Octopus AI tool goes to Octopus AI
+
+**A session outside the Octopus AI project files no ticket on a defect of an Octopus AI tool:**
+the engine, a pack and its tools and plugins, a hook, and a rule or a skill that Octopus AI
+installs. It notifies Octopus AI, and carries on:
+
+    python .octopus/todo.py notify --tool <file> --defect "<what is wrong>" --evidence "<the file and line, or the command>"
+
+- **The engine enforces it.** `new` refuses a ticket whose `source` is in the Octopus AI
+  checkout, in the directory of a pack, or a file that `.octopus/installed.json` lists, and names
+  `notify`. A follow-up that a session of the Octopus AI project files in another project is not
+  refused.
+- **The notice goes to the Octopus AI project,** `TODO/.notices/N####.md`, with the project, the
+  session and its ticket. The manager's 10-minute check lists each open notice on every run.
+- **The Octopus AI manager decides on each notice:** a new Octopus AI ticket (`notice <id>
+  ticket --title "..."`), the evidence on an existing ticket (`notice <id> evidence <ticket
+  id>`), or no ticket (`notice <id> none --why "..."`). `notices` lists the open notices.
+
 ## `permits` says what a ticket may use
 
 **Permits come from the rulesets that `.octopus/project.json` lists.** The core ruleset defines

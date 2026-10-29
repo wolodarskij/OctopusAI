@@ -75,6 +75,7 @@ Bare words are an AND search over id, title, source, body, tags, permits and sta
 | "take T0001", an AI ticket | `move T0001 Pipeline` |
 | "these belong together" | `epic <name> --title "..."`, then `move <ids> Pipeline --epic <name>` |
 | "relate T0001 and T0002" | `link T0001 --related T0002` |
+| "that is a bug of an Octopus AI tool", outside the Octopus AI project | `notify --tool <file> --defect "..." --evidence "..."`. File no ticket: `new` refuses it, and the Octopus AI manager decides on the notice |
 
 **An order the owner gives in this chat counts the same as a drag on the board or a command in
 the owner's shell.** Carry it out. Never ask the owner to drag a card or to type a command for it.

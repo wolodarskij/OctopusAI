@@ -38,8 +38,9 @@ while any agent finished, waits or works. **It runs in every manager session:**
    When none runs `{octopus} check`, make it with `CronCreate`: `cron`
    `1,11,21,31,41,51 * * * *`, `recurring` true, and this prompt:
    `Manager check: run {octopus} check. Print its output as it is and nothing
-   else. When it prints nothing, write nothing at all. When it exits 3, do what
-   its last line says and write nothing about it.`
+   else. When it prints nothing, write nothing at all. When it lists notices,
+   decide each one with the command it names and write nothing about them. When
+   it exits 3, do what its last line says and write nothing about it.`
    Then run `{octopus} check --job-created` once, which records when the job was
    made, and print its output the same way.
 2. **Each run** launches every follow-up that a finished cross-project ticket
@@ -49,11 +50,24 @@ while any agent finished, waits or works. **It runs in every manager session:**
    word for word, on every run, until it is answered. It prints nothing at all only
    when no agent finished, none waits and none works; then you write nothing. It
    never starts any other ticket, and you never answer an agent for the owner.
-3. **Before the job expires** (Claude Code deletes a recurring job after 7 days)
+3. **Each run also lists the notices** that sessions of other projects sent
+   about a defect of an Octopus AI tool (`notify`), on every run until you decide
+   each one. Decide it yourself, with no question to the owner, and write nothing
+   about it:
+   - a new Octopus AI ticket: `notice <id> ticket --title "..." --severity ...
+     --difficulty ...`, when no open Octopus AI ticket names the defect;
+   - its evidence on an existing ticket: `notice <id> evidence <ticket id>`, when
+     an open Octopus AI ticket names it;
+   - no ticket: `notice <id> none --why "..."`, when the defect is not real, or
+     the tool already works.
+
+   Read the open Octopus AI tickets with `query` before you decide. `notices`
+   lists the open notices, and `notices <id>` prints one in full.
+4. **Before the job expires** (Claude Code deletes a recurring job after 7 days)
    the check exits 3 and says so: make the job again with the same `cron` and
    prompt, delete the old one with `CronDelete`, and run `{octopus} check
    --job-created`.
-4. **A manager on an AI provider with no `CronCreate`** (Codex) gets the check from the
+5. **A manager on an AI provider with no `CronCreate`** (Codex) gets the check from the
    board's watchdog, which types it into this session every 10 minutes. Run it the
    same way.
 

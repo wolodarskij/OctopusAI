@@ -73,6 +73,12 @@ ONE ENGINE, MANY PROJECTS. Every path and every rule is read from the current pr
                                               the owner approved the exact new text of a
                                               project-wide README file: the README guard lets
                                               this session write it
+    octopus todo notify --tool <file> --defect "..." --evidence "..."
+                                              a defect of an Octopus AI tool goes to the Octopus
+                                              AI project as a notice, never into this project
+    octopus todo notices                      the notices that wait for the manager's decision
+    octopus todo notice N0001 ticket --title "..." | evidence T0001 | none --why "..."
+                                              the manager's decision on a notice
 
 WORKING A TICKET IN ITS OWN SESSION. `work`, `plan`, `review` and `verify` write
 `TODO/.briefs/<id>.md` and launch `claude` in a new terminal on it. The ticket's `permits`
@@ -2382,6 +2388,289 @@ def launch_new(tid, args):
                            terminal=getattr(args, "terminal", None),
                            dry_run=getattr(args, "dry_run", False), auto=True)
     return cmd_work(a)
+
+
+# ── notices to Octopus AI ───────────────────────────────────────────────────
+# A defect of an Octopus AI tool is no ticket of the project that found it. `notify` writes a
+# notice into the Octopus AI project, `TODO/.notices/N####.md`; its manager's 10-minute check
+# lists every open notice, and `notice` records the manager's decision on it.
+
+NOTICES_DIR = ".notices"
+NOTICE_DECISIONS = ("ticket", "evidence", "none")
+_NOTICE_FILE = re.compile(r"^N(\d{4,})\.md$")
+_LINE_SUFFIX = re.compile(r":\d+(?:[-:]\d+)*$")
+# Build output inside an installed tool's directory, which the install record never lists.
+_BUILD_DIRS = {"Binaries", "Intermediate", "__pycache__"}
+
+
+def is_octopus_project(root=None):
+    """Whether the project at `root` (the current one by default) is the Octopus AI checkout."""
+    try:
+        return Path(root or P.ROOT).resolve() == _project.OCTOPUS.resolve()
+    except OSError:
+        return False
+
+
+def _files_for_octopus():
+    """Whether `new` files for Octopus AI: in the Octopus AI project, or from a working
+    directory inside it, as a follow-up of an Octopus AI ticket filed in another project."""
+    return is_octopus_project() or is_octopus_project(_project.find_root() or P.ROOT)
+
+
+def _installed_files(root):
+    """The project-relative files the install record of `root` lists, but its own config."""
+    import json
+    try:
+        data = json.loads(_read(_project.config_path(root, "installed.json")))
+    except (OSError, ValueError):
+        return set()
+    files = data.get("files") if isinstance(data, dict) else None
+    own = "%s/%s" % (_project.config_dir(root), _project.PROJECT_FILE)
+    return {f for f in (files or {}) if f != own}
+
+
+def octopus_tool_source(source, root=None):
+    """Why `source` names an Octopus AI tool in the project at `root`, or "" when it does not:
+    a path in the Octopus AI checkout or in the directory of an added pack, a checkout path
+    (`core/`, `packs/`, `octopus.py`) that the project does not hold, or a file or a directory
+    of files that Octopus AI installed into the project. A `:line` suffix does not count."""
+    root = Path(root or P.ROOT)
+    path = _LINE_SUFFIX.sub("", (source or "").strip().strip("\"'").replace("\\", "/"))
+    if not path:
+        return ""
+    if re.match(r"^([A-Za-z]:)?/", path):
+        p = Path(path)
+        homes = [("the Octopus AI checkout", _project.OCTOPUS)] + \
+            [("the pack %s" % r["name"], r["dir"]) for r in _project.added_packs() if r["dir"]]
+        for what, d in homes:
+            try:
+                p.resolve().relative_to(Path(d).resolve())
+                return "it is in %s" % what
+            except (ValueError, OSError):
+                continue
+        try:
+            path = p.resolve().relative_to(root.resolve()).as_posix()
+        except (ValueError, OSError):
+            return ""
+    rel = path[2:] if path.startswith("./") else path
+    rel = rel.rstrip("/")
+    if rel.split("/", 1)[0] in ("core", "packs", "octopus.py") \
+            and (_project.OCTOPUS / rel).exists() and not (root / rel).exists():
+        return "it is %s of the Octopus AI checkout" % rel
+    installed = _installed_files(root)
+    if rel in installed:
+        return "Octopus AI installs it"
+    d = root / rel
+    if d.is_dir():
+        files = [f.relative_to(root).as_posix() for f in d.rglob("*")
+                 if f.is_file() and not _BUILD_DIRS.intersection(f.relative_to(d).parts)]
+        if files and all(f in installed for f in files):
+            return "Octopus AI installs it"
+    return ""
+
+
+def _refuse_tool_ticket(source, why):
+    for line in (
+        "Error: --source %s names an Octopus AI tool: %s." % (source, why),
+        "  A defect of an Octopus AI tool is no ticket of this project. Notify Octopus AI,",
+        "  and its manager decides on it:",
+        "    %s notify --tool \"%s\" --defect \"<what is wrong>\" --evidence \"<the file and line, "
+        "or the command and what it printed>\"" % (P.cli, source),
+    ):
+        print(line, file=sys.stderr)
+    return 2
+
+
+def _notices_dir():
+    return P.TODO / NOTICES_DIR
+
+
+def load_notices():
+    """`[(path, meta, body)]` of every notice of the current project, by id."""
+    d = _notices_dir()
+    out = []
+    for f in sorted(d.iterdir()) if d.is_dir() else []:
+        if _NOTICE_FILE.match(f.name):
+            meta, body = parse(_read(f))
+            out.append((f, meta, body))
+    return out
+
+
+def open_notices():
+    """The notices that wait for the manager's decision."""
+    return [n for n in load_notices() if not n[1].get("decision")]
+
+
+def notice_section(body, heading):
+    """The text of section `## <heading>` of a notice body."""
+    m = re.search(r"^## %s\s*\n(.*?)(?=^## |\Z)" % re.escape(heading), body or "", re.M | re.S)
+    return m.group(1).strip() if m else ""
+
+
+def notice_line(meta, body):
+    """One line for a notice: its id, where it came from, the tool and the defect."""
+    who = " ".join(x for x in (meta.get("project", ""), meta.get("ticket", "")) if x)
+    defect = " ".join(notice_section(body, "Defect").split())
+    return "%s  %s  %s: %s" % (meta.get("id", ""), who, meta.get("tool", ""), defect)
+
+
+def _ticket_of_session(sid):
+    """The id of the ticket of the current project whose sessions hold `sid`, or ""."""
+    for t in load_all():
+        if any(e["session"] == sid for e in t.sessions):
+            return t.id
+    return ""
+
+
+def write_notice(meta, defect, evidence):
+    """Write a notice into the current project with the next free id. Returns its path."""
+    import datetime
+    d = _notices_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    n = max([int(_NOTICE_FILE.match(f.name).group(1)) for f in d.iterdir()
+             if _NOTICE_FILE.match(f.name)] or [0])
+    body = "\n## Defect\n\n%s\n\n## Evidence\n\n%s\n" % (defect.strip(), evidence.strip())
+    while True:
+        n += 1
+        nid = "N%04d" % n
+        path = d / ("%s.md" % nid)
+        m = dict({"id": nid}, **meta)
+        m["created"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        m["decision"] = ""
+        try:
+            with io.open(path, "x", encoding="utf-8", newline="") as fh:
+                fh.write(render(m, body))
+            return path
+        except FileExistsError:
+            continue
+
+
+def cmd_notify(args):
+    """Notify Octopus AI of a defect of one of its tools. The notice goes into the Octopus AI
+    project, with this project, the calling session and its ticket."""
+    if is_octopus_project():
+        print("Error: this is the Octopus AI project: file the ticket with `new`",
+              file=sys.stderr)
+        return 2
+    for flag, v in (("--tool", args.tool), ("--defect", args.defect),
+                    ("--evidence", args.evidence)):
+        if not (v or "").strip():
+            print("Error: %s is empty" % flag, file=sys.stderr)
+            return 2
+    sid = ""
+    try:
+        sid = own_session_id()
+    except Exception:                                   # noqa: BLE001 - no process table here
+        pass
+    ticket = (args.ticket or "").strip() or (_ticket_of_session(sid) if sid else "")
+    meta = {k: v for k, v in (("project", P.name), ("ticket", ticket), ("session", sid),
+                              ("tool", args.tool.strip())) if v}
+    try:
+        with in_manager_home():
+            path = write_notice(meta, args.defect, args.evidence)
+            print("%s  sent to %s: its manager decides on it"
+                  % (path.stem, manager_home_name()))
+    except LookupError as exc:
+        print("Error: %s" % exc, file=sys.stderr)
+        return 2
+    return 0
+
+
+def cmd_notices(args):
+    """The notices of the Octopus AI project: the open ones, `--all` every one, or one in
+    full."""
+    try:
+        with in_manager_home():
+            if args.id:
+                f = _notices_dir() / ("%s.md" % args.id.upper())
+                if not f.is_file():
+                    print("Error: no notice %s" % args.id, file=sys.stderr)
+                    return 2
+                sys.stdout.write(_read(f))
+                return 0
+            for _f, meta, body in load_notices() if args.all else open_notices():
+                line = notice_line(meta, body)
+                if meta.get("decision"):
+                    line += "  [%s]" % meta["decision"]
+                print(line)
+    except LookupError as exc:
+        print("Error: %s" % exc, file=sys.stderr)
+        return 2
+    return 0
+
+
+def _add_evidence(t, text):
+    """Append `text` to the `## Evidence` section of ticket `t`, made when it has none."""
+    body = t.body.rstrip("\n") + "\n"
+    m = re.search(r"^## Evidence\s*\n.*?(?=^## |\Z)", body, re.M | re.S)
+    if m:
+        body = body[:m.end()].rstrip("\n") + "\n\n" + text + "\n" + \
+            ("\n" + body[m.end():] if body[m.end():] else "")
+    else:
+        body += "\n## Evidence\n\n%s\n" % text
+    _write(t.path, render(t.meta, body))
+
+
+def cmd_notice(args):
+    """The manager's decision on a notice: a new Octopus AI ticket, its evidence added to an
+    existing ticket, or no ticket. The decision goes on the notice."""
+    import datetime
+    try:
+        with in_manager_home():
+            f = _notices_dir() / ("%s.md" % args.id.upper())
+            if not f.is_file():
+                print("Error: no notice %s" % args.id, file=sys.stderr)
+                return 2
+            meta, body = parse(_read(f))
+            if meta.get("decision"):
+                print("Error: %s is decided already: %s" % (meta["id"], meta["decision"]),
+                      file=sys.stderr)
+                return 2
+            who = " ".join(x for x in (meta.get("project", ""), meta.get("ticket", "")) if x)
+            told = "Notice %s from %s, %s: %s\n\n%s" % (
+                meta["id"], who or "a project", meta.get("tool", ""),
+                notice_section(body, "Defect"), notice_section(body, "Evidence"))
+            if args.decision == "ticket":
+                if not args.title:
+                    print("Error: a ticket needs --title", file=sys.stderr)
+                    return 2
+                a = argparse.Namespace(
+                    title=args.title, severity=args.severity, difficulty=args.difficulty,
+                    category=CATEGORY_TOOLING, source=meta.get("tool", ""),
+                    description=args.description or notice_section(body, "Defect"),
+                    evidence=told, state=None, status=None, epic="", claim=None,
+                    blocked_by=None, permits=None, tags=None, created=None, repeat=None,
+                    parent=None, group=None, owner_order=None, requested=None, launch=False)
+                buf = io.StringIO()
+                with contextlib.redirect_stdout(buf):
+                    rc = cmd_new(a)
+                sys.stdout.write(buf.getvalue())
+                if rc:
+                    return rc
+                decision, what = "ticket %s" % buf.getvalue().split()[0], ""
+            elif args.decision == "evidence":
+                t = find(load_all(), args.target or "")
+                if t is None:
+                    print("Error: evidence needs the id of an Octopus AI ticket", file=sys.stderr)
+                    return 2
+                _add_evidence(t, told)
+                decision, what = "evidence %s" % t.id, ""
+                print("%s  the evidence of %s is on %s" % (t.id, meta["id"], t.path.name))
+            else:
+                if not (args.why or "").strip():
+                    print("Error: no ticket needs --why", file=sys.stderr)
+                    return 2
+                decision, what = "none", args.why.strip()
+            meta["decision"] = decision
+            meta["decided"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+            if what:
+                body = body.rstrip("\n") + "\n\n## Decision\n\n%s\n" % what
+            _write(f, render(meta, body))
+            print("%s  %s" % (meta["id"], decision))
+    except LookupError as exc:
+        print("Error: %s" % exc, file=sys.stderr)
+        return 2
+    return 0
 
 
 def file_template(text):
@@ -6229,6 +6518,35 @@ def _main(argv):
                         "`input`, the outside event with `event`")
     p.add_argument("--mode", choices=list(MODES), default="work")
     p.set_defaults(fn=cmd_report)
+
+    p = sub.add_parser("notify", help="notify Octopus AI of a defect of one of its tools: the "
+                                      "engine, a pack, a hook, an installed rule or skill. Its "
+                                      "manager decides on the notice")
+    p.add_argument("--tool", required=True, help="the tool's file, as `source:` names one")
+    p.add_argument("--defect", required=True, help="what is wrong")
+    p.add_argument("--evidence", required=True,
+                   help="the file and line, or the command and what it printed")
+    p.add_argument("--ticket", help="the ticket the session works; absent: the ticket of the "
+                                    "calling session")
+    p.set_defaults(fn=cmd_notify)
+
+    p = sub.add_parser("notices", help="the notices of the Octopus AI project that wait for "
+                                       "the manager's decision")
+    p.add_argument("id", nargs="?", help="print this notice in full")
+    p.add_argument("--all", action="store_true", help="also the decided notices")
+    p.set_defaults(fn=cmd_notices)
+
+    p = sub.add_parser("notice", help="the manager's decision on a notice: a new Octopus AI "
+                                      "ticket, its evidence on a ticket, or no ticket")
+    p.add_argument("id", help="the notice, N####")
+    p.add_argument("decision", choices=list(NOTICE_DECISIONS))
+    p.add_argument("target", nargs="?", help="with evidence: the Octopus AI ticket")
+    p.add_argument("--title", help="with ticket: the title of the new ticket")
+    p.add_argument("--severity", choices=list(SEVERITIES))
+    p.add_argument("--difficulty", choices=list(DIFFICULTIES))
+    p.add_argument("--description", help="with ticket: the first section; absent: the defect")
+    p.add_argument("--why", help="with none: why no ticket")
+    p.set_defaults(fn=cmd_notice)
 
     p = sub.add_parser("approve-readme", help="the owner approved the exact new text of a "
                                               "project-wide README file: let this session "

@@ -4,7 +4,7 @@
 
 Every manager session runs it every 10 minutes: a recurring job it schedules itself (Claude
 Code's `CronCreate`), or the board's watchdog, which types `WAKE_TEXT` into a manager whose
-agent has no scheduler of its own. One run does three things:
+agent has no scheduler of its own. One run does four things:
 
 1. FOLLOW-UPS. A ticket that holds `projects` and sits in the verify or the closed lane names
    its follow-ups under `## Follow-ups`, one line each: project, id and title. A follow-up
@@ -13,7 +13,11 @@ agent has no scheduler of its own. One run does three things:
 2. THE UPDATE. `sessions --if-any`: the four sections, every run, while any agent finished
    since the last update, waits for the owner, works or waits for anything else; nothing at
    all only when none does. Never a line that says nothing changed.
-3. THE JOB'S AGE. `--job-created` records, after `CronCreate`, when the calling session made
+3. THE NOTICES. Each notice that a session of another project sent about a defect of an
+   Octopus AI tool (`todo notify`) and the manager did not decide yet stands on stderr, every
+   run, with the commands that decide it: a new Octopus AI ticket, its evidence on an existing
+   ticket, or no ticket.
+4. THE JOB'S AGE. `--job-created` records, after `CronCreate`, when the calling session made
    its check job (`check-jobs.json` beside the registry). Claude Code deletes a recurring job
    after 7 days; a check whose job is older than `RENEW_SECONDS` exits 3 and says on stderr
    to make the job again.
@@ -48,7 +52,9 @@ _TICKET = re.compile(r"\bT\d{4,}\b")
 def wake_text():
     """What the watchdog types into a manager whose agent has no scheduler."""
     return ('Run the 10-minute check: python "%s" check. Print its output as it is; when it '
-            'prints nothing, write nothing.' % (project.OCTOPUS / "octopus.py").as_posix())
+            'prints nothing, write nothing. Decide each notice it lists with the command it '
+            'names, and write nothing about the notices.'
+            % (project.OCTOPUS / "octopus.py").as_posix())
 
 
 # ── the follow-ups ─────────────────────────────────────────────────────────
@@ -155,6 +161,35 @@ def launch_followups(registry=None, dry_run=False, err=None):
     return done
 
 
+# ── the notices ────────────────────────────────────────────────────────────
+
+def list_notices(err=None):
+    """Write each open notice of the Octopus AI project on `err`, with the commands that
+    decide it. Returns how many wait."""
+    import todo as T
+    err = sys.stderr if err is None else err
+    try:
+        with T.in_manager_home():
+            waiting = T.open_notices()
+            name = T.manager_home_name()
+    except Exception:                                   # noqa: BLE001 - the check goes on
+        return 0
+    if not waiting:
+        return 0
+    cmd = 'python "%s" todo --project "%s" notice' % (
+        (project.OCTOPUS / "octopus.py").as_posix(), name)
+    err.write("check: %d Octopus AI notice(s) wait for your decision. Decide each one with "
+              "one of these commands, and write nothing about it:\n" % len(waiting))
+    err.write('  %s <id> ticket --title "..." --severity <severity> --difficulty '
+              '<difficulty>\n' % cmd)
+    err.write("  %s <id> evidence <Octopus AI ticket id>\n" % cmd)
+    err.write('  %s <id> none --why "..."\n' % cmd)
+    for _f, meta, body in waiting:
+        err.write("- %s\n" % T.notice_line(meta, body))
+        err.write("  Evidence: %s\n" % " ".join(T.notice_section(body, "Evidence").split()))
+    return len(waiting)
+
+
 # ── the age of the check job ───────────────────────────────────────────────
 
 def jobs_file():
@@ -230,6 +265,7 @@ def run(job_created=False, dry_run=False, registry=None, sid=None, out=None, err
     launch_followups(registry, dry_run, err)
     sessionreport.report(since_last=True, if_any=True, registry=registry, out=out,
                          save=not dry_run)
+    list_notices(err)
     if job_created:
         return 0
     sid = sid if sid is not None else own_session(registry)
