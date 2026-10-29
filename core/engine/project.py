@@ -120,9 +120,10 @@ def _provider_value_ok(key, value):
     return isinstance(value, str)
 
 
-# The roles a lane can have. Each of the first five names exactly one lane; `none` is a lane
-# the code has no need of, and a project may add any number of those.
-LANE_ROLES = ("start", "active", "blocked", "verify", "closed")
+# The roles a lane can have. Each names exactly one lane; `none` is a lane the code has no
+# need of, and a project may add any number of those. `ai` holds the tickets that an AI filed
+# without an owner's request.
+LANE_ROLES = ("ai", "start", "active", "blocked", "verify", "closed")
 
 DEFAULT_LANES = [
     {"dir": "Pipeline", "label": "Pipeline", "role": "start", "color": "#c9a227",
@@ -137,6 +138,26 @@ DEFAULT_LANES = [
     {"dir": "Done", "label": "Done", "role": "closed", "color": "#3f9e6b",
      "statuses": ["done", "closed by other task", "cancelled"]},
 ]
+
+# The lane of the role `ai`. Every project has it: `with_ai_lane` puts it before the start lane
+# of a project whose lanes name no `ai` lane.
+AI_LANE = {"dir": "AI-Pipeline", "label": "AI-Pipeline", "role": "ai", "color": "#b07d3c",
+           "statuses": ["pipeline"]}
+
+
+def with_ai_lane(lanes, roles=None):
+    """`lanes` with the `ai` lane before the start lane, when no lane has the role `ai`. Its
+    status is the word of the status role `pipeline`. Returns a new list."""
+    out = [dict(x) if isinstance(x, dict) else x for x in lanes]         if isinstance(lanes, list) else []
+    if any(isinstance(x, dict) and x.get("role") == "ai" for x in out):
+        return out
+    word = (roles or {}).get("pipeline") or "pipeline"
+    ai = dict(AI_LANE, statuses=[word])
+    if any(isinstance(x, dict) and x.get("dir") == ai["dir"] for x in out):
+        return out
+    at = [i for i, x in enumerate(out) if isinstance(x, dict) and x.get("role") == "start"]
+    out.insert(at[0] if at else 0, ai)
+    return out
 
 # The statuses the code acts on, by role. A project renames one by mapping the role to
 # another word; the word must be a status of the lane the role needs.
@@ -167,7 +188,8 @@ DEFAULT_DIFFICULTY = {
 DEFAULT_QUERY_FIELDS = ["id", "title", "state", "status", "severity", "difficulty",
                         "category", "source", "epic", "permits", "claim", "session", "launched",
                         "sessions", "blockedBy", "group", "related", "path"]
-QUERY_FIELDS = DEFAULT_QUERY_FIELDS + ["parent", "children", "tags", "repeat", "run"]
+QUERY_FIELDS = DEFAULT_QUERY_FIELDS + ["parent", "children", "tags", "repeat", "run",
+                                       "filedBy"]
 
 
 # ── the registry of projects ────────────────────────────────────────────────
@@ -784,7 +806,8 @@ class Project:
                                  % (self.config_dir, PROJECT_FILE))
             rc = True
         self.reply_check = rc
-        self._lanes(cfg.get("lanes") or DEFAULT_LANES, cfg.get("statusRoles") or {})
+        roles = cfg.get("statusRoles") or {}
+        self._lanes(with_ai_lane(cfg.get("lanes") or DEFAULT_LANES, roles), roles)
         cats = cfg.get("categories") or {}
         if not isinstance(cats, dict) or not all(isinstance(v, str) for v in cats.values()):
             self.problems.append("%s/%s: `categories` must map a category to its meaning"

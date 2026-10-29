@@ -60,7 +60,7 @@ An empty file removes the section. A section no layer supplies is left out.
 | `{note_quoted}` | the note, as a quote, for a project's own brief layer |
 | `{ticket_text}` | the ticket file |
 | `{hard_rules}`, `{checks}`, `{checks_line}`, `{granted}`, `{write_paths}`, `{read_only}`, `{look_on_screen}` | from the rulesets |
-| `{lane:<role>}`, `{label:<role>}` | the directory or the label of the board with that role: `start`, `active`, `blocked`, `verify`, `closed` |
+| `{lane:<role>}`, `{label:<role>}` | the directory or the label of the board with that role: `ai`, `start`, `active`, `blocked`, `verify`, `closed` |
 | `{provider}`, `{provider_label}`, `{provider_limits}` | the AI provider the launch starts, its name, and what its launch cannot enforce, as rules |
 | `{status:<role>}` | the status word the project uses for that status role, e.g. `{status:implementing}` |
 

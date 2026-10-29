@@ -1429,7 +1429,7 @@ const sessOf = id => (DATA.sessions || []).filter(s => s.id === id);
 const CAT_CODE = "project code";
 const slugOf = x => String(x || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 
-/* The lanes are the project's data. A role (start, active, blocked, verify, closed) names
+/* The lanes are the project's data. A role (ai, start, active, blocked, verify, closed) names
    the lane the code needs; the label is what the page writes; the colour is a custom
    property per lane directory, set from the snapshot. */
 const laneOf = role => (DATA.roles || {})[role] || role;
@@ -2128,6 +2128,11 @@ function cardNode(t) {
     cp.title = "category: " + t.category + ((DATA.categoryMeaning || {})[t.category]
       ? " · " + DATA.categoryMeaning[t.category] : "");
     sp.append(cp);
+  }
+  if (t.filedBy === "ai") {
+    const ap = el("span", "pill", "AI-filed");
+    ap.title = "an AI filed this ticket without the owner's request";
+    sp.append(ap);
   }
   if (t.repeat) {
     const r = el("span", "pill rep", `↻ ${DATA.repeatLabel[t.repeat] || t.repeat} · run ${t.run}`);

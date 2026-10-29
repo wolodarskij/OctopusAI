@@ -80,8 +80,8 @@ def named_followups(body, names, own):
 
 def unlaunched(registry=None):
     """`[(project name, root, ticket id, source)]`: each follow-up a finished cross-project
-    ticket named that sits in its start lane and was never launched. `source` is
-    `<project> <id>` of the ticket that named it."""
+    ticket named that sits in its start lane or its `ai` lane and was never launched.
+    `source` is `<project> <id>` of the ticket that named it."""
     import todo as T
     registry = project.load_registry() if registry is None else registry
     roots = {r["name"]: Path(r["path"]) for r in registry}
@@ -110,8 +110,8 @@ def unlaunched(registry=None):
             continue
         try:
             t = T.find(T.load_all(), tid)
-            if t is not None and t.state == T.lane("start") and not t.sessions \
-                    and not t.repeat:
+            if t is not None and t.state in (T.lane("start"), T.lane("ai")) \
+                    and not t.sessions and not t.repeat:
                 out.append((name, roots[name], tid, source))
         except Exception:                               # noqa: BLE001
             pass

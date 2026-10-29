@@ -34,6 +34,7 @@ description: Ask about tickets and act on them from chat - list, filter, count, 
 | `--related-to <id>` | the tickets one link away |
 | `--claimed` `--unclaimed` `--blocked` | who holds it, and whether it names a blocker |
 | `--startable` | in Pipeline and sized |
+| `--state AI-Pipeline` | the tickets an AI filed without the owner's request |
 | `--count` `--ids` `--json` | the number, the ids, the full records |
 | `--limit N` `--width N` | the row count, the title width |
 
@@ -68,9 +69,10 @@ Bare words are an AND search over id, title, source, body, tags, permits and sta
 | "it is worse than that" | edit `severity:`, then `index` |
 | "that is a tooling thing" | edit `category: internal tooling`, then `index` |
 | "it needs <permit>" | edit `permits:`, then `index` |
-| "file this" | `new --title "..." --severity High --source src/module.ts:118 --description "..."` |
-| "split T0001" | `new --title "..." --parent T0001` per part |
-| "file it and start it" | `new --title "..." --launch`: `work`, or `plan` when the difficulty is `unknown` |
+| "file this" | `new --title "..." --severity High --source src/module.ts:118 --description "..." --requested "<the order, in neutral words>"` |
+| "split T0001" | `new --title "..." --parent T0001 --requested "<the order, in neutral words>"` per part |
+| "file it and start it" | `new --title "..." --requested "<the order, in neutral words>" --launch`: `work`, or `plan` when the difficulty is `unknown` |
+| "take T0001", an AI ticket | `move T0001 Pipeline` |
 | "these belong together" | `epic <name> --title "..."`, then `move <ids> Pipeline --epic <name>` |
 | "relate T0001 and T0002" | `link T0001 --related T0002` |
 
@@ -80,6 +82,9 @@ the owner's shell.** Carry it out. Never ask the owner to drag a card or to type
 **A `--description` and a `--note` state the owner's order and nothing more.** Keep the scope the
 owner gave, in one or two paragraphs or a short list. Add no part, step, test, check, proof or
 background the owner did not ask for.
+
+**A ticket the owner asks for carries `--requested`, and goes to Pipeline.** A ticket you file on
+your own goes to AI-Pipeline with `filed-by: ai`, with no flag.
 
 **After a hand edit, run `index`, then `check`.** `check` must pass before you report.
 

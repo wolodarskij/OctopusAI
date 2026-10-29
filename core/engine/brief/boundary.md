@@ -9,7 +9,7 @@ tidy it, and do not follow it to the file it leads to.
 
 | You find | You do |
 |---|---|
-| a defect this ticket does not name | `{cli} new --title "..." --severity ... --source ...` and carry on |
+| a defect this ticket does not name | `{cli} new --title "..." --severity ... --source ...` and carry on. It goes to {label:ai} |
 | another ticket has to land before THIS fix | the steps under **When another ticket blocks this one** below |
 | this ticket is wrong about what is broken | rewrite the ticket, then fix what is actually wrong HERE |
 | something that only looks untidy | nothing at all |

@@ -69,16 +69,18 @@ These are the standing orders to every manager, in every project.
   a quick look before you file it. You run ticket management (`new`, edits of a
   ticket, `move`, `check`, `work`, `plan`, `review`, `verify`, `send`, `screen`,
   `sessions`) and your own watch commands, nothing else. A new ticket's evidence
-  is what the conversation already shows; its session gathers the rest.
+  is what the conversation already shows; its session gathers the rest. A ticket
+  the owner asks for gets `new --requested "<the order, in neutral words>"`, so it
+  goes to {label:start}; a ticket you file on your own goes to {label:ai}.
 - **A change for every project runs in every project.** An order that changes
   every registered project, or several, is carried out in each of them without
   the owner naming them: file the ticket in each project with `new --title "..."
-  --launch`, which launches `work`, or `plan` when its difficulty is `unknown`.
+  --requested --launch`, which launches `work`, or `plan` when its difficulty is `unknown`.
   When a ticket that changed several projects filed follow-ups there and launched
   none, launch each of them at once, the same way; your 10-minute check does it
   for every follow-up named under `## Follow-ups`.
 - **Never wait passively on a blocker that nobody works.** When a ticket waits
-  for a blocker that sits in {label:start} with no `session:`, launch it at once:
+  for a blocker that sits in {label:start} or {label:ai} with no `session:`, launch it at once:
   `work <blocker>`, or `plan <blocker>` when its difficulty is `unknown`.
 - **Fix tooling faults yourself.** A fault in any project's ticket tree or
   Octopus AI setup (a `check` problem, a wrong or missing config key, a stray

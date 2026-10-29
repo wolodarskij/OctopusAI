@@ -2,6 +2,7 @@
 
     TODO/
       INDEX.md              generated - never hand-edit
+      AI-Pipeline/          a ticket an AI filed without the owner's request
       Pipeline/             a ticket nobody has started
         T0001-short-slug.md
         some-epic/          an EPIC: a directory that moves as one unit
@@ -14,7 +15,8 @@
 
 The lanes above are the default. A project names its own in `.octopus/project.json`
 (`lanes`): their directories, their labels, their statuses, and lanes of its own. The code
-needs five ROLES - start, active, blocked, verify, closed - and each names one lane.
+needs six ROLES - ai, start, active, blocked, verify, closed - and each names one lane. A
+project whose lanes name no `ai` lane gets AI-Pipeline before its start lane.
 
 THE DIRECTORY IS THE LANE AND `status` IS WHERE INSIDE IT. The path carries the coarse state,
 so a VCS move, an editor drag and `todo.py move` all mean the same thing. The `status` field
@@ -131,7 +133,7 @@ for _stream in ("stdout", "stderr"):
 
 
 def lane(role):
-    """The directory of the lane with this role: start, active, blocked, verify, closed."""
+    """The directory of the lane with this role: ai, start, active, blocked, verify, closed."""
     return P.lane(role)
 
 
@@ -217,6 +219,11 @@ def in_manager_home():
     finally:
         _project.reset(tok)
 
+
+# `filed-by: ai` marks a ticket that an AI filed without an owner's request. It sits in the
+# `ai` lane until the owner takes it; a requested ticket carries no such line.
+FILED_BY_FIELD = "filed-by"
+AI_FILED = "ai"
 
 # Claude Code's Remote Control, per ticket. `remote-control: on|off` on the ticket wins over
 # `remoteControl` in project.json; a provider without Remote Control (Codex) has none.
@@ -462,6 +469,11 @@ class Ticket:
         return self.meta.get("parent", "").strip()
 
     @property
+    def ai_filed(self):
+        """Whether an AI filed this ticket without an owner's request."""
+        return self.meta.get(FILED_BY_FIELD, "").strip() == AI_FILED
+
+    @property
     def category(self):
         """One of `P.CATEGORIES`. Absent is derived from the source, so it is never empty.
         A ticket that still carries the old field `kind` reads through `LEGACY_KINDS` until
@@ -582,7 +594,8 @@ def parse(text):
 
 def render(meta, body):
     keys = ["id", "title", "category", "severity", "difficulty", "status", "outcome", "source",
-            "created", "claim", "session", "launched", "sessions", "blocked-by", "parent",
+            "created", "filed-by", "claim", "session", "launched", "sessions", "blocked-by",
+            "parent",
             "group", "related",
             "permits", "remote-control", "tags", "repeat", "run", "last-run", "last-result"]
     keys += [k for k in meta if k not in keys]
@@ -1640,6 +1653,23 @@ def _may_close(args, status=None):
     return bool(_owner_words(args)) or not os.environ.get("CLAUDECODE")
 
 
+def _in_ai_session():
+    """Whether this process runs inside an AI session: Claude Code sets `CLAUDECODE` in the
+    shells it runs, and a launch on another AI provider sets `OCTOPUS_SESSION`."""
+    return bool(os.environ.get("CLAUDECODE") or os.environ.get("OCTOPUS_SESSION"))
+
+
+def _requested(args, parent=None):
+    """Whether the owner asked for the ticket `new` files. `--requested` and `--owner-order`
+    say so; a caller outside every AI session is the owner; a child of a requested ticket is
+    a part of that request. Every other ticket an AI files on its own."""
+    if getattr(args, "requested", None) or getattr(args, "owner_order", None):
+        return True
+    if not _in_ai_session():
+        return True
+    return parent is not None and not parent.ai_filed
+
+
 def _may_block_by_user(args):
     """Whether this caller may set `blocked by user`.
 
@@ -2054,9 +2084,24 @@ def edit_ticket(tid, fields, body, base):
 
 def cmd_new(args):
     ensure_tree()
-    if getattr(args, "launch", False) and args.state != lane("start"):
-        print("Error: --launch files the ticket into %s; it does not go with --state %s"
-              % (lane("start"), args.state), file=sys.stderr)
+    parent = getattr(args, "parent", None)
+    pt = None
+    if parent:
+        pt = find(load_all(), parent)
+        if pt is None:
+            print("Error: no ticket %r for --parent" % parent, file=sys.stderr)
+            return 2
+    requested = _requested(args, pt)
+    if not args.state:
+        args.state = lane("start") if requested else lane("ai")
+    elif args.state == lane("start") and not requested:
+        print("Error: a ticket an AI files without the owner's request goes to %s, not %s.\n"
+              "  When the owner asked for it, pass --requested \"<the order, in neutral "
+              "words>\"." % (lane("ai"), lane("start")), file=sys.stderr)
+        return 2
+    if getattr(args, "launch", False) and args.state not in (lane("start"), lane("ai")):
+        print("Error: --launch files the ticket into %s or %s; it does not go with --state %s"
+              % (lane("start"), lane("ai"), args.state), file=sys.stderr)
         return 2
     if args.status and args.status not in P.STATUSES[args.state]:
         print("Error: status %r does not belong to %s. One of: %s"
@@ -2075,6 +2120,8 @@ def cmd_new(args):
         "status": args.status or default_status(args.state),
         "created": args.created or _today(),
     }
+    if not requested:
+        meta[FILED_BY_FIELD] = AI_FILED
     category = getattr(args, "category", None)
     if category:
         if category not in P.CATEGORIES:
@@ -2095,12 +2142,7 @@ def cmd_new(args):
         meta["permits"] = args.permits
     if args.tags:
         meta["tags"] = args.tags
-    parent = getattr(args, "parent", None)
-    if parent:
-        pt = find(load_all(), parent)
-        if pt is None:
-            print("Error: no ticket %r for --parent" % parent, file=sys.stderr)
-            return 2
+    if pt is not None:
         meta["parent"] = pt.id
     group = getattr(args, "group", None)
     if P.groups_store == "files":
@@ -2133,6 +2175,9 @@ def cmd_new(args):
     path = _dest_dir(args.state, args.epic or "") / ("%s-%s.md" % (tid, slug(args.title)))
     _write(path, render(meta, body))
     commit_id(n)
+    said = getattr(args, "requested", None)
+    if isinstance(said, str) and said.strip():
+        record_owner_order(path, args.state, meta["status"], said)
     print("%s  %s" % (tid, path.relative_to(P.ROOT)))
     write_index(quiet=True)
     if getattr(args, "launch", False):
@@ -2399,6 +2444,7 @@ def query_record(t, every):
         "launched": lambda: t.launched, "sessions": lambda: t.sessions,
         "blockedBy": lambda: t.blocked_by, "parent": lambda: t.parent,
         "group": lambda: t.group, "related": lambda: t.related,
+        "filedBy": lambda: t.meta.get(FILED_BY_FIELD, ""),
         "children": lambda: [k.id for k in children_of(every, t.id)],
         "tags": lambda: t.tags, "repeat": lambda: t.repeat, "run": lambda: t.run,
         "path": lambda: t.path.relative_to(P.ROOT).as_posix(),
@@ -5590,7 +5636,9 @@ def _main(argv):
                    "What it should do for a Feature: title, or What the documentation "
                    "should say for a Documentation: title")
     p.add_argument("--evidence")
-    p.add_argument("--state", default=lane("start"), choices=list(P.STATES))
+    p.add_argument("--state", choices=list(P.STATES),
+                   help="absent: %s for a requested ticket, %s for one an AI files on its own"
+                        % (lane("start"), lane("ai")))
     p.add_argument("--status")
     p.add_argument("--epic", default="")
     p.add_argument("--claim")
@@ -5606,6 +5654,10 @@ def _main(argv):
                    metavar="WORDS",
                    help="the owner ordered, in this session's chat, to file this ticket as "
                         "`blocked by user`; the order in neutral words is optional")
+    p.add_argument("--requested", nargs="?", const=True, metavar="WORDS",
+                   help="the owner asked for this ticket: it goes to %s, not %s. The order "
+                        "in neutral words is optional and goes under `## Owner's orders`"
+                        % (lane("start"), lane("ai")))
     p.add_argument("--launch", action="store_true",
                    help="launch its session at once: `plan` when its difficulty is unknown, "
                         "`work` otherwise")

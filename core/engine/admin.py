@@ -1590,7 +1590,8 @@ def set_global_rules(changes, out=print):
 # ── lanes ───────────────────────────────────────────────────────────────────
 
 def _lanes_of(pj):
-    return [dict(x) for x in (pj.get("lanes") or _project.DEFAULT_LANES)]
+    return _project.with_ai_lane(pj.get("lanes") or _project.DEFAULT_LANES,
+                                 pj.get("statusRoles") or {})
 
 
 def _save_pj(root, pj):

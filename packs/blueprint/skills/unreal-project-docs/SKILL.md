@@ -154,7 +154,7 @@ For script and C++ classes, read the whole file including commented-out blocks �
 | **Suspect** | Zero call sites but reachable from somewhere not swept |
 
 Only **Orphaned** is a claim, and only when `_callindex.json` reports `sourcesNotSwept: []`. Every
-Deprecated / Orphaned finding also gets a ticket in Pipeline: `python .octopus/todo.py new --title
+Deprecated / Orphaned finding also gets a ticket in AI-Pipeline: `python .octopus/todo.py new --title
 "..." --source <page>`.
 
 ## Step 4 — Write the directory
@@ -203,7 +203,7 @@ outside the five axes; a search for a function name finds it; a search for a phr
 *prose* finds it; every cross-link resolves.
 
 Then finish per the project's own conventions — if it keeps a changelist log, append one line; file each
-finding as a ticket in Pipeline. Do not `save_assets` — this skill only reads the editor.
+finding as a ticket in AI-Pipeline. Do not `save_assets` — this skill only reads the editor.
 
 ## Update run
 

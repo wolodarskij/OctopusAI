@@ -4,8 +4,8 @@ This ticket holds `projects`: it may change other registered projects and file
 tickets in them. **Carry the change into each project to the end.** The owner
 never has to launch a session in another project by hand.
 
-- **File each follow-up with its session:** `new --title "..." --launch`, with
-  the command in the project's row below. It files the ticket and launches `work`
+- **File each follow-up with its session:** `new --title "..." --requested --launch`,
+  with the command in the project's row below. It files the ticket and launches `work`
   on it, or `plan` when its `difficulty` is `unknown`. Give it `--note` with what
   the follow-up needs from this ticket. Do the same in every project the change
   reaches.

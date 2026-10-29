@@ -141,6 +141,7 @@ def snapshot():
             "sessions": t.sessions,
             "blockedBy": t.blocked_by,
             "parent": t.parent,
+            "filedBy": t.meta.get(T.FILED_BY_FIELD, ""),
             "group": t.group,
             "tags": t.tags,
             "repeat": t.repeat,
@@ -1443,7 +1444,8 @@ def act_groupApply(body):
 
 
 def act_new(body):
-    """File a ticket in the start lane from the fields the page holds."""
+    """File a ticket in the start lane from the fields the page holds. The owner filed it,
+    so it is a requested ticket."""
     title = (body.get("title") or "").strip()
     if not title:
         raise ValueError("a ticket needs a title")
@@ -1471,7 +1473,7 @@ def act_new(body):
         description=(body.get("description") or "").strip(),
         evidence=(body.get("evidence") or "").strip(),
         state=T.lane("start"), epic="", parent=(body.get("parent") or "").strip() or None,
-        group=group if P.groups_store == "files" else None)
+        group=group if P.groups_store == "files" else None, requested=True)
     repeat = (body.get("repeat") or "").strip()
     if repeat and repeat not in T.REPEAT_ROLES:
         raise ValueError("%r is not a role" % repeat)

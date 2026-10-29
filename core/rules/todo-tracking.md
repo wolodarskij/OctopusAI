@@ -9,6 +9,7 @@
 ```
 TODO/
   INDEX.md              generated - never hand-edit
+  AI-Pipeline/          an AI filed it without the owner's request
   Pipeline/             nobody has started it
     T0001-short-slug.md
     some-epic/          an EPIC: a directory that moves as one unit
@@ -21,10 +22,11 @@ TODO/
 ```
 
 **These are the default boards.** A project renames boards and adds boards in `lanes` in
-`.octopus/project.json`. The engine needs five roles, and each role names exactly one board:
+`.octopus/project.json`. The engine needs six roles, and each role names exactly one board:
 
 | Role | Default board |
 |---|---|
+| `ai` | AI-Pipeline |
 | `start` | Pipeline |
 | `active` | InProgress |
 | `blocked` | Blocked |
@@ -32,7 +34,22 @@ TODO/
 | `closed` | Done |
 
 This rule uses the default names. Read each name as its role. The open boards are every board
-before the verify board, except the closed board.
+before the verify board, except the closed board. A project whose `lanes` name no `ai` board gets
+AI-Pipeline before its start board from the engine.
+
+## AI-Pipeline holds the tickets nobody asked for
+
+**A ticket that an AI files without the owner's request goes to AI-Pipeline and carries
+`filed-by: ai`.** A requested ticket goes to Pipeline and carries no such line. The owner takes an
+AI ticket with a move to Pipeline; the line stays.
+
+- **A requested ticket:** the owner filed it (the owner's shell, the board's `New task`), or an AI
+  filed it because the owner asked for it and passed `--requested "<the order, in neutral
+  words>"`. A child of a requested ticket, such as a part of a split, is requested too.
+- **An AI ticket:** every other ticket that a session files, also a finding of a session on an AI
+  ticket. `new` sends it to AI-Pipeline with no flag, and refuses it `--state Pipeline`.
+- A group run launches no AI-Pipeline ticket. A blocker and a named follow-up in AI-Pipeline with no
+  session get a worker, as in Pipeline.
 
 **A move of a ticket is a move of its file.** `move`, a drag on the board and `mv` all do it.
 No other place records the state, so nothing can disagree with the tree.
@@ -52,7 +69,8 @@ names no status lands on it.
 
 | Board | Status | Set by |
 |---|---|---|
-| Pipeline | `pipeline` | `new`, the board's `New task`, any move to Pipeline, and a `verify` session that finds the work does not hold |
+| AI-Pipeline | `pipeline` | `new` in a session, for a ticket the owner did not ask for, and any move to AI-Pipeline |
+| Pipeline | `pipeline` | `new` for a requested ticket, the board's `New task`, any move to Pipeline, and a `verify` session that finds the work does not hold |
 | InProgress | `waiting` | a move that names no status, such as a drag. No session has the ticket |
 | InProgress | `investigating` | a `review` session, at its start |
 | InProgress | `planning` | a `plan` session, at its start |
@@ -77,10 +95,10 @@ waits for an answer from the owner stays in its board, and the session asks the 
 **A launched session that meets a blocker:**
 
 1. links the blocker and moves its own ticket to Blocked;
-2. launches a worker on the blocker when the blocker is in Pipeline with no session: `work
+2. launches a worker on the blocker when the blocker is in Pipeline or AI-Pipeline with no session: `work
    <blocker>`, or `plan <blocker>` when its difficulty is `unknown`;
 3. schedules a `CronCreate` job every 10 minutes that reads the blocker's board with `show`. When
-   the blocker is back in Pipeline with no session, the job launches the worker again;
+   the blocker is back in Pipeline or AI-Pipeline with no session, the job launches the worker again;
 4. stays open. When the blocker is in Verification or Done, the job moves the ticket back to
    InProgress `implementing` and deletes itself, and the session continues.
 
@@ -90,7 +108,7 @@ session. The brief carries the exact commands.
 **A change for every project reaches every project.** A session whose ticket holds `projects` and
 changes several registered projects carries the change into each of them to the end. Every
 follow-up ticket it files in another project gets its session from the filing session, the same
-way in every project: `new --project "<name>" --title "..." --launch` files it and launches
+way in every project: `new --project "<name>" --title "..." --requested --launch` files it and launches
 `work`, or `plan` when its difficulty is `unknown`. A follow-up filed without a session gets one
 at once. The filing session names every follow-up on its own ticket, under `## Follow-ups`. The
 owner never launches them by hand. The brief of a ticket that holds `projects` carries the
@@ -510,7 +528,7 @@ that changes code or content and also its docs is a bug or a feature.
 `new`, the board's `New task` and its `Process with AI` write the section that the title names.
 `check` accepts the three kinds, and it renames no ticket.
 
-Other fields: `category`, `parent`, `group`, `related`, `repeat`, `run`.
+Other fields: `category`, `filed-by`, `parent`, `group`, `related`, `repeat`, `run`.
 
 **`category` says what the ticket is about.** The defaults are `project code` and `internal
 tooling`. `categories` in `.octopus/project.json` adds categories, or rewords the default ones.
@@ -586,7 +604,8 @@ moves all of them at once.
 When the user asks you to **analyze** code, at any scope:
 
 - Find inconsistencies, bugs, missing implementations, code smells and improvements.
-- **Create a ticket in Pipeline** for each finding.
+- **Create a ticket in Pipeline** for each finding: `new --requested "<the order, in neutral
+  words>"`. The owner asked for the findings.
 - Do **not** fix them. At the end, say "Added N ticket(s)."
 
 **Ask before you log an ambiguous finding.** A finding is ambiguous when the code, the comments
@@ -604,6 +623,7 @@ code around it makes obvious.
 
 - Normal edits, features and refactors that the user asked for: log nothing.
 - Do not move a ticket out of Pipeline unless the user asks, or you do its work.
+- Do not move a ticket from AI-Pipeline to Pipeline unless the owner asks.
 - **Never delete a ticket to mark it finished.** It moves to Done with the status that says how it
   closed.
 
@@ -611,7 +631,7 @@ code around it makes obvious.
 
 | Request | Action |
 |---|---|
-| add | `new` |
+| add | `new --requested "<the order, in neutral words>"` |
 | start | `move <id> InProgress` |
 | park | `move <id> Blocked`, and fill `blocked-by:` |
 | finish | `move <id> Verification`, and stop. `verify <id>` closes it |
