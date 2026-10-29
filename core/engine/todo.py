@@ -98,7 +98,10 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import hashlib
 import io
+import json
+import math
 import os
 import re
 import shutil
@@ -1612,17 +1615,19 @@ def cmd_check(args):
     if stale:
         problems.append("%s/INDEX.md is stale - run: %s index" % (P.todo_dir, P.cli))
 
-    # A look-alike is a guess, so it is listed and does not fail the check.
-    pairs = duplicate_pairs(tickets)
+    # A duplicate is the model's verdict, so it is listed and does not fail the check.
+    pairs, unchecked = same_pairs(dup_candidate_pairs(tickets))
     if pairs:
-        print("%d pair(s) of open tickets look like duplicates:" % len(pairs))
-        for a, b, why in pairs:
-            print("  %s and %s: %s" % (a.id, b.id, why))
+        print("%d pair(s) of open tickets name the same defect or request:" % len(pairs))
+        for a, b in pairs:
+            print("  %s %s\n  %s %s" % (a.id, a.title, b.id, b.title))
         print("  Close the duplicate: %s move <id> %s --status \"%s\", after its evidence went "
               "to the other with `evidence`." % (P.cli, lane("closed"),
                                                   S("closed by other task")))
         print("  Or record that they differ: %s link <id> --not-duplicate <other id> --why "
               "\"<why>\"\n" % P.cli)
+    if unchecked:
+        print("The duplicate check has no verdict on %s.\n" % unchecked)
     if not problems:
         print("%d tickets, index current, no problem" % len(tickets))
         return 0
@@ -2136,6 +2141,20 @@ def cmd_new(args):
         print("Error: --not-duplicate needs --why \"<why the new ticket differs from each of "
               "them>\"", file=sys.stderr)
         return 2
+    if _in_ai_session():
+        tickets = load_all()
+        text = args.description or ""
+        skip = set(differs) | ({pt.id} if pt is not None else set())
+        found = [t for t, _score in dup_candidates(args.title, text, tickets, skip)]
+        if found:
+            try:
+                ids, why = same_as_new(args.title, args.source, text, found)
+            except ValueError as exc:
+                ids, why = [], ""
+                print("The duplicate check has no verdict, so the ticket is filed: %s" % exc,
+                      file=sys.stderr)
+            if ids:
+                return _refuse_duplicate([t for t in found if t.id in ids], why)
     n = next_id()
     tid = "T%04d" % n
     meta = {
@@ -2198,7 +2217,7 @@ def cmd_new(args):
             print("Error: %s." % why.replace("%s is" % tid, "a ticket is", 1), file=sys.stderr)
             return 1
     body = "\n## %s\n\n%s\n" % (body_section(args.title),
-                                args.description or "TODO: describe it.")
+                                args.description or PLACEHOLDER)
     if args.evidence:
         body += "\n## Evidence\n\n%s\n" % args.evidence
     if differs:
@@ -2221,89 +2240,131 @@ def cmd_new(args):
 # from it; `new` and `check` do not take the two for duplicates.
 NOT_DUP_FIELD = "not-duplicate"
 NOT_DUP_SECTION = "Not a duplicate"
-# Two titles are close when their content words overlap at least this much (Jaccard).
-TITLE_CLOSE = 0.6
-# `check` takes two tickets on the same file for duplicates when this share of the shorter
-# title's content words, and at least two of them, stand in the other title too.
-TITLE_SHARED = 0.55
-_TITLE_KIND_RE = re.compile(r"^\s*(?:bug|feature|documentation)\s*:\s*", re.I)
-_TITLE_STOP = frozenset(
+# THE DUPLICATE CHECK runs in two steps. A cheap compare of the words (tf-idf cosine over the
+# title and the first section, weighted against every ticket of the project) picks at most
+# `DUP_CANDIDATES` open tickets that score `DUP_SCORE` or more. Only then a model reads them,
+# and only its verdict of the same defect or request makes a duplicate. A shared source file
+# never does.
+# The first section of a ticket that `new` filed with no description.
+PLACEHOLDER = "TODO: describe it."
+DUP_SCORE = 0.3
+DUP_CANDIDATES = 5
+DUP_PAIRS = 40
+DUP_SECONDS = 120
+DUP_TRIES = 2
+DUP_TEXT_CHARS = 1200
+_KIND_RE = re.compile(r"^\s*(?:bug|feature|documentation)\s*:\s*", re.I)
+_DUP_STOP = frozenset(
     "a an the of to in on for and or is are be been not no with by at as it its that this "
     "these those when from does do should every each into than then any all one has have "
     "was were will can".split())
 
+DUP_PROMPT = """You compare tickets of the project %(project)s.
 
-def source_files(source):
-    """The files and folders a `source:` line (str) names, without line numbers, in lower case
-    and with forward slashes. Returns a set of str; a word that is not a path is left out."""
-    out = set()
-    for part in re.split(r"[,;\s]+", source or ""):
-        part = part.strip("`'\"()").replace("\\", "/")
-        part = re.sub(r":[\d,\-]+$", "", part).rstrip("/").lower()
-        if part and ("/" in part or "." in part.lstrip(".")):
-            out.add(part)
-    return out
+%(task)s
 
+Two tickets are the same only when they name the same wrong behaviour, or the same change,
+in the same place, so that one fix or one piece of work settles both. Tickets that share a
+file, a subsystem, a topic or the same wording about different things are different. When
+you are in doubt, they are different.
 
-def title_words(title):
-    """The content words of a ticket title (str), without its kind prefix and stop words, each
-    with a plural `s` cut. Returns a set of str."""
-    words = re.findall(r"[a-z0-9_]+", _TITLE_KIND_RE.sub("", title or "").lower())
-    return {w[:-1] if len(w) > 3 and w.endswith("s") and not w.endswith("ss") else w
-            for w in words if w not in _TITLE_STOP}
+%(answer)s
 
-
-def titles_close(a, b):
-    """Whether two ticket titles (str) name the same thing: their content words overlap at
-    least `TITLE_CLOSE`. Returns a bool."""
-    wa, wb = title_words(a), title_words(b)
-    if not wa or not wb:
-        return False
-    return len(wa & wb) / len(wa | wb) >= TITLE_CLOSE
+%(tickets)s"""
+DUP_TASK_NEW = ("A NEW ticket is about to be filed. Decide, for each OPEN ticket below, whether "
+                "it is the same defect or the same request as the NEW ticket. An OPEN ticket "
+                "is the same only when the work it asks for settles everything that the NEW "
+                "ticket asks for. A NEW ticket that asks for more than the open ticket, or for "
+                "another part of the work, is different.")
+DUP_ANSWER_NEW = ('Answer with one JSON object and nothing else: {"same": ["<id of each open '
+                  'ticket that is the same>"], "why": "<one sentence>"}. "same" is [] when no '
+                  'open ticket is the same.')
+DUP_TASK_PAIRS = ("Decide, for each PAIR of open tickets below, whether its two tickets are the "
+                  "same defect or the same request.")
+DUP_ANSWER_PAIRS = ('Answer with one JSON object and nothing else: {"pairs": [{"a": "<id>", '
+                    '"b": "<id>", "same": true or false}]}, one entry for each pair.')
 
 
-def titles_share(a, b):
-    """Whether the shorter of two ticket titles (str) shares at least `TITLE_SHARED` of its
-    content words, and at least two, with the other. Returns a bool."""
-    wa, wb = title_words(a), title_words(b)
-    both = len(wa & wb)
-    return both >= 2 and both / min(len(wa), len(wb)) >= TITLE_SHARED
+def first_section(body):
+    """The text of the first `## ` section of a ticket body (str), without its heading and
+    without the placeholder that `new` writes when it gets no description."""
+    m = re.search(r"^##[^\n]*\n(.*?)(?=^##\s|\Z)", body or "", re.M | re.S)
+    return (m.group(1) if m else "").replace(PLACEHOLDER, "").strip()
 
 
-def duplicate_reason(title, source, t):
-    """Why ticket `t` looks like the ticket that `title` and `source` (str) describe: `same
-    file <path>`, `close title`, or empty when it does not. Returns a str."""
-    same = sorted(source_files(source) & source_files(t.source))
-    if same:
-        return "same file %s" % same[0]
-    return "close title" if titles_close(title, t.title) else ""
+def dup_words(text):
+    """The content words of a ticket text (str): lower case, without a kind prefix and stop
+    words, each with a plural `s` cut. Returns a list of str."""
+    words = re.findall(r"[a-z0-9_]+", _KIND_RE.sub("", text or "").lower())
+    return [w[:-1] if len(w) > 3 and w.endswith("s") and not w.endswith("ss") else w
+            for w in words if len(w) > 1 and w not in _DUP_STOP]
 
 
-def not_duplicates(t):
-    """The ids that ticket `t` names in `not-duplicate:`. Returns a list of str."""
-    return [x for x in re.split(r"[,\s]+", t.meta.get(NOT_DUP_FIELD, "")) if x]
+def _idf(tickets):
+    """`(weights, unknown)`: the inverse document frequency of each word over the title and the
+    first section of `tickets`, so a word that many tickets of the project hold weighs little,
+    and the weight of a word that no ticket holds."""
+    df = {}
+    for t in tickets:
+        for w in set(dup_words(t.title + "\n" + first_section(t.body))):
+            df[w] = df.get(w, 0) + 1
+    n = len(tickets)
+    return {w: math.log((n + 1) / (c + 0.5)) for w, c in df.items()}, math.log(n + 2)
 
 
-def duplicates_of(title, source, tickets, skip=()):
-    """The open tickets that look like the ticket `title` and `source` (str) describe: the
-    open lanes only, no repeatable ticket, no id in `skip`. Returns a list of
-    `(Ticket, reason)` in priority order."""
+def _vector(text, idf):
+    weights, unknown = idf
+    tf = {}
+    for w in dup_words(text):
+        tf[w] = tf.get(w, 0) + 1
+    v = {w: c * weights.get(w, unknown) for w, c in tf.items()}
+    norm = math.sqrt(sum(x * x for x in v.values())) or 1.0
+    return {w: x / norm for w, x in v.items()}
+
+
+def _cosine(a, b):
+    return sum(x * b.get(w, 0.0) for w, x in a.items())
+
+
+class _DupDoc:
+    """The two word vectors of one ticket: its title, and its title with its first section."""
+    __slots__ = ("title", "text")
+
+    def __init__(self, title, text, idf):
+        self.title = _vector(title, idf)
+        self.text = _vector(title + "\n" + text, idf)
+
+    def score(self, other):
+        return max(_cosine(self.title, other.title), _cosine(self.text, other.text))
+
+
+def _dup_open(tickets):
+    return [t for t in tickets if t.state in P.OPEN_STATES and not t.repeat]
+
+
+def dup_candidates(title, text, tickets, skip=()):
+    """The open tickets whose words come close to a new ticket with `title` and first section
+    `text` (str): the open lanes only, no repeatable ticket, no id in `skip`. Returns at most
+    `DUP_CANDIDATES` `(Ticket, score)`, the closest first."""
+    idf = _idf(tickets)
+    new = _DupDoc(title, text, idf)
     out = []
-    for t in sorted(tickets, key=priority):
-        if t.state not in P.OPEN_STATES or t.repeat or t.id in skip:
+    for t in _dup_open(tickets):
+        if t.id in skip:
             continue
-        why = duplicate_reason(title, source, t)
-        if why:
-            out.append((t, why))
-    return out
+        score = new.score(_DupDoc(t.title, first_section(t.body), idf))
+        if score >= DUP_SCORE:
+            out.append((t, score))
+    out.sort(key=lambda x: -x[1])
+    return out[:DUP_CANDIDATES]
 
 
-def duplicate_pairs(tickets):
-    """The pairs of open tickets that look like duplicates of each other: a close title, or the
-    same file and titles that share most words. A parent and its child, and a pair that one of
-    them names in `not-duplicate:`, are left out. Returns a list of `(Ticket, Ticket, reason)`."""
-    open_t = sorted((t for t in tickets if t.state in P.OPEN_STATES and not t.repeat),
-                    key=lambda t: t.id)
+def dup_candidate_pairs(tickets):
+    """The pairs of open tickets whose words come close, except a parent and its child and a
+    pair that one of them names in `not-duplicate:`. Returns `(Ticket, Ticket)` by id."""
+    idf = _idf(tickets)
+    open_t = sorted(_dup_open(tickets), key=lambda t: t.id)
+    docs = {t.id: _DupDoc(t.title, first_section(t.body), idf) for t in open_t}
     out = []
     for i, a in enumerate(open_t):
         for b in open_t[i + 1:]:
@@ -2311,28 +2372,139 @@ def duplicate_pairs(tickets):
                 continue
             if b.id in not_duplicates(a) or a.id in not_duplicates(b):
                 continue
-            if titles_close(a.title, b.title):
-                out.append((a, b, "close title"))
-                continue
-            same = sorted(source_files(a.source) & source_files(b.source))
-            if same and titles_share(a.title, b.title):
-                out.append((a, b, "same file %s, and the titles share most words" % same[0]))
+            if docs[a.id].score(docs[b.id]) >= DUP_SCORE:
+                out.append((a, b))
     return out
 
 
-def _refuse_duplicate(found):
-    """Print why `new` refuses a ticket that looks like the open tickets in `found`, a list of
-    `(Ticket, reason)`. Returns the exit code."""
-    lines = ["Error: an open ticket already looks like this one; file nothing:"]
-    for t, why in found:
-        lines.append("  %s  [%s]  %s  (%s; source %s)"
-                     % (t.id, t.state, t.title, why, t.source or "-"))
-    ids = " ".join(t.id for t, _ in found)
+def not_duplicates(t):
+    """The ids that ticket `t` names in `not-duplicate:`. Returns a list of str."""
+    return [x for x in re.split(r"[,\s]+", t.meta.get(NOT_DUP_FIELD, "")) if x]
+
+
+def _dup_ticket(head, title, source, text):
+    return "%s\ntitle: %s\nsource: %s\ntext: %s\n" % (
+        head, title, source or "-", " ".join((text or "").split())[:DUP_TEXT_CHARS] or "-")
+
+
+def _ask_dup_model(prompt):
+    """The model's answer (str) to a duplicate prompt: Claude Code's Haiku through `claude -p`
+    when the project has Claude Code, else the project's own AI provider. Raises ValueError
+    when no answer comes."""
+    import todo_server
+    claude = "claude" in P.providers
+    return todo_server._ask_provider(prompt, {
+        "provider": "claude" if claude else P.provider,
+        "model": P.models.get("haiku") if claude else None,
+    }, DUP_SECONDS)
+
+
+def _dup_json(answer):
+    m = re.search(r"\{.*\}", answer or "", re.S)
+    if not m:
+        return None
+    try:
+        d = json.loads(m.group(0))
+    except ValueError:
+        return None
+    return d if isinstance(d, dict) else None
+
+
+def same_as_new(title, source, text, candidates):
+    """Ask the model which of `candidates` (Tickets) name the same defect or request as the new
+    ticket. Returns `(ids, why)`; `ids` is empty when none does. Raises ValueError when the
+    model gives no usable answer."""
+    tickets = "\n".join([_dup_ticket("NEW ticket", title, source, text)] + [
+        _dup_ticket("OPEN ticket %s" % t.id, t.title, t.source, first_section(t.body))
+        for t in candidates])
+    prompt = DUP_PROMPT % {"project": P.name, "task": DUP_TASK_NEW, "answer": DUP_ANSWER_NEW,
+                           "tickets": tickets}
+    known = {t.id for t in candidates}
+    for _try in range(DUP_TRIES):
+        d = _dup_json(_ask_dup_model(prompt))
+        same = d.get("same") if d else None
+        if isinstance(same, list) and all(isinstance(x, str) for x in same):
+            ids = [x.strip().upper() for x in same if x.strip().upper() in known]
+            return ids, " ".join(str(d.get("why") or "").split())
+    raise ValueError("the model gave no verdict")
+
+
+def _dup_cache_file():
+    return _project.home() / "duplicates" / ("%s.json" % P.slug)
+
+
+def _dup_key(a, b):
+    h = hashlib.sha1()
+    for t in (a, b):
+        h.update(("%s\n%s\n%s\n" % (t.id, t.title, first_section(t.body))).encode("utf-8"))
+    return "%s|%s|%s" % (a.id, b.id, h.hexdigest()[:16])
+
+
+def same_pairs(pairs):
+    """The pairs of `pairs` (`(Ticket, Ticket)`) that the model takes for the same defect or
+    request. A verdict stays outside every repository, per project, until the title or the
+    first section of either ticket changes; one model call takes at most `DUP_PAIRS` new
+    pairs. Returns `(same, unchecked)`: the list of pairs, and why some pairs have no verdict,
+    or empty."""
+    path = _dup_cache_file()
+    try:
+        cache = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        cache = {}
+    keys = {(a.id, b.id): _dup_key(a, b) for a, b in pairs}
+    ask = [(a, b) for a, b in pairs if keys[(a.id, b.id)] not in cache][:DUP_PAIRS]
+    error = ""
+    if ask:
+        seen = {}
+        for a, b in ask:
+            seen.setdefault(a.id, a)
+            seen.setdefault(b.id, b)
+        tickets = "\n".join(
+            [_dup_ticket("TICKET %s" % t.id, t.title, t.source, first_section(t.body))
+             for t in seen.values()] +
+            ["PAIR %s %s" % (a.id, b.id) for a, b in ask])
+        prompt = DUP_PROMPT % {"project": P.name, "task": DUP_TASK_PAIRS,
+                               "answer": DUP_ANSWER_PAIRS, "tickets": tickets}
+        d = None
+        try:
+            for _try in range(DUP_TRIES):
+                d = _dup_json(_ask_dup_model(prompt))
+                if d and isinstance(d.get("pairs"), list):
+                    break
+        except ValueError as exc:
+            error = str(exc)
+        for e in (d or {}).get("pairs") or []:
+            if not isinstance(e, dict) or not isinstance(e.get("same"), bool):
+                continue
+            ids = (str(e.get("a", "")).strip().upper(), str(e.get("b", "")).strip().upper())
+            key = keys.get(ids) or keys.get(ids[::-1])
+            if key:
+                cache[key] = e["same"]
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(cache, indent=1, sort_keys=True), encoding="utf-8")
+        except OSError:
+            pass
+    missing = sum(1 for k in keys.values() if k not in cache)
+    unchecked = ("%d pair(s), %s" % (missing, error or "the model gave no verdict")
+                 if missing else "")
+    return [(a, b) for a, b in pairs if cache.get(keys[(a.id, b.id)]) is True], unchecked
+
+
+def _refuse_duplicate(same, why):
+    """Print why `new` refuses a ticket that the model takes for the same defect or request as
+    the open tickets `same`. Returns the exit code."""
+    lines = ["Error: an open ticket already names this defect or request; file nothing:"]
+    for t in same:
+        lines.append("  %s  [%s]  %s" % (t.id, t.state, t.title))
+    if why:
+        lines.append("  The model's reason: %s" % why)
     lines += [
-        "  When one of them is the same defect or request, add your evidence to it:",
+        "  Add your evidence to it:",
         "    %s evidence <id> \"<what you found: the file and line, or the command>\"" % P.cli,
-        "  When the new ticket is different from each of them, file it again with:",
-        "    --not-duplicate %s --why \"<why it differs from each of them>\"" % ids,
+        "  When the new ticket is a different defect or request, file it again with:",
+        "    --not-duplicate %s --why \"<why it differs from each of them>\""
+        % " ".join(t.id for t in same),
     ]
     for line in lines:
         print(line, file=sys.stderr)
@@ -6148,7 +6320,7 @@ def _main(argv):
                    help="with --launch: print the launch instead of starting it")
     p.add_argument("--not-duplicate", dest="not_duplicate", nargs="+", metavar="ID",
                    help="the open tickets that look like this one and are not the same defect "
-                        "or request; an AI session's `new` refuses every other look-alike")
+                        "or request; the duplicate check does not ask the model about them")
     p.add_argument("--why", help="with --not-duplicate: why the new ticket differs from each "
                                  "of them")
     p.set_defaults(fn=cmd_new)

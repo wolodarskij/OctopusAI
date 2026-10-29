@@ -63,16 +63,20 @@ AI ticket with a move to Pipeline; the line stays.
 the same request:** `list`, `query`, or `new` itself. When one exists, add your evidence to it
 with `evidence <id> "<the file and line, or the command>"`, and file nothing.
 
-- **The engine enforces it.** `new` in an AI session refuses a ticket when an open ticket names a
-  file of the same `source:` or has a close title, and lists those tickets. The owner's shell is
-  not refused.
+- **The engine enforces it in two steps.** `new` in an AI session first compares the words of
+  the new title and description with the open tickets. Only when that finds close tickets, a model
+  (Claude Code's Haiku, through `claude -p`) reads them. Only its verdict that an open ticket
+  already asks for all of the new ticket's defect or request refuses the new ticket, and the
+  refusal lists that ticket. A shared `source:` file alone never refuses a ticket. When the model
+  gives no answer, `new` files the ticket. The owner's shell is never refused.
 - **A ticket that differs from each of them** is filed with `--not-duplicate <ids> --why "<why
-  it differs from each of them>"`. The ids must cover every ticket that `new` listed. The ticket
-  records them in `not-duplicate:` and the reason under `## Not a duplicate`.
-- **`check` lists the open pairs that look like duplicates:** a close title, or the same file and
-  titles that share most words. The list does not fail the check. Close the duplicate as `closed
-  by other task` after its evidence went to the other ticket, or record that the two differ with
-  `link <id> --not-duplicate <other id> --why "<why>"`.
+  it differs from each of them>"`. The ticket records them in `not-duplicate:` and the reason
+  under `## Not a duplicate`.
+- **`check` lists the open pairs that the model takes for the same defect or request.** The list
+  does not fail the check. The model's verdict on a pair is kept outside the repository until a
+  title or a first section changes. Close the duplicate as `closed by other task` after its
+  evidence went to the other ticket, or record that the two differ with `link <id>
+  --not-duplicate <other id> --why "<why>"`.
 
 **A move of a ticket is a move of its file.** `move`, a drag on the board and `mv` all do it.
 No other place records the state, so nothing can disagree with the tree.
