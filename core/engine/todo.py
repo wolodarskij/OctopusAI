@@ -2136,12 +2136,6 @@ def cmd_new(args):
         print("Error: --not-duplicate needs --why \"<why the new ticket differs from each of "
               "them>\"", file=sys.stderr)
         return 2
-    if _in_ai_session():
-        found = duplicates_of(args.title, args.source, load_all(),
-                              skip={pt.id} if pt is not None else ())
-        rest = [(t, why) for t, why in found if t.id not in differs]
-        if rest:
-            return _refuse_duplicate(rest)
     n = next_id()
     tid = "T%04d" % n
     meta = {
