@@ -86,6 +86,12 @@ background the owner did not ask for.
 **A ticket the owner asks for carries `--requested`, and goes to Pipeline.** A ticket you file on
 your own goes to AI-Pipeline with `filed-by: ai`, with no flag.
 
+**One defect, one ticket.** Before you file, search the open tickets for the same defect or
+request. When one exists, add your evidence with `evidence <id> "<the file and line, or the
+command>"` and file nothing. `new` in an AI session refuses a ticket whose `source:` file or close
+title matches an open ticket, and lists them. A ticket that differs from each of them takes
+`--not-duplicate <ids> --why "<why it differs from each of them>"`.
+
 **After a hand edit, run `index`, then `check`.** `check` must pass before you report.
 
 ## Launching a session

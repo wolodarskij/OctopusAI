@@ -1606,6 +1606,17 @@ def cmd_check(args):
     if stale:
         problems.append("%s/INDEX.md is stale - run: %s index" % (P.todo_dir, P.cli))
 
+    # A look-alike is a guess, so it is listed and does not fail the check.
+    pairs = duplicate_pairs(tickets)
+    if pairs:
+        print("%d pair(s) of open tickets look like duplicates:" % len(pairs))
+        for a, b, why in pairs:
+            print("  %s and %s: %s" % (a.id, b.id, why))
+        print("  Close the duplicate: %s move <id> %s --status \"%s\", after its evidence went "
+              "to the other with `evidence`." % (P.cli, lane("closed"),
+                                                  S("closed by other task")))
+        print("  Or record that they differ: %s link <id> --not-duplicate <other id> --why "
+              "\"<why>\"\n" % P.cli)
     if not problems:
         print("%d tickets, index current, no problem" % len(tickets))
         return 0
@@ -2103,12 +2114,28 @@ def cmd_new(args):
         print("Error: --launch files the ticket into %s or %s; it does not go with --state %s"
               % (lane("start"), lane("ai"), args.state), file=sys.stderr)
         return 2
+    tool = "" if _files_for_octopus() else octopus_tool_source(args.source)
+    if tool:
+        return _refuse_tool_ticket(args.source, tool)
     if args.status and args.status not in P.STATUSES[args.state]:
         print("Error: status %r does not belong to %s. One of: %s"
               % (args.status, args.state, ", ".join(P.STATUSES[args.state])), file=sys.stderr)
         return 2
     if args.status == P.OWNER_BLOCKS and not _may_block_by_user(args):
         return _refuse_block_by_user()
+    differs = [x.strip().upper() for x in getattr(args, "not_duplicate", None) or []
+               if x.strip()]
+    why_differs = " ".join((getattr(args, "why", None) or "").split())
+    if differs and not why_differs:
+        print("Error: --not-duplicate needs --why \"<why the new ticket differs from each of "
+              "them>\"", file=sys.stderr)
+        return 2
+    if _in_ai_session():
+        found = duplicates_of(args.title, args.source, load_all(),
+                              skip={pt.id} if pt is not None else ())
+        rest = [(t, why) for t, why in found if t.id not in differs]
+        if rest:
+            return _refuse_duplicate(rest)
     n = next_id()
     tid = "T%04d" % n
     meta = {
@@ -2144,6 +2171,8 @@ def cmd_new(args):
         meta["tags"] = args.tags
     if pt is not None:
         meta["parent"] = pt.id
+    if differs:
+        meta[NOT_DUP_FIELD] = ", ".join(sorted(set(differs)))
     group = getattr(args, "group", None)
     if P.groups_store == "files":
         if group and group not in load_group_files():
@@ -2172,6 +2201,9 @@ def cmd_new(args):
                                 args.description or "TODO: describe it.")
     if args.evidence:
         body += "\n## Evidence\n\n%s\n" % args.evidence
+    if differs:
+        body += "\n## %s\n\n%s\n" % (NOT_DUP_SECTION, _not_dup_line(sorted(set(differs)),
+                                                                    why_differs))
     path = _dest_dir(args.state, args.epic or "") / ("%s-%s.md" % (tid, slug(args.title)))
     _write(path, render(meta, body))
     commit_id(n)
@@ -2182,6 +2214,161 @@ def cmd_new(args):
     write_index(quiet=True)
     if getattr(args, "launch", False):
         return launch_new(tid, args)
+    return 0
+
+
+# A ticket that names an open ticket in `not-duplicate:` was filed, or linked, as different
+# from it; `new` and `check` do not take the two for duplicates.
+NOT_DUP_FIELD = "not-duplicate"
+NOT_DUP_SECTION = "Not a duplicate"
+# Two titles are close when their content words overlap at least this much (Jaccard).
+TITLE_CLOSE = 0.6
+# `check` takes two tickets on the same file for duplicates when this share of the shorter
+# title's content words, and at least two of them, stand in the other title too.
+TITLE_SHARED = 0.55
+_TITLE_KIND_RE = re.compile(r"^\s*(?:bug|feature|documentation)\s*:\s*", re.I)
+_TITLE_STOP = frozenset(
+    "a an the of to in on for and or is are be been not no with by at as it its that this "
+    "these those when from does do should every each into than then any all one has have "
+    "was were will can".split())
+
+
+def source_files(source):
+    """The files and folders a `source:` line (str) names, without line numbers, in lower case
+    and with forward slashes. Returns a set of str; a word that is not a path is left out."""
+    out = set()
+    for part in re.split(r"[,;\s]+", source or ""):
+        part = part.strip("`'\"()").replace("\\", "/")
+        part = re.sub(r":[\d,\-]+$", "", part).rstrip("/").lower()
+        if part and ("/" in part or "." in part.lstrip(".")):
+            out.add(part)
+    return out
+
+
+def title_words(title):
+    """The content words of a ticket title (str), without its kind prefix and stop words, each
+    with a plural `s` cut. Returns a set of str."""
+    words = re.findall(r"[a-z0-9_]+", _TITLE_KIND_RE.sub("", title or "").lower())
+    return {w[:-1] if len(w) > 3 and w.endswith("s") and not w.endswith("ss") else w
+            for w in words if w not in _TITLE_STOP}
+
+
+def titles_close(a, b):
+    """Whether two ticket titles (str) name the same thing: their content words overlap at
+    least `TITLE_CLOSE`. Returns a bool."""
+    wa, wb = title_words(a), title_words(b)
+    if not wa or not wb:
+        return False
+    return len(wa & wb) / len(wa | wb) >= TITLE_CLOSE
+
+
+def titles_share(a, b):
+    """Whether the shorter of two ticket titles (str) shares at least `TITLE_SHARED` of its
+    content words, and at least two, with the other. Returns a bool."""
+    wa, wb = title_words(a), title_words(b)
+    both = len(wa & wb)
+    return both >= 2 and both / min(len(wa), len(wb)) >= TITLE_SHARED
+
+
+def duplicate_reason(title, source, t):
+    """Why ticket `t` looks like the ticket that `title` and `source` (str) describe: `same
+    file <path>`, `close title`, or empty when it does not. Returns a str."""
+    same = sorted(source_files(source) & source_files(t.source))
+    if same:
+        return "same file %s" % same[0]
+    return "close title" if titles_close(title, t.title) else ""
+
+
+def not_duplicates(t):
+    """The ids that ticket `t` names in `not-duplicate:`. Returns a list of str."""
+    return [x for x in re.split(r"[,\s]+", t.meta.get(NOT_DUP_FIELD, "")) if x]
+
+
+def duplicates_of(title, source, tickets, skip=()):
+    """The open tickets that look like the ticket `title` and `source` (str) describe: the
+    open lanes only, no repeatable ticket, no id in `skip`. Returns a list of
+    `(Ticket, reason)` in priority order."""
+    out = []
+    for t in sorted(tickets, key=priority):
+        if t.state not in P.OPEN_STATES or t.repeat or t.id in skip:
+            continue
+        why = duplicate_reason(title, source, t)
+        if why:
+            out.append((t, why))
+    return out
+
+
+def duplicate_pairs(tickets):
+    """The pairs of open tickets that look like duplicates of each other: a close title, or the
+    same file and titles that share most words. A parent and its child, and a pair that one of
+    them names in `not-duplicate:`, are left out. Returns a list of `(Ticket, Ticket, reason)`."""
+    open_t = sorted((t for t in tickets if t.state in P.OPEN_STATES and not t.repeat),
+                    key=lambda t: t.id)
+    out = []
+    for i, a in enumerate(open_t):
+        for b in open_t[i + 1:]:
+            if a.parent == b.id or b.parent == a.id:
+                continue
+            if b.id in not_duplicates(a) or a.id in not_duplicates(b):
+                continue
+            if titles_close(a.title, b.title):
+                out.append((a, b, "close title"))
+                continue
+            same = sorted(source_files(a.source) & source_files(b.source))
+            if same and titles_share(a.title, b.title):
+                out.append((a, b, "same file %s, and the titles share most words" % same[0]))
+    return out
+
+
+def _refuse_duplicate(found):
+    """Print why `new` refuses a ticket that looks like the open tickets in `found`, a list of
+    `(Ticket, reason)`. Returns the exit code."""
+    lines = ["Error: an open ticket already looks like this one; file nothing:"]
+    for t, why in found:
+        lines.append("  %s  [%s]  %s  (%s; source %s)"
+                     % (t.id, t.state, t.title, why, t.source or "-"))
+    ids = " ".join(t.id for t, _ in found)
+    lines += [
+        "  When one of them is the same defect or request, add your evidence to it:",
+        "    %s evidence <id> \"<what you found: the file and line, or the command>\"" % P.cli,
+        "  When the new ticket is different from each of them, file it again with:",
+        "    --not-duplicate %s --why \"<why it differs from each of them>\"" % ids,
+    ]
+    for line in lines:
+        print(line, file=sys.stderr)
+    return 2
+
+
+def _not_dup_line(ids, why):
+    return "- %s: %s" % (", ".join(ids), " ".join(why.split()))
+
+
+def add_section_line(body, section, line):
+    """`body` (str) with `line` added at the end of the section `## <section>`, which is made
+    at the end of the body when it is absent. Returns a str."""
+    m = re.search(r"^##\s+%s[ \t]*\n" % re.escape(section), body, re.M)
+    if not m:
+        return body.rstrip("\n") + "\n\n## %s\n\n%s\n" % (section, line)
+    nxt = re.search(r"^##\s", body[m.end():], re.M)
+    end = m.end() + nxt.start() if nxt else len(body)
+    head = body[:end].rstrip("\n") + ("\n\n" if end == m.end() else "\n")
+    return head + line + "\n" + ("\n" + body[end:] if nxt else "")
+
+
+def cmd_evidence(args):
+    """Add a line under `## Evidence` of an open ticket: what a session found about a defect
+    or a request that the ticket already names."""
+    t = find(load_all(), args.id)
+    if t is None:
+        print("Error: no ticket %r" % args.id, file=sys.stderr)
+        return 2
+    text = " ".join((args.text or "").split())
+    if not text:
+        print("Error: the evidence is empty", file=sys.stderr)
+        return 2
+    t.body = add_section_line(t.body, "Evidence", "- %s: %s" % (_today(), text))
+    _write(t.path, render(t.meta, t.body))
+    print("%s  evidence added" % t.id)
     return 0
 
 
@@ -5415,6 +5602,16 @@ def _edit_edges(args, add):
         return out
 
     related, blockers = resolve(args.related), resolve(args.blocked_by)
+    differs = resolve(getattr(args, "not_duplicate", None)) if add else []
+    if differs:
+        why = " ".join((getattr(args, "why", None) or "").split())
+        if not why:
+            print("Error: --not-duplicate needs --why \"<why this ticket differs from them>\"",
+                  file=sys.stderr)
+            return 2
+        _set_list(t.meta, NOT_DUP_FIELD, set(not_duplicates(t)) | {o.id for o in differs})
+        t.body = add_section_line(t.body, NOT_DUP_SECTION,
+                                  _not_dup_line([o.id for o in differs], why))
     touched = {t.id}
     for o in related:
         a, b = set(t.related), set(o.related)
@@ -5666,7 +5863,18 @@ def _main(argv):
                    help="with --launch: none prints the command instead of launching")
     p.add_argument("--dry-run", action="store_true",
                    help="with --launch: print the launch instead of starting it")
+    p.add_argument("--not-duplicate", dest="not_duplicate", nargs="+", metavar="ID",
+                   help="the open tickets that look like this one and are not the same defect "
+                        "or request; an AI session's `new` refuses every other look-alike")
+    p.add_argument("--why", help="with --not-duplicate: why the new ticket differs from each "
+                                 "of them")
     p.set_defaults(fn=cmd_new)
+
+    p = sub.add_parser("evidence", help="add a line under `## Evidence` of a ticket that "
+                                        "already names the defect or the request")
+    p.add_argument("id")
+    p.add_argument("text", help="what you found: the file and line, or the command")
+    p.set_defaults(fn=cmd_evidence)
 
     p = sub.add_parser("chat", help="open a terminal with a read-only session that answers "
                                     "questions about the codebase and edits nothing")
@@ -5886,6 +6094,10 @@ def _main(argv):
     p.add_argument("--related", nargs="*", metavar="ID", help="written on both tickets")
     p.add_argument("--blocked-by", dest="blocked_by", nargs="*", metavar="ID")
     p.add_argument("--group", help="the group slug")
+    p.add_argument("--not-duplicate", dest="not_duplicate", nargs="+", metavar="ID",
+                   help="open tickets that look like this one and are not the same defect or "
+                        "request; `check` stops listing the pair")
+    p.add_argument("--why", help="with --not-duplicate: why this ticket differs from them")
     p.set_defaults(fn=cmd_link)
 
     p = sub.add_parser("unlink", help="remove related, blocked-by or group from a ticket")

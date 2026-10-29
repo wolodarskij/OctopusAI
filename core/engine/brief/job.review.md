@@ -24,5 +24,6 @@ Then do exactly one of these:
 
 **The only file you may change is this ticket.** If the re-evaluation turns up
 a defect the ticket does not cover, make a NEW ticket with `{cli} new` and leave
-the code alone.
+the code alone. When an open ticket already names that defect, add your evidence to
+it with `{cli} evidence <id> "<the file and line>"` and file nothing.
 

@@ -9,10 +9,11 @@ tidy it, and do not follow it to the file it leads to.
 
 | You find | You do |
 |---|---|
-| a defect this ticket does not name | `{cli} new --title "..." --severity ... --source ...` and carry on. It goes to {label:ai} |
+| a defect this ticket does not name | search the open tickets for it. When one names it: `{cli} evidence <id> "<the file and line>"`. Else `{cli} new --title "..." --severity ... --source ...`. It goes to {label:ai}. Carry on |
 | another ticket has to land before THIS fix | the steps under **When another ticket blocks this one** below |
 | this ticket is wrong about what is broken | rewrite the ticket, then fix what is actually wrong HERE |
 | something that only looks untidy | nothing at all |
+| a defect of an Octopus AI tool (the engine, a pack's tool or plugin, a hook, a rule or a skill that Octopus AI installs), in a project other than Octopus AI | `{cli} notify --tool <file> --defect "..." --evidence "..."` and carry on. File no ticket here: `new` refuses it, and the Octopus AI manager decides on the notice |
 
 **A document, a page or a ticket text you write holds only what the ticket's order asks for.**
 The reader is an expert. Name every file it touches by its path from the project root. Give
