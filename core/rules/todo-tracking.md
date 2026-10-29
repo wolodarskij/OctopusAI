@@ -50,6 +50,12 @@ AI ticket with a move to Pipeline; the line stays.
   ticket. `new` sends it to AI-Pipeline with no flag, and refuses it `--state Pipeline`.
 - A group run launches no AI-Pipeline ticket. A blocker and a named follow-up in AI-Pipeline with no
   session get a worker, as in Pipeline.
+- **The engine moves an unmarked AI ticket to AI-Pipeline.** The manager's 10-minute check and
+  `octopus ai-filed` read the transcript of the session that filed each open ticket in Pipeline or
+  Blocked. A ticket that a turn with no owner's prompt filed, with no `--requested`, moves to
+  AI-Pipeline and gets `filed-by: ai`. A requested ticket, its children, a cross-project follow-up,
+  a ticket with `## Owner's orders` or `blocked by user`, and a ticket whose session runs stay.
+  Each ticket is judged once, so every later move of the owner stands.
 
 ## One defect, one ticket
 

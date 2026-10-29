@@ -10,6 +10,9 @@
                                                   the manager's 10-minute check: launch the
                                                   unlaunched follow-ups, then the update while
                                                   any agent finished, waits or works
+    python octopus.py ai-filed [--dry-run]        move the open tickets that an AI filed without
+                                                  an owner's request to AI-Pipeline, in every
+                                                  registered project
     python octopus.py hook                        the Claude Code hook: SessionStart,
                                                   UserPromptSubmit, Stop, Notification,
                                                   PreToolUse and PostToolUse; PreToolUse also
@@ -212,6 +215,9 @@ def main(argv=None):
     if cmd == "check":
         import managercheck
         return managercheck.main(rest)
+    if cmd == "ai-filed":
+        import aifiled
+        return aifiled.main(rest)
 
     ap = argparse.ArgumentParser(prog="octopus %s" % cmd)
     try:

@@ -4,7 +4,7 @@
 
 Every manager session runs it every 10 minutes: a recurring job it schedules itself (Claude
 Code's `CronCreate`), or the board's watchdog, which types `WAKE_TEXT` into a manager whose
-agent has no scheduler of its own. One run does four things:
+agent has no scheduler of its own. One run does five things:
 
 1. FOLLOW-UPS. A ticket that holds `projects` and sits in the verify or the closed lane names
    its follow-ups under `## Follow-ups`, one line each: project, id and title. A follow-up
@@ -17,7 +17,10 @@ agent has no scheduler of its own. One run does four things:
    Octopus AI tool (`todo notify`) and the manager did not decide yet stands on stderr, every
    run, with the commands that decide it: a new Octopus AI ticket, its evidence on an existing
    ticket, or no ticket.
-4. THE JOB'S AGE. `--job-created` records, after `CronCreate`, when the calling session made
+4. THE AI TICKETS. Each open ticket of a registered project that an AI filed without an
+   owner's request and that sits outside AI-Pipeline with no `filed-by: ai` moves there
+   (`aifiled.sweep`). It writes nothing to the update.
+5. THE JOB'S AGE. `--job-created` records, after `CronCreate`, when the calling session made
    its check job (`check-jobs.json` beside the registry). Claude Code deletes a recurring job
    after 7 days; a check whose job is older than `RENEW_SECONDS` exits 3 and says on stderr
    to make the job again.
@@ -190,6 +193,19 @@ def list_notices(err=None):
     return len(waiting)
 
 
+# ── the AI tickets ─────────────────────────────────────────────────────────
+
+def sort_ai_tickets(registry=None, dry_run=False, err=None):
+    """Move the open tickets that an AI filed without an owner's request to AI-Pipeline.
+    What the sweep prints is kept out of the update; a failure says so on `err`."""
+    import aifiled
+    err = sys.stderr if err is None else err
+    try:
+        aifiled.sweep(registry, dry_run, out=io.StringIO(), err=err)
+    except Exception as exc:                            # noqa: BLE001 - the check goes on
+        err.write("check: the AI ticket sweep failed: %s: %s\n" % (type(exc).__name__, exc))
+
+
 # ── the age of the check job ───────────────────────────────────────────────
 
 def jobs_file():
@@ -262,6 +278,7 @@ def run(job_created=False, dry_run=False, registry=None, sid=None, out=None, err
             err.write("check: no hook names the session this runs in\n")
             return 2
         record_job(sid, now)
+    sort_ai_tickets(registry, dry_run, err)
     launch_followups(registry, dry_run, err)
     sessionreport.report(since_last=True, if_any=True, registry=registry, out=out,
                          save=not dry_run)
