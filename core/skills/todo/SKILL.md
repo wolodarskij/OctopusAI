@@ -77,6 +77,10 @@ Bare words are an AND search over id, title, source, body, tags, permits and sta
 **An order the owner gives in this chat counts the same as a drag on the board or a command in
 the owner's shell.** Carry it out. Never ask the owner to drag a card or to type a command for it.
 
+**A `--description` and a `--note` state the owner's order and nothing more.** Keep the scope the
+owner gave, in one or two paragraphs or a short list. Add no part, step, test, check, proof or
+background the owner did not ask for.
+
 **After a hand edit, run `index`, then `check`.** `check` must pass before you report.
 
 ## Launching a session

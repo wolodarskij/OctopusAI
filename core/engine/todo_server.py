@@ -977,7 +977,8 @@ Answer with %s and no other text. The keys of a ticket are:
   tags         a short space-separated list, or an empty string
   description  one or two paragraphs: what is wrong for a bug, what the program should
                do for a feature, what the documentation should say for a documentation
-               ticket
+               ticket. Only what the note asks for: add no part, step, test, check,
+               proof or background that the note does not name
   evidence     the file and line read, or the command run, or an empty string
 %s
 Write every word in Simplified Technical English: short sentences, active voice, one

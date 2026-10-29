@@ -491,6 +491,10 @@ One or two paragraphs. Name a function with its parameters and its return type.
 The file and line you read, or the command you ran.
 ```
 
+**The body states the order and nothing more.** Keep the scope that the owner gave. Add no part,
+step, test, check, proof or background that the owner did not ask for. A session's `## Result` is
+a short list: the path of the deliverable and the facts the owner must know.
+
 **The title says whether the ticket is a bug, a feature or a documentation ticket.** A bug title
 starts with `Bug: ` and says what is wrong: "Bug: The board drops a ticket that has no severity". A
 feature title starts with `Feature: ` and says, as a positive statement, what the program should

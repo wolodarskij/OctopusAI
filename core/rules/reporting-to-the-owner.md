@@ -1,7 +1,8 @@
 # Reporting to the owner
 
-*Always applies, in every project, to every chat message to the owner. A project's own
-`.agents/rules/reporting-to-the-owner.md` adds to this rule and wins where the two differ.*
+*Always applies, in every project, to every chat message to the owner, and to every document, page
+and ticket text written for the owner. A project's own `.agents/rules/reporting-to-the-owner.md`
+adds to this rule and wins where the two differ.*
 
 **No unasked prose.** This rule is broken more often than any other, and each break costs the owner a
 correction. Length is never earned by effort.
@@ -66,6 +67,31 @@ comes unasked, because a report out of context misleads. An answer holds no unas
   last line of its message.
 - **Never cite a document's section, rule or row number.** Say what it says.
 - **Name who decided.** Never "it was refused" or "it is not allowed": say which agent or which owner order.
+
+## Documents, pages and ticket text
+
+**A deliverable holds only what the order asked for, in the form the order asked for.** A deliverable is
+a document, a page, a guide, a report, or a ticket text that you write for the owner. Ask the one question
+of each part and each sentence of it, against the order.
+
+- **Write for an expert reader.** The owner knows the project, the engine and the tools. Do not explain
+  how a thing works, what the owner sees, or what the owner already knows.
+- **Name every file that the deliverable touches** by its path from the project root: the source file,
+  the asset path, the config file.
+- **Give actions, not descriptions.** An instruction says which file to edit, what to change in it, and
+  how. It says nothing else: "Open `Content/UI/WBP_Menu`. Set `Parent Class` to `MenuWidget`." Never
+  "the row's focus border turns white".
+- **Leave out each part that the order does not name:** background, "where the work stands", an order of
+  the work, another route (C++ code when the order asks for Blueprint steps), a test guide, checks and
+  proof, known limits, related tickets.
+- **The proof stays on the ticket.** The files, the lines and the commands that prove the deliverable go
+  into the ticket's `## Result`, never into the deliverable, unless the order asks for them there.
+- **A part that the deliverable cannot be correct without is a question to the owner.** Ask before you
+  add it. Never add it on your own.
+- **A ticket body states the order and nothing more.** It adds no part, step, test, check or background
+  that the owner did not ask for, and it is short: one or two paragraphs, or a short list.
+- **A ticket's `## Result` is short.** Give the path of the deliverable and the facts the owner must
+  know, as a list. Do not repeat the deliverable.
 
 ## Finish, do not ask
 

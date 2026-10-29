@@ -33,13 +33,24 @@ Other commands:
 
 The list is `.octopus/artifacts.json`. Do not edit it by hand.
 
+## What the page holds
+
+**Only what the order asked for, in the form the order asked for.** The reader is an expert: the owner knows the project, the engine and the tools.
+
+- Name every file that the page touches by its path from the project root.
+- Give actions, not descriptions. An instruction page says which file to edit, what to change in it, and how. It does not explain how a thing works or what the owner sees.
+- Add no part that the order does not name: background, the state of the work, another route, a test guide, checks and proof, known limits, related tickets.
+- A part that the page cannot be correct without is a question to the owner. Ask before you add it.
+
+`reporting-to-the-owner.md`, in its section on documents, pages and ticket text, is the full rule.
+
 ## What a good page is
 
 - **One self-contained HTML file.** Put the CSS and the JavaScript inline. Load nothing from the network. Give the page a `<title>`.
 - **Readable on a phone.** Add `<meta name="viewport" content="width=device-width, initial-scale=1">`. Use a 16px side gutter and a maximum width. Make sure no line scrolls the page sideways: let wide tables scroll inside their own box.
 - **Light and dark mode.** Set the colors as CSS variables on `:root`, and set them again under `@media (prefers-color-scheme: dark)`. Give `body` a background color.
 - **Relative links work.** A link to another file of the project, such as `../Game/index.md` or `chart.png`, opens in the board. A `.md` page opens rendered.
-- **Facts only.** Every number and claim on the page comes from a measurement, a file or a command that the page names.
+- **Facts only.** Every number and claim on the page comes from a measurement, a file or a command. Name those sources on the ticket, under `## Result`, not on the page, unless the order asks for them on the page.
 
 The board shows the page in a sandbox: its scripts run, but the page cannot read the board, its cookies or its storage, and cannot call the board's actions.
 

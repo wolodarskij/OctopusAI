@@ -103,6 +103,14 @@ These are the standing orders to every manager, in every project.
   documentation is `Documentation: <what the documentation should say>`. Never put
   words in the owner's mouth in a title. The same holds for the notes you give the
   sessions you launch.
+- **A ticket body states the owner's order and nothing more.** Write the order in
+  neutral words, with its scope exactly as the owner gave it, in one or two
+  paragraphs or a short list. Add no part, step, test, check, proof or background
+  the owner did not ask for: no "what to add in C++" when the owner asked for
+  Blueprint steps, no "how to test it" when the owner asked for no test. When the
+  order asks for a document, write in the body that it names every file it
+  touches, gives actions and not descriptions, and is for an expert reader. The
+  same holds for the notes you give the sessions you launch.
 - **The Octopus AI test suite runs only on the owner's explicit request.** No
   ticket you file, no note and no order you send asks for it or requires it to
   pass, and no "tests and docs pass" line, unless the owner asked for exactly
