@@ -189,9 +189,11 @@ def _block_text(content):
 
 def owner_words(sid):
     """What the owner said to the Claude Code session `sid`: `(said, brief)`. `said` lists,
-    oldest first, the owner's own prompts and the owner's answers to the session's question
-    dialogs. `brief` is the path of the brief that the launch prompt of the session names,
-    or None. Both are empty when no transcript of `sid` is on this machine."""
+    oldest first, `(kind, text)`: kind "prompt" for the owner's own prompt, also one the
+    owner sent while a turn ran, and "answer" for the owner's answer to a question dialog of
+    the session, with its question. `brief` is the path of the brief that the launch prompt
+    of the session names, or None. Both are empty when no transcript of `sid` is on this
+    machine."""
     said, brief, asks = [], None, set()
     if not sid:
         return said, brief
@@ -212,6 +214,15 @@ def owner_words(sid):
                             and b.get("name") == "AskUserQuestion"):
                         asks.add(b.get("id", ""))
                 continue
+            if b'"type":"attachment"' in raw and b'"queued_command"' in raw:
+                att = _load(raw).get("attachment") or {}
+                origin = att.get("origin")
+                text = att.get("prompt")
+                if (att.get("type") == "queued_command" and isinstance(origin, dict)
+                        and origin.get("kind") == "human" and isinstance(text, str)
+                        and text.strip()):
+                    said.append(("prompt", text.strip()))
+                continue
             if b'"type":"user"' not in raw:
                 continue
             rec = _load(raw)
@@ -222,12 +233,12 @@ def owner_words(sid):
                             and b.get("tool_use_id") in asks):
                         text = _block_text(b.get("content")).strip()
                         if text:
-                            said.append(text)
+                            said.append(("answer", text))
                 continue
             kind = prompt_kind(rec)
             text = _block_text(content).strip()
             if kind == "owner" and text:
-                said.append(text)
+                said.append(("prompt", text))
             elif kind == "engine" and brief is None:
                 m = _LAUNCH.match(text)
                 if m:

@@ -1866,7 +1866,7 @@ def _guard_take(tickets, ordered):
         return 2
     try:
         named, why = owner_named([(t.id, t.title, first_section(t.body)) for t in tickets],
-                                 ordered, owner_text())
+                                 ordered, *owner_text())
     except ValueError as exc:
         print("The check of the owner's words has no verdict, so the move goes on: %s" % exc,
               file=sys.stderr)
@@ -2163,7 +2163,7 @@ def cmd_new(args):
             return 2
         try:
             named, why = owner_named([("NEW", args.title, args.description or "")],
-                                     _claim(args), owner_text(pt))
+                                     _claim(args), *owner_text(pt))
         except ValueError as exc:
             print("The check of the owner's words has no verdict, so the ticket is filed as "
                   "requested: %s" % exc, file=sys.stderr)
@@ -2505,8 +2505,9 @@ These name no subject:
 - the SESSION'S STATEMENT alone: it is what the session says the owner ordered, not proof.
 
 These name it: the owner names the defect, the change, the feature or the requirement
-that the ticket asks for; the ticket is a part of a subject the owner named, such as one
-item of a list the owner wrote, or a step of a split of the owner's ticket; the ticket is
+that the ticket asks for, or names the ticket by its id; the ticket is a part of a subject
+the owner named, such as one item of a list the owner wrote, or a step of a split of the
+owner's ticket; the ticket is
 a follow-up that carries into one project a change the owner ordered for every project or
 for several, also when it changes that project's own rules, docs or code to match; the
 owner answered yes to a question that named the subject.
@@ -2538,13 +2539,14 @@ def _ticket_words(title, body):
 
 
 def _launch_words(brief):
-    """The owner's words of the launch whose brief is `brief`: the ticket it was launched on,
-    unless an AI filed it or it is repeatable, and the owner's note to that launch."""
+    """The owner's words of the launch whose brief is `brief`: `(parts, note)`. `parts` holds
+    the ticket it was launched on, unless an AI filed it or it is repeatable, and the
+    owner's note to that launch; `note` is that note alone."""
     out = []
     try:
         text = _read(brief).replace("\r\n", "\n")
     except OSError:
-        return out
+        return out, ""
     tid = brief.stem
     for f in sorted(brief.parent.parent.rglob("%s-*.md" % tid)):
         if f.parent.name == ".briefs":
@@ -2566,14 +2568,15 @@ def _launch_words(brief):
         if m else ""
     if note:
         out.append("The owner's note to this launch:\n%s" % note)
-    return out
+    return out, note
 
 
 def owner_text(parent=None):
-    """Every word the owner said to the AI session that runs this command, as one text: the
-    owner's prompts and answers in its transcript (the last `OWNER_CHARS` of them), the
-    ticket and the note of its launch, and `parent` when the owner asked for that ticket.
-    A session with no Claude Code transcript finds its launch through the ticket whose
+    """Every word the owner said to the AI session that runs this command: `(text, direct)`.
+    `text` holds the owner's prompts and answers in its transcript (the last `OWNER_CHARS`
+    of them), the ticket and the note of its launch, and `parent` when the owner asked for
+    that ticket. `direct` holds only what the owner wrote: the prompts and the note. A
+    session with no Claude Code transcript finds its launch through the ticket whose
     `sessions:` names it."""
     import aifiled
     sid = (os.environ.get("CLAUDE_CODE_SESSION_ID") or os.environ.get("OCTOPUS_SESSION")
@@ -2583,22 +2586,31 @@ def owner_text(parent=None):
         own = next((t for t in load_all() if sid in t.meta.get("sessions", "")), None)
         if own is not None:
             brief = P.BRIEFS / ("%s.md" % own.id)
-    parts = []
+    parts, note = [], ""
     if said:
         parts.append("The owner's prompts and answers in this session, oldest first:\n%s"
-                     % "\n---\n".join(said)[-OWNER_CHARS:])
+                     % "\n---\n".join(text for _kind, text in said)[-OWNER_CHARS:])
     if brief is not None:
-        parts += _launch_words(Path(brief))
+        launch, note = _launch_words(Path(brief))
+        parts += launch
     if parent is not None and not parent.ai_filed:
         parts.append("The parent ticket %s, which the owner asked for:\n%s"
                      % (parent.id, _ticket_words(parent.title, parent.body)))
-    return "\n\n".join(parts)
+    direct = [text for kind, text in said if kind == "prompt"] + ([note] if note else [])
+    return "\n\n".join(parts), "\n".join(direct)
 
 
-def owner_named(tickets, claim, owner):
-    """The ids of `tickets` (`(id, title, text)`) whose subject the owner's words `owner`
-    name, and the model's reason: `(ids, why)`. `claim` is the order as the session states
-    it. Raises ValueError when the model gives no usable answer."""
+def owner_named(tickets, claim, owner, direct=""):
+    """The ids of `tickets` (`(id, title, text)`) whose subject the owner's words name, and
+    the model's reason: `(ids, why)`. `owner` is every word the owner said, `direct` only
+    what the owner wrote; `claim` is the order as the session states it. A ticket whose id
+    stands in `direct` is named: the owner named it. The model judges the others. Raises
+    ValueError when the model gives no usable answer."""
+    by_id = [i for i, _t, _x in tickets if i != "NEW" and re.search(
+        r"(?<![\w-])%s(?!\w)" % re.escape(i), direct or "", re.I)]
+    tickets = [x for x in tickets if x[0] not in by_id]
+    if not tickets:
+        return by_id, "the owner named %s by its id" % ", ".join(by_id)
     listing = "\n".join("TICKET %s\ntitle: %s\ntext: %s\n" % (
         i, title, " ".join((text or "").split())[:DUP_TEXT_CHARS] or "-")
         for i, title, text in tickets)
@@ -2610,7 +2622,7 @@ def owner_named(tickets, claim, owner):
         d = _dup_json(_ask_dup_model(prompt))
         named = d.get("named") if d else None
         if isinstance(named, list) and all(isinstance(x, str) for x in named):
-            return ([x.strip().upper() for x in named if x.strip().upper() in known],
+            return (by_id + [x.strip().upper() for x in named if x.strip().upper() in known],
                     " ".join(str(d.get("why") or "").split()))
     raise ValueError("the model gave no verdict")
 

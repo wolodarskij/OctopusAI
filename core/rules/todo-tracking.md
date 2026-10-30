@@ -57,6 +57,9 @@ AI ticket with a move to Pipeline; the line stays.
   owner's prompts and answers in the session's transcript, the ticket and the note of its
   launch, and a requested parent. Else it goes to AI-Pipeline with `filed-by: ai`. With no
   verdict, it goes to Pipeline.
+- **A ticket id in the owner's own words is an explicit order for that ticket.** A ticket whose
+  id stands in the owner's prompts or in the note of the session's launch is named, with no
+  model.
 - **Only the owner's order moves a ticket from AI-Pipeline to Pipeline.** In an AI session, `move`
   of a ticket or an epic from AI-Pipeline to Pipeline needs `--owner-order "<the order, in
   neutral words>"`, and the same check of the owner's words for each ticket.
