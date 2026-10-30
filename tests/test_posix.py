@@ -168,7 +168,7 @@ class Launch(FixtureCase):
                 mock.patch("subprocess.Popen") as popen:
             self.assertIsNone(posixterm.attach_window("octopus-1", "T - T0001", self.tmp))
         script = self.tmp / "octopus-1.command"
-        self.assertEqual(popen.call_args[0][0], ["open", "-a", "Terminal", str(script)])
+        self.assertEqual(popen.call_args[0][0], ["open", "-g", "-a", "Terminal", str(script)])
         text = script.read_text(encoding="utf-8")
         self.assertIn("attach-session -t =octopus-1", text)
         self.assertIn("has-session -t '=octopus-1'", text)

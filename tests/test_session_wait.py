@@ -1531,6 +1531,7 @@ class WaitState(FixtureCase):
         argv = popen.call_args[0][0]
         self.assertEqual(argv[:3], ["wt", "-w", "new"])
         self.assertNotIn("focus-tab", argv)
+        self.assertEqual(popen.call_args[1]["startupinfo"].wShowWindow, 4)   # SW_SHOWNOACTIVATE
 
     @unittest.skipUnless(os.name == "nt", "Windows' console windows; test_posix covers macOS")
     def test_focus_raises_the_window_of_the_session_console(self):

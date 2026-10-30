@@ -1261,7 +1261,8 @@ def _start_board(checkout, args, out):
                                     _project.home() / "board.command")
         out("board: %s" % ("started from %s" % checkout if why is None else why))
         return
-    subprocess.Popen(["cmd", "/c", "start", "Octopus AI - Agent Board",
+    # `/min`: the board's window never takes the keyboard from the owner's window.
+    subprocess.Popen(["cmd", "/c", "start", "Octopus AI - Agent Board", "/min",
                       str(Path(checkout) / "AgentBoard.bat")] + argv, cwd=str(checkout))
     out("board: started from %s" % checkout)
 

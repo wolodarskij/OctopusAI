@@ -3854,6 +3854,18 @@ def _open_terminal(line, title, terminal, tab=None, env=None):
                   file=sys.stderr)
             return 2
         return 0
+    # A new window never takes the keyboard from the window the owner works in. A console
+    # window starts minimized and not active; `focus` restores it. A Windows Terminal
+    # window reads the flag from `wt`, opens behind the owner's window, and does not call
+    # SetForegroundWindow. It is not minimized: Windows Terminal restores a minimized new
+    # window when its shell starts, and the restore brings it to the front.
+    SW_SHOWNOACTIVATE, SW_SHOWMINNOACTIVE = 4, 7
+
+    def background(show):
+        info = subprocess.STARTUPINFO()
+        info.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        info.wShowWindow = show
+        return info
     try:
         if terminal == "wt":
             # Every session gets a window of its own, so the window that shows a session
@@ -3870,11 +3882,13 @@ def _open_terminal(line, title, terminal, tab=None, env=None):
             subprocess.Popen(["wt", "-w", "new", "nt",
                               "-d", str(P.ROOT),
                               "--title", title.replace(";", "\\;"),
-                              "cmd", "/c", tab.replace(";", "\\;")], cwd=str(P.ROOT), env=env)
+                              "cmd", "/c", tab.replace(";", "\\;")], cwd=str(P.ROOT), env=env,
+                             startupinfo=background(SW_SHOWNOACTIVATE))
         else:
             CREATE_NEW_CONSOLE = 0x00000010
             subprocess.Popen("cmd /c " + line, cwd=str(P.ROOT), shell=False,
-                             creationflags=CREATE_NEW_CONSOLE, env=env)
+                             creationflags=CREATE_NEW_CONSOLE, env=env,
+                             startupinfo=background(SW_SHOWMINNOACTIVE))
     except FileNotFoundError as exc:
         if terminal == "wt":
             # No Windows Terminal on this machine. The session still starts, in a console
@@ -3882,7 +3896,8 @@ def _open_terminal(line, title, terminal, tab=None, env=None):
             # way.
             CREATE_NEW_CONSOLE = 0x00000010
             subprocess.Popen("cmd /c " + line, cwd=str(P.ROOT), shell=False,
-                             creationflags=CREATE_NEW_CONSOLE, env=env)
+                             creationflags=CREATE_NEW_CONSOLE, env=env,
+                             startupinfo=background(SW_SHOWMINNOACTIVE))
         else:
             print("Error: could not launch (%s). The command is:\n  %s" % (exc, line),
                   file=sys.stderr)

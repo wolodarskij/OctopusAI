@@ -177,19 +177,21 @@ def _sq(text):
     return "'%s'" % text.replace("'", "'\\''")
 
 
-def attach_window(name, title, scripts_dir):
-    """Open a terminal window attached to the tmux session `name`. Returns None, or the
-    reason no window opened."""
+def attach_window(name, title, scripts_dir, background=True):
+    """Open a terminal window attached to the tmux session `name`, in the background unless
+    `background` is False. Returns None, or the reason no window opened."""
     attach = "%s -L %s -f %s attach-session -t %s" % (
         quote(tmux_path()), SOCKET, quote(CONF), quote("=" + name))
-    return open_window(attach, title, Path(scripts_dir) / ("%s.command" % name), session=name)
+    return open_window(attach, title, Path(scripts_dir) / ("%s.command" % name), session=name,
+                       background=background)
 
 
-def open_window(command, title, script, session=None):
+def open_window(command, title, script, session=None, background=True):
     """Open a terminal window of its own that runs `command`. On macOS that is a Terminal.app
     window: `open` runs the `.command` script `script`, so no permission to control Terminal
-    is asked for. With `session`, the tmux session `command` attaches to, the window closes
-    once that session has ended. Returns None, or the reason no window opened."""
+    is asked for. With `background`, `open -g` leaves Terminal behind the owner's window. With
+    `session`, the tmux session `command` attaches to, the window closes once that session has
+    ended. Returns None, or the reason no window opened."""
     script = Path(script)
     script.parent.mkdir(parents=True, exist_ok=True)
     body = ["#!/bin/sh",
@@ -210,7 +212,8 @@ def open_window(command, title, script, session=None):
     script.chmod(0o755)
     try:
         if DARWIN:
-            subprocess.Popen(["open", "-a", "Terminal", str(script)],
+            subprocess.Popen(["open"] + (["-g"] if background else []) + [
+                "-a", "Terminal", str(script)],
                              stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                              stderr=subprocess.DEVNULL)
             return None
@@ -345,7 +348,8 @@ def focus(pid, title="", scripts_dir=None):
         except OSError:
             ttys = []
         if not ttys and scripts_dir is not None:
-            return attach_window(info["session"], title or info["session"], scripts_dir) is None
+            return attach_window(info["session"], title or info["session"], scripts_dir,
+                                 background=False) is None
     else:
         tty = _tty_of(pid)
         ttys = [tty] if tty else []
