@@ -43,11 +43,23 @@ AI-Pipeline before its start board from the engine.
 `filed-by: ai`.** A requested ticket goes to Pipeline and carries no such line. The owner takes an
 AI ticket with a move to Pipeline; the line stays.
 
-- **A requested ticket:** the owner filed it (the owner's shell, the board's `New task`), or an AI
-  filed it because the owner asked for it and passed `--requested "<the order, in neutral
-  words>"`. A child of a requested ticket, such as a part of a split, is requested too.
-- **An AI ticket:** every other ticket that a session files, also a finding of a session on an AI
-  ticket. `new` sends it to AI-Pipeline with no flag, and refuses it `--state Pipeline`.
+- **A requested ticket:** the owner filed it (the owner's shell, the board's `New task`), or the
+  owner's own words named its subject and an AI filed it with `--requested "<the order, in
+  neutral words>"`. A part of a requested ticket, such as a step of a split the owner asked
+  for, is requested too.
+- **An AI ticket:** every other ticket that a session files. An order such as "file a ticket for
+  each fix", "evaluate and decide" or "analyze", a brief, a plan and a session's own finding
+  never make a ticket requested: only the owner's own words that name its subject do. `new`
+  sends an AI ticket to AI-Pipeline with no flag, and refuses it `--state Pipeline`.
+- **The engine checks the owner's words.** In an AI session, `new` refuses a bare `--requested`.
+  A ticket with `--requested`, `--owner-order` or a requested parent goes to Pipeline only when
+  a model (the duplicate check's model) finds that the owner's words name its subject: the
+  owner's prompts and answers in the session's transcript, the ticket and the note of its
+  launch, and a requested parent. Else it goes to AI-Pipeline with `filed-by: ai`. With no
+  verdict, it goes to Pipeline.
+- **Only the owner's order moves a ticket from AI-Pipeline to Pipeline.** In an AI session, `move`
+  of a ticket or an epic from AI-Pipeline to Pipeline needs `--owner-order "<the order, in
+  neutral words>"`, and the same check of the owner's words for each ticket.
 - A group run launches no AI-Pipeline ticket. A blocker and a named follow-up in AI-Pipeline with no
   session get a worker, as in Pipeline.
 - **The engine moves an unmarked AI ticket to AI-Pipeline.** The manager's 10-minute check and
@@ -135,8 +147,9 @@ session. The brief carries the exact commands.
 **A change for every project reaches every project.** A session whose ticket holds `projects` and
 changes several registered projects carries the change into each of them to the end. Every
 follow-up ticket it files in another project gets its session from the filing session, the same
-way in every project: `new --project "<name>" --title "..." --requested --launch` files it and launches
-`work`, or `plan` when its difficulty is `unknown`. A follow-up filed without a session gets one
+way in every project: `new --project "<name>" --title "..." --requested "<the order>" --launch`
+files it and launches `work`, or `plan` when its difficulty is `unknown`. A follow-up filed
+without a session gets one
 at once. The filing session names every follow-up on its own ticket, under `## Follow-ups`. The
 owner never launches them by hand. The brief of a ticket that holds `projects` carries the
 registered projects and their commands.
@@ -649,8 +662,8 @@ moves all of them at once.
 When the user asks you to **analyze** code, at any scope:
 
 - Find inconsistencies, bugs, missing implementations, code smells and improvements.
-- **Create a ticket in Pipeline** for each finding: `new --requested "<the order, in neutral
-  words>"`. The owner asked for the findings.
+- **Create a ticket** for each finding: `new` with no flag. It goes to AI-Pipeline: an order to
+  analyze names no finding's subject.
 - Do **not** fix them. At the end, say "Added N ticket(s)."
 
 **Ask before you log an ambiguous finding.** A finding is ambiguous when the code, the comments
@@ -668,7 +681,8 @@ code around it makes obvious.
 
 - Normal edits, features and refactors that the user asked for: log nothing.
 - Do not move a ticket out of Pipeline unless the user asks, or you do its work.
-- Do not move a ticket from AI-Pipeline to Pipeline unless the owner asks.
+- Do not move a ticket from AI-Pipeline to Pipeline unless the owner orders it and names its
+  subject.
 - **Never delete a ticket to mark it finished.** It moves to Done with the status that says how it
   closed.
 
@@ -676,7 +690,7 @@ code around it makes obvious.
 
 | Request | Action |
 |---|---|
-| add | `new --requested "<the order, in neutral words>"` |
+| add | `new --requested "<the order that names the subject, in neutral words>"` |
 | start | `move <id> InProgress` |
 | park | `move <id> Blocked`, and fill `blocked-by:` |
 | finish | `move <id> Verification`, and stop. `verify <id>` closes it |

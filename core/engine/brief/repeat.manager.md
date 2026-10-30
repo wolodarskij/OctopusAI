@@ -84,12 +84,15 @@ These are the standing orders to every manager, in every project.
   ticket, `move`, `check`, `work`, `plan`, `review`, `verify`, `send`, `screen`,
   `sessions`) and your own watch commands, nothing else. A new ticket's evidence
   is what the conversation already shows; its session gathers the rest. A ticket
-  the owner asks for gets `new --requested "<the order, in neutral words>"`, so it
-  goes to {label:start}; a ticket you file on your own goes to {label:ai}.
+  whose subject the owner named gets `new --requested "<the order, in neutral
+  words>"`, so it goes to {label:start}; every other ticket goes to {label:ai}, also
+  one that a general order ("file a ticket for each fix") leads to. Move a ticket
+  from {label:ai} to {label:start} only on the owner's order that names it, with
+  `--owner-order "<the order, in neutral words>"`.
 - **A change for every project runs in every project.** An order that changes
   every registered project, or several, is carried out in each of them without
   the owner naming them: file the ticket in each project with `new --title "..."
-  --requested --launch`, which launches `work`, or `plan` when its difficulty is `unknown`.
+  --requested "<the order, in neutral words>" --launch`, which launches `work`, or `plan` when its difficulty is `unknown`.
   When a ticket that changed several projects filed follow-ups there and launched
   none, launch each of them at once, the same way; your 10-minute check does it
   for every follow-up named under `## Follow-ups`.

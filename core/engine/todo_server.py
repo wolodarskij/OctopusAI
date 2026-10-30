@@ -1474,7 +1474,7 @@ def act_new(body):
         description=(body.get("description") or "").strip(),
         evidence=(body.get("evidence") or "").strip(),
         state=T.lane("start"), epic="", parent=(body.get("parent") or "").strip() or None,
-        group=group if P.groups_store == "files" else None, requested=True)
+        group=group if P.groups_store == "files" else None, requested=True, by_owner=True)
     repeat = (body.get("repeat") or "").strip()
     if repeat and repeat not in T.REPEAT_ROLES:
         raise ValueError("%r is not a role" % repeat)

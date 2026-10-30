@@ -84,8 +84,13 @@ the owner's shell.** Carry it out. Never ask the owner to drag a card or to type
 owner gave, in one or two paragraphs or a short list. Add no part, step, test, check, proof or
 background the owner did not ask for.
 
-**A ticket the owner asks for carries `--requested`, and goes to Pipeline.** A ticket you file on
-your own goes to AI-Pipeline with `filed-by: ai`, with no flag.
+**A ticket whose subject the owner named carries `--requested "<the order, in neutral words>"`,
+and goes to Pipeline.** Every other ticket you file goes to AI-Pipeline with `filed-by: ai`, with
+no flag: also a ticket that an order such as "file a ticket for each fix", "evaluate and decide"
+or "analyze" leads to, and a finding of your own. `new` refuses a bare `--requested`, and files a
+ticket in AI-Pipeline when a model finds that the owner's words do not name its subject. Move a
+ticket from AI-Pipeline to Pipeline only on the owner's order that names it: `move <id> Pipeline
+--owner-order "<the order, in neutral words>"`.
 
 **One defect, one ticket.** Before you file, search the open tickets for the same defect or
 request. When one exists, add your evidence with `evidence <id> "<the file and line, or the

@@ -57,6 +57,8 @@ _FILED = re.compile(r"^(T\d{3,})  (\S[^\r\n]*?\.md)\s*$", re.M)
 _ENGINE_PROMPT = re.compile(r"^(?:(?:Work|Re-evaluate|Verify) ticket T\d+\. Read \S*\.briefs[\\/]"
                             r"|Run the 10-minute check:|<task-notification>|You judge one Claude "
                             r"Code session)")
+# The launch prompt of a ticket session, and the brief it names.
+_LAUNCH = re.compile(r"(?:Work|Re-evaluate|Verify) ticket T\d+\. Read (\S*\.briefs[\\/]T\d+\.md)")
 _KEEP_TURN = ("This session is being continued", "[Request interrupted", "<local-command",
               "Base directory for this skill", "[Your previous response")
 
@@ -66,8 +68,11 @@ _KEEP_TURN = ("This session is being continued", "[Request interrupted", "<local
 def transcripts():
     """Every top-level Claude Code transcript on this machine. A subagent's transcript is
     left out: its prompt comes from its session, never from the owner."""
-    base = Path(os.environ.get("CLAUDE_CONFIG_DIR") or (Path.home() / ".claude")) / "projects"
-    return sorted(base.glob("*/*.jsonl"))
+    return sorted(_transcript_dir().glob("*/*.jsonl"))
+
+
+def _transcript_dir():
+    return Path(os.environ.get("CLAUDE_CONFIG_DIR") or (Path.home() / ".claude")) / "projects"
 
 
 def prompt_kind(rec):
@@ -173,6 +178,61 @@ def _load(raw):
     except ValueError:
         return {}
     return rec if isinstance(rec, dict) else {}
+
+
+def _block_text(content):
+    if isinstance(content, list):
+        return "\n".join(b.get("text", "") for b in content
+                         if isinstance(b, dict) and b.get("type") == "text")
+    return content if isinstance(content, str) else ""
+
+
+def owner_words(sid):
+    """What the owner said to the Claude Code session `sid`: `(said, brief)`. `said` lists,
+    oldest first, the owner's own prompts and the owner's answers to the session's question
+    dialogs. `brief` is the path of the brief that the launch prompt of the session names,
+    or None. Both are empty when no transcript of `sid` is on this machine."""
+    said, brief, asks = [], None, set()
+    if not sid:
+        return said, brief
+    hits = sorted(_transcript_dir().glob("*/%s.jsonl" % sid))
+    if not hits:
+        return said, brief
+    try:
+        fh = open(hits[0], "rb")
+    except OSError:
+        return said, brief
+    with fh:
+        for raw in fh:
+            if b'"type":"assistant"' in raw:
+                if b"AskUserQuestion" not in raw:
+                    continue
+                for b in ((_load(raw).get("message") or {}).get("content") or []):
+                    if (isinstance(b, dict) and b.get("type") == "tool_use"
+                            and b.get("name") == "AskUserQuestion"):
+                        asks.add(b.get("id", ""))
+                continue
+            if b'"type":"user"' not in raw:
+                continue
+            rec = _load(raw)
+            content = (rec.get("message") or {}).get("content")
+            if b'"tool_result"' in raw:
+                for b in (content if isinstance(content, list) else []):
+                    if (isinstance(b, dict) and b.get("type") == "tool_result"
+                            and b.get("tool_use_id") in asks):
+                        text = _block_text(b.get("content")).strip()
+                        if text:
+                            said.append(text)
+                continue
+            kind = prompt_kind(rec)
+            text = _block_text(content).strip()
+            if kind == "owner" and text:
+                said.append(text)
+            elif kind == "engine" and brief is None:
+                m = _LAUNCH.match(text)
+                if m:
+                    brief = Path(rec.get("cwd") or ".") / m.group(1)
+    return said, brief
 
 
 def scan(cache=None):

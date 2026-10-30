@@ -1687,9 +1687,10 @@ def _in_ai_session():
 
 
 def _requested(args, parent=None):
-    """Whether the owner asked for the ticket `new` files. `--requested` and `--owner-order`
-    say so; a caller outside every AI session is the owner; a child of a requested ticket is
-    a part of that request. Every other ticket an AI files on its own."""
+    """Whether the ticket `new` files claims the owner's request. `--requested` and
+    `--owner-order` claim it; a caller outside every AI session is the owner; a child of a
+    requested ticket claims that request. Every other ticket an AI files on its own. In an AI
+    session `cmd_new` holds a claim only when the owner's words name the subject."""
     if getattr(args, "requested", None) or getattr(args, "owner_order", None):
         return True
     if not _in_ai_session():
@@ -1775,6 +1776,11 @@ def cmd_move(args):
         if why:
             print("Error: %s." % why, file=sys.stderr)
             return 1
+    taken = [t for t in targets if t.state == lane("ai")] if state == lane("start") else []
+    if taken and _in_ai_session():
+        rc = _guard_take(taken, ordered)
+        if rc:
+            return rc
 
     if args.epic:
         epics = load_epics()
@@ -1841,6 +1847,36 @@ def cmd_move(args):
         print(m)
     write_index(quiet=True)
     print("INDEX.md rewritten")
+    return 0
+
+
+def _guard_take(tickets, ordered):
+    """Refuse an AI session's move of `tickets` from the `ai` lane to the start lane unless
+    the owner ordered it in neutral words (`ordered`) and the owner's own words name the
+    subject of each ticket. Returns 0 when the move may go on, else the exit code."""
+    if not ordered:
+        for line in (
+            "Error: only the owner's order moves a ticket from %s to %s."
+            % (lane("ai"), lane("start")),
+            "  When the owner named this ticket's subject and ordered the move in this "
+            "session's chat, pass",
+            "    --owner-order \"<the order, in neutral words>\"",
+        ):
+            print(line, file=sys.stderr)
+        return 2
+    try:
+        named, why = owner_named([(t.id, t.title, first_section(t.body)) for t in tickets],
+                                 ordered, owner_text())
+    except ValueError as exc:
+        print("The check of the owner's words has no verdict, so the move goes on: %s" % exc,
+              file=sys.stderr)
+        return 0
+    left = [t.id for t in tickets if t.id not in named]
+    if left:
+        print("Error: the owner's words do not name the subject of %s, so it stays in %s: %s"
+              % (", ".join(left), lane("ai"), why or "the model gave no reason"),
+              file=sys.stderr)
+        return 2
     return 0
 
 
@@ -2119,12 +2155,29 @@ def cmd_new(args):
             print("Error: no ticket %r for --parent" % parent, file=sys.stderr)
             return 2
     requested = _requested(args, pt)
+    if requested and _in_ai_session() and not getattr(args, "by_owner", False):
+        if getattr(args, "requested", None) is True and not _claim(args):
+            print("Error: --requested takes the owner's order that names this ticket's subject, "
+                  "in neutral words:\n  --requested \"<the order, in neutral words>\"",
+                  file=sys.stderr)
+            return 2
+        try:
+            named, why = owner_named([("NEW", args.title, args.description or "")],
+                                     _claim(args), owner_text(pt))
+        except ValueError as exc:
+            print("The check of the owner's words has no verdict, so the ticket is filed as "
+                  "requested: %s" % exc, file=sys.stderr)
+        else:
+            if "NEW" not in named:
+                requested = False
+                print("The owner's words do not name this ticket's subject, so it is not a "
+                      "requested ticket: %s" % (why or "the model gave no reason"))
     if not args.state:
         args.state = lane("start") if requested else lane("ai")
     elif args.state == lane("start") and not requested:
         print("Error: a ticket an AI files without the owner's request goes to %s, not %s.\n"
-              "  When the owner asked for it, pass --requested \"<the order, in neutral "
-              "words>\"." % (lane("ai"), lane("start")), file=sys.stderr)
+              "  When the owner's own words named its subject, pass --requested \"<the "
+              "order, in neutral words>\"." % (lane("ai"), lane("start")), file=sys.stderr)
         return 2
     if getattr(args, "launch", False) and args.state not in (lane("start"), lane("ai")):
         print("Error: --launch files the ticket into %s or %s; it does not go with --state %s"
@@ -2232,7 +2285,7 @@ def cmd_new(args):
     _write(path, render(meta, body))
     commit_id(n)
     said = getattr(args, "requested", None)
-    if isinstance(said, str) and said.strip():
+    if requested and isinstance(said, str) and said.strip():
         record_owner_order(path, args.state, meta["status"], said)
     print("%s  %s" % (tid, path.relative_to(P.ROOT)))
     write_index(quiet=True)
@@ -2432,6 +2485,142 @@ def same_as_new(title, source, text, candidates):
             ids = [x.strip().upper() for x in same if x.strip().upper() in known]
             return ids, " ".join(str(d.get("why") or "").split())
     raise ValueError("the model gave no verdict")
+
+
+# THE SUBJECT CHECK: in an AI session a ticket is requested only when the owner's own words
+# name its subject. The words are the owner's prompts and answers in the session's
+# transcript, the ticket the session was launched on and the note of that launch, and a
+# requested parent. The duplicate check's model reads them, and the session's statement of
+# the order, and names the tickets whose subject the owner named.
+OWNER_CHARS = 8000
+SUBJECT_PROMPT = """You check tickets of the project %(project)s before they go to the owner's
+main Pipeline. A ticket goes there only when the OWNER'S WORDS below explicitly name its
+subject: the specific defect, change, feature or document that the ticket is about.
+
+These name no subject:
+- a general order to file tickets for what a task finds: "file a ticket for each fix",
+  "evaluate and decide", "analyze this", "file the findings", "file it as requested";
+- the generic text of a brief, a plan, a rule file or a tool's instructions;
+- a defect or a fix that a session found while it did the owner's task;
+- the SESSION'S STATEMENT alone: it is what the session says the owner ordered, not proof.
+
+These name it: the owner names the defect, the change, the feature or the requirement
+that the ticket asks for; the ticket is a part of a subject the owner named, such as one
+item of a list the owner wrote, or a step of a split of the owner's ticket; the ticket is
+a follow-up that carries into one project a change the owner ordered for every project or
+for several, also when it changes that project's own rules, docs or code to match; the
+owner answered yes to a question that named the subject.
+
+Judge what a ticket asks for, not its wording: a ticket that asks for what the owner's
+words ask for is named, whatever words it uses. When you are in doubt, the owner did not
+name it. A ticket that is not filed yet has the id NEW.
+
+Answer with one JSON object and nothing else: {"named": ["<id of each ticket whose subject
+the owner's words name>"], "why": "<one sentence>"}. "named" is [] when the owner's words
+name none of them.
+
+OWNER'S WORDS
+%(owner)s
+
+SESSION'S STATEMENT OF THE ORDER
+%(claim)s
+
+TICKETS
+%(tickets)s"""
+
+
+def _ticket_words(title, body):
+    """The order that a ticket holds: its title, its first section and its `## Owner's
+    orders`."""
+    orders = re.search(r"^##\s+Owner's orders[ \t]*\n(.*?)(?=^##\s|\Z)", body or "", re.M | re.S)
+    return "\n".join(x for x in (title, first_section(body),
+                                 orders.group(1).strip() if orders else "") if x)
+
+
+def _launch_words(brief):
+    """The owner's words of the launch whose brief is `brief`: the ticket it was launched on,
+    unless an AI filed it or it is repeatable, and the owner's note to that launch."""
+    out = []
+    try:
+        text = _read(brief).replace("\r\n", "\n")
+    except OSError:
+        return out
+    tid = brief.stem
+    for f in sorted(brief.parent.parent.rglob("%s-*.md" % tid)):
+        if f.parent.name == ".briefs":
+            continue
+        meta, body = parse(_read(f))
+        if meta.get(FILED_BY_FIELD) != AI_FILED and not meta.get("repeat"):
+            out.append("The ticket %s that the owner launched this session on:\n%s"
+                       % (tid, _ticket_words(meta.get("title", ""), body)))
+            if ("projects" in meta.get("permits", "")
+                    and brief.parent.parent.parent.resolve() != Path(P.ROOT).resolve()):
+                out.append("That ticket may change every registered project, and the new "
+                           "ticket is filed in another project, %s: it is a follow-up of %s "
+                           "when it carries the change of %s into %s."
+                           % (P.name, tid, tid, P.name))
+        break
+    m = re.search(r"^## The owner's order for this launch[ \t]*\n(.*?)(?=^## |\Z)", text,
+                  re.M | re.S)
+    note = m.group(1).replace("That outranks the generic instructions above.", "").strip() \
+        if m else ""
+    if note:
+        out.append("The owner's note to this launch:\n%s" % note)
+    return out
+
+
+def owner_text(parent=None):
+    """Every word the owner said to the AI session that runs this command, as one text: the
+    owner's prompts and answers in its transcript (the last `OWNER_CHARS` of them), the
+    ticket and the note of its launch, and `parent` when the owner asked for that ticket.
+    A session with no Claude Code transcript finds its launch through the ticket whose
+    `sessions:` names it."""
+    import aifiled
+    sid = (os.environ.get("CLAUDE_CODE_SESSION_ID") or os.environ.get("OCTOPUS_SESSION")
+           or "").strip()
+    said, brief = aifiled.owner_words(sid)
+    if brief is None and sid:
+        own = next((t for t in load_all() if sid in t.meta.get("sessions", "")), None)
+        if own is not None:
+            brief = P.BRIEFS / ("%s.md" % own.id)
+    parts = []
+    if said:
+        parts.append("The owner's prompts and answers in this session, oldest first:\n%s"
+                     % "\n---\n".join(said)[-OWNER_CHARS:])
+    if brief is not None:
+        parts += _launch_words(Path(brief))
+    if parent is not None and not parent.ai_filed:
+        parts.append("The parent ticket %s, which the owner asked for:\n%s"
+                     % (parent.id, _ticket_words(parent.title, parent.body)))
+    return "\n\n".join(parts)
+
+
+def owner_named(tickets, claim, owner):
+    """The ids of `tickets` (`(id, title, text)`) whose subject the owner's words `owner`
+    name, and the model's reason: `(ids, why)`. `claim` is the order as the session states
+    it. Raises ValueError when the model gives no usable answer."""
+    listing = "\n".join("TICKET %s\ntitle: %s\ntext: %s\n" % (
+        i, title, " ".join((text or "").split())[:DUP_TEXT_CHARS] or "-")
+        for i, title, text in tickets)
+    prompt = SUBJECT_PROMPT % {"project": P.name, "owner": owner or "(none found)",
+                               "claim": " ".join((claim or "").split()) or "(none)",
+                               "tickets": listing}
+    known = {i for i, _t, _x in tickets}
+    for _try in range(DUP_TRIES):
+        d = _dup_json(_ask_dup_model(prompt))
+        named = d.get("named") if d else None
+        if isinstance(named, list) and all(isinstance(x, str) for x in named):
+            return ([x.strip().upper() for x in named if x.strip().upper() in known],
+                    " ".join(str(d.get("why") or "").split()))
+    raise ValueError("the model gave no verdict")
+
+
+def _claim(args):
+    """The order that `--requested` or `--owner-order` states, in neutral words, or ""."""
+    for said in (getattr(args, "requested", None), getattr(args, "owner_order", None)):
+        if isinstance(said, str) and said.strip():
+            return said.strip()
+    return ""
 
 
 def _dup_cache_file():
@@ -6402,8 +6591,9 @@ def _main(argv):
                    help="the owner ordered, in this session's chat, to file this ticket as "
                         "`blocked by user`; the order in neutral words is optional")
     p.add_argument("--requested", nargs="?", const=True, metavar="WORDS",
-                   help="the owner asked for this ticket: it goes to %s, not %s. The order "
-                        "in neutral words is optional and goes under `## Owner's orders`"
+                   help="the owner's order that names this ticket's subject, in neutral "
+                        "words; it goes under `## Owner's orders`. The ticket goes to %s, not "
+                        "%s, only when the owner's own words in this session name its subject"
                         % (lane("start"), lane("ai")))
     p.add_argument("--launch", action="store_true",
                    help="launch its session at once: `plan` when its difficulty is unknown, "
