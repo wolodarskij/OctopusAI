@@ -1261,10 +1261,16 @@ def _start_board(checkout, args, out):
                                     _project.home() / "board.command")
         out("board: %s" % ("started from %s" % checkout if why is None else why))
         return
-    # `/min`: the board's window never takes the keyboard from the owner's window.
-    subprocess.Popen(["cmd", "/c", "start", "Octopus AI - Agent Board", "/min",
-                      str(Path(checkout) / "AgentBoard.bat")] + argv, cwd=str(checkout))
-    out("board: started from %s" % checkout)
+    # The board server runs with no window, so nothing appears on the owner's desktop. What
+    # it prints goes to `board.log` in the Octopus AI home.
+    log = _project.home() / "board.log"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    CREATE_NO_WINDOW, CREATE_NEW_PROCESS_GROUP = 0x08000000, 0x00000200
+    with open(log, "ab") as f:
+        subprocess.Popen([sys.executable, str(Path(checkout) / "octopus.py"), "board"] + argv,
+                         cwd=str(checkout), stdin=subprocess.DEVNULL, stdout=f, stderr=f,
+                         creationflags=CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP)
+    out("board: started from %s with no window; its output goes to %s" % (checkout, log))
 
 
 def relocate(new, old=None, wait=False, link=True, poll=15, out=print):

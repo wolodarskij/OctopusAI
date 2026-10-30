@@ -924,17 +924,17 @@ a.icon{display:inline-flex;align-items:center;text-decoration:none}
     <p>How a launched session appears. The rulesets ask for <code id="pTermRs"></code>. Your choice is saved in <code id="gBoardFile"></code>, so it follows the project, not this browser.</p>
   <div class="opt" id="gTerm">
     <b>Terminal of a launched session</b>
-    <label><input type="radio" name="gTerm" value="external">
-      <span>External terminal<small>A window of its own: Windows Terminal or a console window on Windows, a Terminal window on macOS. A session launched from now on gets one.</small></span></label>
     <label><input type="radio" name="gTerm" value="own">
-      <span>Own pseudoconsole<small>The board runs the console itself and shows its screen here; no window opens (on macOS a tmux session with no window). A session launched from now on gets one; it survives a restart of the board.</small></span></label>
+      <span>Own pseudoconsole<small>The engine runs the console itself, with no window, and the board shows its screen here (on macOS a tmux session with no window). Focus opens a window on your desktop that shows the session and takes your keys. A session launched from now on gets one; it survives a restart of the board.</small></span></label>
+    <label><input type="radio" name="gTerm" value="window">
+      <span>A window of its own<small>Windows Terminal or a console window on Windows, a Terminal window on macOS. A session launched from now on gets one.</small></span></label>
   </div>
   <div class="opt" id="gFocus">
     <b>A click on a session</b>
     <label><input type="radio" name="gFocus" value="popup">
       <span>Shows the terminal on the page<small>The screen of the console in a window here, with a line to type into it.</small></span></label>
     <label><input type="radio" name="gFocus" value="window">
-      <span>Raises the terminal window<small>Brings the session's window forward. An own pseudoconsole has no window and always shows on the page.</small></span></label>
+      <span>Raises the terminal window<small>Brings the session's window forward. For an own pseudoconsole it is the window that shows the session.</small></span></label>
   </div>
   </section>
   <section id="pGit">
@@ -1393,7 +1393,7 @@ let waitOn = "";
 /* The filter row's visibility, the terminal kind of a launch, what a click on a session
    does and whether the Sessions view lists the other projects. All four live in
    TODO/.board.json. */
-let FILTERS = "hidden", TERM = "external", FOCUS = "popup", OTHERS = "hidden";
+let FILTERS = "hidden", TERM = "own", FOCUS = "popup", OTHERS = "hidden";
 
 const $ = s => document.querySelector(s);
 const el = (t, c, x) => { const n = document.createElement(t);
@@ -1889,15 +1889,13 @@ function otherCard(proj, s) {
   const sp = el("span", "sp");
   const d = el("span", "dot " + waitOf(s));
   d.title = stateTip(s);
-  sp.append(d, ...waitPills([s], () =>
-    s.own ? openTerminal(id, mode, proj) : raiseSession(id, mode, proj)));
+  sp.append(d, ...waitPills([s], () => raiseSession(id, mode, proj)));
   m.append(sp);
   c.append(m);
   const act = el("div", "act");
   const f = el("button", null, "Focus");
   f.title = "bring the terminal forward";
-  f.addEventListener("click", e => { e.stopPropagation();
-    s.own ? openTerminal(id, mode, proj) : raiseSession(id, mode, proj); });
+  f.addEventListener("click", e => { e.stopPropagation(); raiseSession(id, mode, proj); });
   const r = el("button", null, "⟲");
   r.title = "copy  claude --resume " + s.session;
   r.addEventListener("click", e => { e.stopPropagation(); copy("claude --resume " + s.session); });
@@ -2858,11 +2856,10 @@ const isHere = proj => proj == null || proj === PROJECT;
 const liveOf = (id, mode, proj) => (isHere(proj) ? (DATA.sessions || [])
   : ((ALLSESS.find(p => p.name === proj) || {}).sessions || [])).find(s =>
   mode === "cli" ? s.session === id : (s.id === id && s.mode === mode));
-/* A click on a session: raise its window, or show its screen on the page. An own
-   pseudoconsole has no window, so it always shows. */
+/* A click on a session: raise its window, or show its screen on the page. The window of an
+   own pseudoconsole is the viewer that the server opens on the owner's desktop. */
 function focusSession(id, mode) {
-  const s = liveOf(id, mode);
-  if ((s && s.own) || FOCUS === "popup") return openTerminal(id, mode);
+  if (FOCUS === "popup") return openTerminal(id, mode);
   return raiseSession(id, mode);
 }
 async function raiseSession(id, mode, proj) {
@@ -2886,7 +2883,6 @@ function openTerminal(id, mode, proj) {
   $("#tTitle").textContent = s ? (s.goal || s.title || "") : "";
   $("#tOwn").textContent = s && s.own ? "own pseudoconsole" : "";
   $("#tLog").style.display = s && s.own ? "" : "none";
-  $("#tFocus").style.display = s && s.own ? "none" : "";
   $("#tScreen").className = "";
   $("#tScreen").textContent = "";
   $("#tErr").textContent = "";
@@ -4438,11 +4434,7 @@ function drawSettings() {
   const pj = DATA.project || {};
   $("#gBoardFile").textContent = (pj.todoDir || "TODO") + "/.board.json";
   for (const r of document.querySelectorAll("#gTerm input")) r.checked = r.value === TERM;
-  for (const r of document.querySelectorAll("#gFocus input")) {
-    r.checked = r.value === FOCUS;
-    r.disabled = TERM === "own";
-    r.closest("label").classList.toggle("off", TERM === "own");
-  }
+  for (const r of document.querySelectorAll("#gFocus input")) r.checked = r.value === FOCUS;
   drawLanes();
 }
 /* ── the Project view: the lanes of the project ─────────────────────── */
@@ -4629,7 +4621,7 @@ function applyBoard() {
   SORT = bd.sort || "priority";
   FILTERS = bd.filters || "hidden";
   OTHERS = bd.others || "hidden";
-  TERM = bd.terminal || "external";
+  TERM = bd.terminal || "own";
   FOCUS = bd.focus || "popup";
 }
 function setUrlProject() {
@@ -4675,7 +4667,7 @@ async function openManager() {
     if (VIEW !== "repeatable") setView("repeatable");
     SEL.clear(); SEL.add(r.id); OPEN.add(r.id);
     render(); scrollToSelected();
-    if (r.own) openTerminal(r.id, "work");
+    if (r.own && !r.focused) openTerminal(r.id, "work");
     toast(r.started ? `${r.project} ${r.id} · the manager starts`
       : r.focused || r.own ? `${r.project} ${r.id} · manager forward`
       : `${r.project} ${r.id} · the manager's window did not come forward`,

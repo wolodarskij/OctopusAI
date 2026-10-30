@@ -327,10 +327,11 @@ def act_field(body):
 
 def board_terminal(body):
     """The `--terminal` a launch from the page gets: what the request names, else the
-    board's setting: `own` for a pseudoconsole the board reads, else the project's terminal."""
+    board's setting: `own` for a pseudoconsole with no window, else the window kind of the
+    rulesets (`T.window_terminal`)."""
     if body.get("terminal"):
         return body["terminal"]
-    return "own" if T.load_board()["terminal"] == "own" else P.terminal
+    return "own" if T.load_board()["terminal"] == "own" else T.window_terminal()
 
 
 def provider_choices():
@@ -760,8 +761,8 @@ def act_focus(body):
 
 def act_manager(body):
     """The board's Manager button. The manager of the home project, whose `work` session runs,
-    comes to the front, whichever project the page shows; an own pseudoconsole has no window, so
-    the page shows it. With none running, the manager starts as the board starts it when it
+    comes to the front, whichever project the page shows: its window, or for an own pseudoconsole
+    the viewer window that `focus` opens. With none running, the manager starts as the board starts it when it
     opens. Returns the project and the ticket id of the manager, and whether it `started`."""
     import time
     name, root = _home_project()
@@ -776,7 +777,7 @@ def act_manager(body):
         if hit is not None:
             own = bool(hit.get("own"))
             return {"project": name, "id": hit["id"], "started": False, "own": own,
-                    "focused": not own and bool(T.focus_session(hit)), "noSnapshot": True}
+                    "focused": bool(T.focus_session(hit)), "noSnapshot": True}
     finally:
         project.reset(tok)
     started = autostart_managers(time.time())

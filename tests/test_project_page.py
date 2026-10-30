@@ -62,7 +62,7 @@ class ProjectPage(FixtureCase):
         blueprint = next(p for p in v["packs"] if p["name"] == "blueprint")
         self.assertEqual(blueprint["requires"], ["unreal"])
         self.assertEqual([ln["dir"] for ln in v["lanes"]][0], "Pipeline")
-        self.assertEqual(v["terminal"]["board"], "external")
+        self.assertEqual(v["terminal"]["board"], todo_server.T.BOARD_TERMINAL_DEFAULT)
         outside = next(p for p in v["permits"] if p["name"] == "outside")
         self.assertEqual(outside["tickets"], 1)
         self.assertEqual(v["groups"]["store"], "map")

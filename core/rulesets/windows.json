@@ -1,5 +1,5 @@
 {
-  "title": "Windows: sessions open in Windows Terminal, and terminal control works",
-  "terminal": "wt",
+  "title": "Windows: sessions run in a pseudoconsole with no window, and terminal control works",
+  "terminal": "own",
   "sessions": true
 }

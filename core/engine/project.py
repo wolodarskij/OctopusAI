@@ -63,7 +63,9 @@ RULESET_KEYS = RULESET_LISTS + ("title", "lookOnScreen", "permits", "terminal", 
                                 "permitOverrides", "deny", "testerPermits", "modePermits", "brief",
                                 "payload", "requires", "optionalRules")
 PERMIT_KEYS = ("grants", "deny", "addDirEnv", "addDir", "addDirRegistry")
-TERMINALS = ("wt", "cmd")
+# Where a launched session runs: `own`, a pseudoconsole the engine hosts with no window; `wt`, a
+# Windows Terminal window; `cmd`, a console window.
+TERMINALS = ("own", "wt", "cmd")
 # The old name of each renamed shipped pack -> its name now. A project.json, a `requires` and the
 # command line may still say the old one; `admin.migrate_pack_names` rewrites a project to the new.
 PACK_ALIASES = {"angelscript": "ue-angelscript", "browser": "browser-game"}
@@ -822,7 +824,7 @@ class Project:
         self.PERMITS = {n: s["grants"] for n, s in rules["permits"].items()}
         self.TESTER_PERMITS = tuple(rules["testerPermits"])
         self.MODE_PERMITS = {m: tuple(v) for m, v in rules["modePermits"].items()}
-        self.terminal = rules["terminal"] or "wt"
+        self.terminal = rules["terminal"] or ("own" if os.name == "nt" else "wt")
         self._providers(cfg, rules)
         # Claude's lists and defaults, under the names the rest of the engine reads.
         claude = self.providers[DEFAULT_PROVIDER]

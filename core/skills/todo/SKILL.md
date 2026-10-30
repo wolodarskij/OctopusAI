@@ -117,8 +117,8 @@ file alone refuses nothing. A ticket that differs from each named ticket takes `
   first and say so.
 - In a project with `vcs: git`, a `work` session commits its own files and hunks before it moves
   the ticket to Verification, and a `verify` session pulls and pushes the work when it holds.
-- `--terminal cmd|wt|own|none` picks the terminal. `own` is a hidden console that the board holds.
-  `none` and `--dry-run` print the launch line.
+- `--terminal own|wt|cmd|none` picks the terminal. `own`, the default, is a pseudoconsole that the
+  engine holds with no window. `none` and `--dry-run` print the launch line.
 - Every launch writes its session id into the ticket under `sessions:`. `claude --resume <id>`
   restores it.
 
@@ -129,7 +129,7 @@ ticket that nobody can size.
 
     python .octopus/todo.py sessions                      every session that still has a terminal
     python .octopus/todo.py sessions --input              only the sessions that wait for the owner's input
-    python .octopus/todo.py focus  T0001                  bring it to the front
+    python .octopus/todo.py focus  T0001                  bring its window to the front; an own session gets a window that shows it
     python .octopus/todo.py screen T0001 --mode work      print its screen
     python .octopus/todo.py send   T0001 --text "yes" --keys Enter
     python .octopus/todo.py close  T0001                  close it

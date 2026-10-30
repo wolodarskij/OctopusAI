@@ -857,12 +857,15 @@ BOARD_VIEW_RENAMED = {"manage": "groups"}
 # `newest` and `oldest` follow the `created` date, then the id; `updated` is the last write
 # to the ticket file.
 BOARD_SORTS = ("priority", "newest", "oldest", "updated")
-# Where a launched session's terminal lives. `external` is a Windows Terminal tab, or a
-# console window of its own; `own` is a pseudoconsole `session_pty.py` holds with no window,
-# read and driven from the page.
-BOARD_TERMINALS = ("external", "own")
-# What a click on a session does with an external terminal: raise its window, or show its
-# screen in a popup on the page. An own terminal has no window, so it always shows.
+# Where a launched session's terminal lives. `own` is a pseudoconsole `session_pty.py` holds
+# with no window, read and driven from the page, and shown in a window on `focus`; `window`
+# is a Windows Terminal window, or a console window of its own. The default is `own` on
+# Windows and `window` elsewhere; `external` is the old name of the default.
+BOARD_TERMINALS = ("own", "window")
+BOARD_TERMINAL_DEFAULT = "own" if WINDOWS else "window"
+BOARD_TERMINAL_RENAMED = {"external": BOARD_TERMINAL_DEFAULT}
+# What a click on a session does: show its screen in a popup on the page, or bring its
+# window forward. The window of an own terminal is the viewer that `focus` opens.
 BOARD_FOCUS = ("window", "popup")
 # Whether the filter row of the header is shown.
 BOARD_FILTERS = ("hidden", "shown")
@@ -890,10 +893,12 @@ def load_board():
     order_l, width_l, shut_l = d.get("laneOrder"), d.get("laneWidth"), d.get("laneShut")
     if isinstance(view, str):
         view = BOARD_VIEW_RENAMED.get(view, view)
+    if isinstance(term, str):
+        term = BOARD_TERMINAL_RENAMED.get(term, term)
     return {"view": view if view in BOARD_VIEWS else "lanes",
             "sort": order if order in BOARD_SORTS else "priority",
             "shut": sorted(str(x) for x in shut) if isinstance(shut, list) else [],
-            "terminal": term if term in BOARD_TERMINALS else "external",
+            "terminal": term if term in BOARD_TERMINALS else BOARD_TERMINAL_DEFAULT,
             "focus": focus if focus in BOARD_FOCUS else "popup",
             "filters": filt if filt in BOARD_FILTERS else "hidden",
             "others": others if others in BOARD_OTHERS else "hidden",
@@ -3833,20 +3838,21 @@ def _shell_line(argv, title, marks=None):
             % (P.ROOT, "&& ".join("set %s=%s" % kv for kv in env.items()), title, line, reset))
 
 
-def _open_terminal(line, title, terminal, tab=None, env=None):
-    """Run `cmd /c <line>` in a terminal of its own: a Windows Terminal window of its own
-    (`wt`), else a console window. A wt window runs `tab` when one is given.
-    Returns 0, or 2 when nothing could start.
+def _open_terminal(line, title, terminal, tab=None, env=None, ticket=None, mode="cli"):
+    """Run `cmd /c <line>` in a terminal of its own: a pseudoconsole the engine hosts with no
+    window (`own`), a Windows Terminal window of its own (`wt`), else a console window. The
+    pseudoconsole and a wt window run `tab` when one is given. `ticket` and `mode` name the
+    session in the host's record. Returns 0, or 2 when nothing could start.
 
     On macOS and Linux the line runs in a tmux session named after its session id, with a
     Terminal window on it unless `terminal` is `own` (`posixterm.launch`)."""
     import subprocess
     tab = tab or line
+    m = re.search(_LINE_SESSION, tab)
+    sid = (m.group(1) or m.group(2)).lower() if m else ""
     if not WINDOWS:
         import posixterm
-        m = re.search(_LINE_SESSION, tab)
-        name = posixterm.session_name((m.group(1) or m.group(2)).lower() if m
-                                      else "%s-%d" % (P.slug, os.getpid()))
+        name = posixterm.session_name(sid or "%s-%d" % (P.slug, os.getpid()))
         why = posixterm.launch(tab, title, P.ROOT, name, P.SESSIONS_DIR,
                                window=terminal != "own")
         if why:
@@ -3854,6 +3860,8 @@ def _open_terminal(line, title, terminal, tab=None, env=None):
                   file=sys.stderr)
             return 2
         return 0
+    if terminal == "own":
+        return _open_own(tab, title, ticket or "-", mode, sid, env)
     # A new window never takes the keyboard from the window the owner works in. A console
     # window starts minimized and not active; `focus` restores it. A Windows Terminal
     # window reads the flag from `wt`, opens behind the owner's window, and does not call
@@ -3903,6 +3911,48 @@ def _open_terminal(line, title, terminal, tab=None, env=None):
                   file=sys.stderr)
             return 2
     return 0
+
+
+def _open_own(tab, title, ticket, mode, sid, env=None):
+    """Run `cmd /c <tab>` in a pseudoconsole that `session_pty.py` holds, with no window.
+    The hooks and the session detection see the same shell as in a window, and `screen`,
+    `send`, `log` and `focus` reach it through the host. The host is detached: it survives
+    the caller, and it has no console of its own, which `AttachConsole` needs. Returns 0, or
+    2 when the host could not start."""
+    import subprocess
+    import uuid
+    sid = sid or str(uuid.uuid4())
+    DETACHED_PROCESS, CREATE_NEW_PROCESS_GROUP = 0x00000008, 0x00000200
+    host = [_console_python(), str(WIN / "session_pty.py"),
+            "--ticket", ticket, "--mode", mode, "--session", sid,
+            "--title", title, "--sessions-dir", str(P.SESSIONS_DIR),
+            "--cwd", str(P.ROOT), "--cmd-line", "cmd /c " + tab]
+    P.SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
+    host_log = P.SESSIONS_DIR / ("%s.%s.host.log" % (sid, mode))
+    try:
+        with open(host_log, "ab") as err:
+            subprocess.Popen(host, cwd=str(P.ROOT), env=env,
+                             creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+                             stdin=subprocess.DEVNULL, stdout=err, stderr=err)
+    except FileNotFoundError as exc:
+        print("Error: could not launch (%s). The command is:\n  %s" % (exc, tab),
+              file=sys.stderr)
+        return 2
+    return 0
+
+
+def _console_python():
+    """The Python that runs a console script: `python.exe` beside a `pythonw.exe`."""
+    exe = Path(sys.executable)
+    if exe.name.lower() == "pythonw.exe" and (exe.parent / "python.exe").is_file():
+        return str(exe.parent / "python.exe")
+    return str(exe)
+
+
+def window_terminal():
+    """The window kind of a launch that asks for a window: the rulesets' `terminal` when it
+    is one, else `wt`."""
+    return P.terminal if P.terminal != "own" else "wt"
 
 
 # The no-narration rule as a command-line argument: `cmd` reads every double quote, so it
@@ -4054,29 +4104,7 @@ def cmd_work(args):
         tab = posixterm.export({P.verify_env: P.verify_token(t.id)}) + line
     elif mode == "verify":
         tab = "set %s=%s&& %s" % (P.verify_env, P.verify_token(t.id), line)
-    if terminal == "own" and WINDOWS:
-        # No window. `session_pty.py` holds a pseudoconsole with the same `cmd /c`
-        # line inside, so the hooks and the session detection see the same shell, and
-        # the page reads its screen and types into it through the host. The host is
-        # detached: it survives the board server, and it has no console of its own,
-        # which `AttachConsole` needs.
-        DETACHED_PROCESS, CREATE_NEW_PROCESS_GROUP = 0x00000008, 0x00000200
-        host = [sys.executable, str(WIN / "session_pty.py"),
-                "--ticket", t.id, "--mode", mode, "--session", ticket_session_id(t, mode),
-                "--title", title, "--sessions-dir", str(P.SESSIONS_DIR),
-                "--cwd", str(P.ROOT), "--cmd-line", "cmd /c " + tab]
-        P.SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
-        host_log = P.SESSIONS_DIR / ("%s.%s.host.log" % (ticket_session_id(t, mode), mode))
-        try:
-            with open(host_log, "ab") as err:
-                subprocess.Popen(host, cwd=str(P.ROOT), env=env,
-                                 creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
-                                 stdin=subprocess.DEVNULL, stdout=err, stderr=err)
-        except FileNotFoundError as exc:
-            print("Error: could not launch (%s). The command is:\n  %s" % (exc, line),
-                  file=sys.stderr)
-            return 2
-    elif _open_terminal(line, title, terminal, tab=tab, env=env) != 0:
+    if _open_terminal(line, title, terminal, tab=tab, env=env, ticket=t.id, mode=mode) != 0:
         return 2
     record_launch(t, mode, provider)
     moved = start_lane(t, mode)
@@ -4353,8 +4381,9 @@ def live_sessions(tickets=None, recheck=False):
             "hooked": True,
             "created": rec.get("shell_started") or rec.get("claude_started") or 0,
             "tabbed": False,
-            "own": False,
-            "pty": None,
+            # A chat runs in a pseudoconsole the host holds, as a launched session does.
+            "own": bool(shell) and shell in ptys,
+            "pty": ptys.get(shell) if shell else None,
             "terminal": rec.get("terminal") or None,
             "title": rec.get("title") or "%s - %s" % (P.title, sid[:8]),
             "goal": " - ".join(x for x in (agent, goal) if x),
@@ -5413,7 +5442,7 @@ def focus_session(s):
                                P.SESSIONS_DIR)
     import winproc
     if s.get("own"):
-        return False                                    # a pseudoconsole has no window
+        return _view_session(s)
     # The window that shows the session's console is exact: the console's own window, or
     # the Windows Terminal window that owns its hidden pseudo window. It counts only when
     # it is a visible terminal window. A session in a tab of a window that holds others
@@ -5447,6 +5476,57 @@ def focus_session(s):
                 hwnd = h
                 break
     return bool(hwnd) and winproc.raise_window(hwnd)
+
+
+# Seconds `_view_session` waits for the window of a new viewer.
+VIEW_WAIT = 10
+
+
+def _view_session(s):
+    """Bring the viewer of an own session to the front: the console window that
+    `session_view.py` runs in, on the owner's desktop. It shows the session's pseudoconsole
+    and types into it. A viewer of this session that still runs is raised; else a new one
+    opens. Returns True when its window is the foreground window."""
+    import json
+    import subprocess
+    import time
+    import winproc
+    rec = s.get("pty") or pty_records().get(s["shell"])
+    if rec is None:
+        return False
+    path = Path(rec["path"])
+    view = path.with_name(path.name[:-len(".pty.json")] + ".view.json")
+    pid = 0
+    try:
+        mark = json.loads(view.read_text(encoding="utf-8"))
+        if mark.get("pid") and winproc.created_at(mark["pid"]) == mark.get("created"):
+            pid = int(mark["pid"])
+    except (OSError, ValueError, TypeError):
+        pass
+    if not pid:
+        CREATE_NEW_CONSOLE, SW_SHOWNORMAL = 0x00000010, 1
+        info = subprocess.STARTUPINFO()
+        info.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        info.wShowWindow = SW_SHOWNORMAL
+        try:
+            pid = subprocess.Popen([_console_python(), str(WIN / "session_view.py"),
+                                    "--record", str(path)], cwd=str(P.ROOT),
+                                   creationflags=CREATE_NEW_CONSOLE, startupinfo=info).pid
+        except OSError:
+            return False
+    end = time.time() + VIEW_WAIT
+    while True:
+        hwnd = 0
+        try:
+            hwnd = int(_console_io("window", {"shell": pid, "claude": None,
+                                              "key": s["key"]}).get("hwnd") or 0)
+        except OSError:
+            pass
+        if hwnd and any(h == hwnd for h, _c, _t, _p in winproc.windows()):
+            return winproc.raise_window(hwnd)
+        if time.time() >= end or pid not in winproc.processes():
+            return False
+        time.sleep(0.2)
 
 
 def close_session(s, force=False):
@@ -6351,7 +6431,7 @@ def _main(argv):
     p.add_argument("--provider", choices=list(_project.PROVIDERS), help="the project's default when omitted")
     p.add_argument("--model", help="a key of `models`; absent is the project's default")
     p.add_argument("--effort", help="one of `efforts`; absent is the project's default")
-    p.add_argument("--terminal", default=None, choices=["wt", "cmd", "none"])
+    p.add_argument("--terminal", default=None, choices=["own", "wt", "cmd", "none"])
     p.add_argument("--dry-run", action="store_true")
     p.set_defaults(fn=cmd_chat)
 
