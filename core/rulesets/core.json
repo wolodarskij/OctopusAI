@@ -37,7 +37,7 @@
   },
   "optionalRules": {
     "heavy-tools-only-when-needed": {
-      "title": "Use an external tool only when its result is needed; ask the owner before an expensive one",
+      "title": "Use an external tool or add a test only when needed; ask the owner before an expensive tool or a slow test",
       "default": true
     },
     "investigate-first": {
