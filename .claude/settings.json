@@ -80,7 +80,9 @@
     "CLAUDE_CODE_DISABLE_FAST_MODE": "1",
     "CLAUDE_CODE_SILENT_TURN_REMINDER": "1",
     "CLAUDE_CODE_SILENT_TURN_REMINDER_SECONDS": "300",
-    "CLAUDE_CODE_SILENT_TURN_REMINDER_TEXT": "About 5 minutes passed since your last message to the owner. Write one short sentence: what you work on now. Then continue, and write nothing else about your work."
+    "CLAUDE_CODE_SILENT_TURN_REMINDER_TEXT": "About 5 minutes passed since your last message to the owner. Write one short sentence: what you work on now. Then continue, and write nothing else about your work.",
+    "BASH_DEFAULT_TIMEOUT_MS": "60000",
+    "BASH_MAX_TIMEOUT_MS": "60000"
   },
   "permissions": {
     "allow": [

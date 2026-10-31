@@ -95,9 +95,11 @@ def _json_bytes(d):
 # The env every project's `.claude/settings.json` carries. A session launched from inside another Claude session
 # inherits CLAUDE_CODE_CHILD_SESSION and keeps no transcript unless persistence is forced; the owner's rule is that
 # every session keeps its transcript. `STATUS_ENV` sets Claude Code's reminder to ask for one status line once every
-# 5 minutes.
+# 5 minutes. `LONG_CALL_ENV` caps a foreground shell command at 60 seconds: Claude Code then moves it to the
+# background, so the owner's queued messages reach the session (`core/rules/long-calls-in-background.md`).
+LONG_CALL_ENV = {"BASH_DEFAULT_TIMEOUT_MS": "60000", "BASH_MAX_TIMEOUT_MS": "60000"}
 SESSION_ENV = dict({"CLAUDE_CODE_DISABLE_TERMINAL_TITLE": "1", "CLAUDE_CODE_FORCE_SESSION_PERSISTENCE": "1",
-                    "CLAUDE_CODE_DISABLE_FAST_MODE": "1"}, **_agents.STATUS_ENV)
+                    "CLAUDE_CODE_DISABLE_FAST_MODE": "1"}, **_agents.STATUS_ENV, **LONG_CALL_ENV)
 
 # The permission rules every project's `.claude/settings.json` carries. A finished session's last command is
 # `todo.py close <id> --mode <mode> --self`; the auto-mode check refuses it as a process kill unless a rule allows it.

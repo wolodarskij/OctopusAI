@@ -10,6 +10,7 @@ The rules and the skills of this project live once, in `.agents/`. Every agent r
 - `.agents/rules/octopus/core/heavy-tools-only-when-needed.md`
 - `.agents/rules/octopus/core/investigate-first.md`
 - `.agents/rules/octopus/core/local-information.md`
+- `.agents/rules/octopus/core/long-calls-in-background.md`
 - `.agents/rules/octopus/core/no-narration-in-comments.md`
 - `.agents/rules/octopus/core/no-owner-quotes.md`
 - `.agents/rules/octopus/core/owner-edits.md`

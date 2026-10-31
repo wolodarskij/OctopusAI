@@ -63,7 +63,8 @@ ONE ENGINE, MANY PROJECTS. Every path and every rule is read from the current pr
     octopus todo group <slug> --title "..."   create, retitle, rename or delete a group
     octopus todo regroup T0001 <slug>         put tickets in a group
     octopus todo children T0001               a parent's children and where they stand
-    octopus todo wait T0001                   hold until every child is in Verification or Done
+    octopus todo wait T0001                   hold until every child is in Verification or Done;
+                                              a session runs it in the background
     octopus todo sessions                     every session that still has a terminal
     octopus todo screen T0001 --mode work     the screen of that session's terminal
     octopus todo send T0001 --text "yes" --keys Enter
@@ -6896,7 +6897,7 @@ def _main(argv):
     p.set_defaults(fn=cmd_children)
 
     p = sub.add_parser("wait", help="block until every child of the ticket is in the verify "
-                                    "or the closed lane")
+                                    "or the closed lane; a session runs it in the background")
     p.add_argument("id")
     p.add_argument("--interval", type=int, default=30, help="seconds between looks")
     p.add_argument("--timeout", type=int, default=0, help="seconds; 0 waits for ever")
@@ -6954,7 +6955,8 @@ def _main(argv):
     p.set_defaults(fn=cmd_close)
 
     p = sub.add_parser("review-old", help="the tickets older than --days in the start and "
-                                          "the blocked lane; `run` reviews them in batches")
+                                          "the blocked lane; `run` reviews them in batches, "
+                                          "and a session runs it in the background")
     p.add_argument("action", choices=["list", "run"])
     p.add_argument("--days", type=int, default=5,
                    help="a ticket created more than this many days ago, and not reviewed "

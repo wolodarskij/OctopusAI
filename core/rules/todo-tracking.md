@@ -417,6 +417,9 @@ per ticket: where the review left it.
     python .octopus/todo.py review-old list --days 5             the tickets a sweep takes
     python .octopus/todo.py review-old run --days 5 --batch 10   review them, a batch at a time
 
+**`review-old run` and `wait` hold until their sessions or children finish.** Run each of them in
+the background (`run_in_background`), never as a blocking call in your own turn.
+
 One run goes through the boards like any ticket: `work`, then Verification, then `verify`.
 
 | The verification | Result |
@@ -520,7 +523,7 @@ A ticket that is too big for one session gets children.
 
     python .octopus/todo.py new --title "..." --parent T0001    file a child
     python .octopus/todo.py children T0001                      the children and their boards; exit 1 while one is open
-    python .octopus/todo.py wait T0001                          hold until every child is in Verification or Done
+    python .octopus/todo.py wait T0001                          hold until every child is in Verification or Done; run it in the background
     python .octopus/todo.py query --parent T0001                also --parents, --roots
 
 `check` fails a parent in Done while a child is still open.
