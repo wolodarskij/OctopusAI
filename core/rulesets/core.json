@@ -36,6 +36,10 @@
     }
   },
   "optionalRules": {
+    "heavy-tools-only-when-needed": {
+      "title": "Run a heavy external tool only when a measurement shows it is needed, one at a time",
+      "default": true
+    },
     "investigate-first": {
       "title": "Investigate what something does before you answer",
       "default": true
