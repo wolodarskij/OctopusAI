@@ -37,7 +37,7 @@
   },
   "optionalRules": {
     "heavy-tools-only-when-needed": {
-      "title": "Run a heavy external tool only when a measurement shows it is needed, one at a time",
+      "title": "Use an external tool only when its result is needed; ask the owner before an expensive one",
       "default": true
     },
     "investigate-first": {
