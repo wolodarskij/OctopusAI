@@ -1,0 +1,6 @@
+{
+  "title": "The Affinity editor over its built-in MCP server: the stdio proxy, the setup and status tool, and the affinity-mcp skill",
+  "payload": [
+    {"from": "skills/", "to": ".agents/skills/"}
+  ]
+}

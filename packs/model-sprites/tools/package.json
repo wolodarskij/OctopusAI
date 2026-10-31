@@ -1,0 +1,11 @@
+{
+  "name": "octopus-model-sprites",
+  "private": true,
+  "type": "module",
+  "description": "The tools of the model-sprites pack of Octopus AI",
+  "dependencies": {
+    "three": "^0.186.1",
+    "tsx": "^4.23.15",
+    "vite": "^8.3.5"
+  }
+}

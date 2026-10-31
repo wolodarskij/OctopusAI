@@ -137,6 +137,18 @@ The commands denied to every session and the commit policy of each mode are in
 The core supplies `vcs.work` and `vcs.verify`; the pack supplies `vcs.plan`, `vcs.review` and
 `vcs.manager`.
 
+## The asset packs
+
+Any project can take them; none requires another.
+
+| Pack | What it adds | Needs on the machine |
+|---|---|---|
+| `affinity` | the skill `affinity-mcp`; `tools/affinity_mcp.py` (`status`, `setup`, `tools`) and the stdio proxy to the built-in MCP server of Affinity 3 | Affinity 3 with its MCP setting on, Node.js, Python 3 |
+| `tripo` | the skill `tripo-cli`: 3D models, textures, rigs and preset animations from a prompt or an image | `tripo-cli` (npm, global), a Tripo account |
+| `model-sprites` | the skill `model-sprites`; the tools that render a GLB to palette sprites in 8 facings, convert a still sheet in CIELAB, cut frame sets and strips, and dither videos | Node.js and `npm install` in `tools/`, Chrome or Edge, `ffmpeg` for videos |
+
+Each pack's `README.md` lists its files, its setup and its command lines.
+
 ## Another engine
 
 A pack for another engine is a new directory under `packs/` with a `ruleset.json`. Give it

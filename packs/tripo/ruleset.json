@@ -1,0 +1,6 @@
+{
+  "title": "The Tripo CLI: 3D models, textures, rigs and preset animations from a prompt or an image, and the tripo-cli skill",
+  "payload": [
+    {"from": "skills/", "to": ".agents/skills/"}
+  ]
+}

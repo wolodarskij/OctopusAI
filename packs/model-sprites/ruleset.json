@@ -1,0 +1,6 @@
+{
+  "title": "3D model to palette pixel sprites in 8 facings, still sheets in the palette, sprite strips and dithered videos, and the model-sprites skill",
+  "payload": [
+    {"from": "skills/", "to": ".agents/skills/"}
+  ]
+}

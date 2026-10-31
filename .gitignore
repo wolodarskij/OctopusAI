@@ -15,6 +15,7 @@
 # Build output and local tool state
 __pycache__/
 *.py[cod]
+node_modules/
 Binaries/
 Intermediate/
 *.log
