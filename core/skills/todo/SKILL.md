@@ -122,6 +122,8 @@ file alone refuses nothing. A ticket that differs from each named ticket takes `
   first and say so.
 - In a project with `vcs: git`, a `work` session commits its own files and hunks before it moves
   the ticket to Verification, and a `verify` session pulls and pushes the work when it holds.
+- In a project with `vcs: svn` or `vcs: perforce`, a `work` session puts its files into the
+  changelist of its ticket, and a `verify` session commits or submits them when the work holds.
 - `--terminal own|wt|cmd|none` picks the terminal. `own`, the default, is a pseudoconsole that the
   engine holds with no window. `none` and `--dry-run` print the launch line.
 - Every launch writes its session id into the ticket under `sessions:`. `claude --resume <id>`

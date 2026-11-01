@@ -3464,9 +3464,14 @@ def build_brief(t, mode="work", note="", provider="claude"):
                 return _fill(_read(files[n]).replace("\r\n", "\n"), vals)
         return ""
 
-    # The commit policy of each mode, only where the project uses git: the core supplies
-    # `vcs.work` and `vcs.verify`, the git pack the others.
-    git = P.vcs == "git"
+    # The commit policy of each mode, only where the project has a VCS: `vcs.<kind>.<mode>`
+    # from the pack of that VCS, and for git `vcs.<mode>`: the core supplies `vcs.work` and
+    # `vcs.verify`, the git pack the others.
+    has_vcs = P.vcs != "none"
+
+    def vcs_sec(m):
+        return sec("vcs.%s.%s" % (P.vcs, m), *(["vcs.%s" % m] if P.vcs == "git" else []))
+
     permits = [sec("permits.granted") if granted else sec("permits.none")]
     if ungranted:
         permits.append(sec("permits.ungranted"))
@@ -3483,8 +3488,8 @@ def build_brief(t, mode="work", note="", provider="claude"):
         out = [sec("header"), sec("messages"), other,
                sec("where") if vals["project_line"] else "",
                sec("repeat.%s" % MANAGER)] + permits + [sec("before")]
-        if git:
-            out.append(sec("vcs.%s" % MANAGER))
+        if has_vcs:
+            out.append(vcs_sec(MANAGER))
         if note:
             out.append(sec("note"))
         out.append(sec("ticket"))
@@ -3503,8 +3508,8 @@ def build_brief(t, mode="work", note="", provider="claude"):
     out += permits
     out.append(sec("before.%s" % mode, "before"))
     out.append(sec("finish.%s" % mode))
-    if git:
-        out.append(sec("vcs.%s" % mode))
+    if has_vcs:
+        out.append(vcs_sec(mode))
     out.append(sec("finish"))
     out.append(sec("close.%s" % mode))
     if note:

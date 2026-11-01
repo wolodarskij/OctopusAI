@@ -1,7 +1,7 @@
 """vcs.py - the version control of a project: one interface, a git backend, and nothing else.
 
-    detect(root)         "git" when the root holds `.git`, "diversion" when it holds
-                         `.diversion`, else None
+    detect(root)         "git", "svn", "perforce" or "diversion": the kind whose marker
+                         (`MARKERS`) sits in the root, else None
     backend(root, kind)  `Git` for "git", else `NoVcs`. Without a kind, `detect` picks it
 
 EVERY METHOD RETURNS A LIST OF `Step(argv, rc, out)`, one per command it ran, in order. A
@@ -15,8 +15,10 @@ deleting a branch that is not merged, and `init` on a project that already has a
 CREDENTIALS stay in git's own credential manager. Octopus AI stores none, and git never prompts on
 a terminal: `GIT_TERMINAL_PROMPT=0`, and stdin is empty.
 
-The project chooses its VCS in `.octopus/project.json`: `vcs` is `git` or `none` (absent means
+The project chooses its VCS in `.octopus/project.json`: `vcs` is one of `KINDS` (absent means
 none), and `vcsPull` is how `sync` pulls (`PULL_ARGS`). A project with no VCS works as before.
+`svn` and `perforce` have no backend here: the `svn` and the `perforce` packs give their sessions
+the commit policy (`PACK_KINDS`), and every call of the board on them does nothing.
 """
 
 from __future__ import annotations
@@ -27,8 +29,11 @@ import subprocess
 from collections import namedtuple
 from pathlib import Path
 
-KINDS = ("git", "none")
-MARKERS = (("git", ".git"), ("diversion", ".diversion"))
+KINDS = ("git", "svn", "perforce", "none")
+# The kinds whose commit policy only a pack of the same name supplies.
+PACK_KINDS = ("svn", "perforce")
+MARKERS = (("git", ".git"), ("svn", ".svn"), ("perforce", ".p4config"), ("perforce", ".p4ignore"),
+           ("diversion", ".diversion"))
 PULL_ARGS = {
     "rebase": ["--rebase", "--autostash"],
     "merge": ["--no-rebase"],
@@ -59,7 +64,7 @@ class NeedsConfirm(Exception):
 
 
 def detect(root):
-    """`"git"`, `"diversion"` or None: the VCS whose marker sits in the root."""
+    """The kind of the VCS whose marker sits in the root, or None."""
     root = Path(root)
     for kind, marker in MARKERS:
         if (root / marker).exists():

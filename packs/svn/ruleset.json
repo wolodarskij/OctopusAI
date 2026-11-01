@@ -1,0 +1,94 @@
+{
+  "title": "SVN: the svn-commit, svn-update and svn-branch permits, the svn commands no session runs, and the commit policy of each launch mode",
+  "detect": [
+    ".svn"
+  ],
+  "modePermits": {
+    "verify": [
+      "svn-commit",
+      "svn-update"
+    ]
+  },
+  "permits": {
+    "svn-commit": {
+      "grants": "write to the repository: commit, import, and copy, move, delete or mkdir on a URL",
+      "deny": [
+        "Bash(svn commit:*)",
+        "Bash(svn ci:*)",
+        "Bash(svn import:*)",
+        "Bash(svn mkdir *://*)",
+        "Bash(svn mkdir ^/*)",
+        "Bash(svn mkdir * ^/*)",
+        "Bash(svn delete *://*)",
+        "Bash(svn delete ^/*)",
+        "Bash(svn delete * ^/*)",
+        "Bash(svn rm *://*)",
+        "Bash(svn rm ^/*)",
+        "Bash(svn rm * ^/*)",
+        "Bash(svn move *://*)",
+        "Bash(svn move ^/*)",
+        "Bash(svn move * ^/*)",
+        "Bash(svn mv *://*)",
+        "Bash(svn mv ^/*)",
+        "Bash(svn mv * ^/*)"
+      ]
+    },
+    "svn-update": {
+      "grants": "bring the working copy up to date with the repository: update, and relocate",
+      "deny": [
+        "Bash(svn update:*)",
+        "Bash(svn up:*)",
+        "Bash(svn relocate:*)"
+      ]
+    },
+    "svn-branch": {
+      "grants": "change branches: switch, copy and merge",
+      "deny": [
+        "Bash(svn switch:*)",
+        "Bash(svn sw:*)",
+        "Bash(svn copy:*)",
+        "Bash(svn cp:*)",
+        "Bash(svn merge:*)"
+      ]
+    }
+  },
+  "deny": [
+    {
+      "tools": [
+        "Bash(svn commit)",
+        "Bash(svn ci)",
+        "Bash(svn revert:*)",
+        "Bash(svn cleanup --remove*)",
+        "Bash(svn cleanup * --remove*)",
+        "Bash(svn lock --force*)",
+        "Bash(svn lock * --force*)",
+        "Bash(svn unlock --force*)",
+        "Bash(svn unlock * --force*)",
+        "Bash(svn add .)",
+        "Bash(svn add . *)",
+        "Bash(svn add --force*)",
+        "Bash(svn add * --force*)",
+        "Bash(svn * theirs-full*)",
+        "Bash(svn * --accept tf*)",
+        "Bash(svn * --accept=tf*)",
+        "Bash(svn * mine-full*)",
+        "Bash(svn * --accept mf*)",
+        "Bash(svn * --accept=mf*)"
+      ],
+      "unless": []
+    }
+  ],
+  "brief": [
+    "vcs.svn.work",
+    "vcs.svn.verify",
+    "vcs.svn.plan",
+    "vcs.svn.review",
+    "vcs.svn.manager"
+  ],
+  "payload": [
+    {
+      "from": "rules/",
+      "to": ".agents/rules/octopus/svn/"
+    }
+  ]
+}

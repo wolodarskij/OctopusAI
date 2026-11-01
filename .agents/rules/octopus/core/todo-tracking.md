@@ -395,6 +395,13 @@ holds.** The brief sections `vcs.work` and `vcs.verify` give the exact steps.
   backend yet, so it commits nothing.
 - **With the `git` pack,** a `work` launch holds `git-commit`, and a `verify` launch holds
   `git-commit` and `git-sync`, whatever the ticket says (`modePermits`).
+- **In a project with `vcs: svn` or `vcs: perforce`, a commit goes to the server at once, so the
+  `verify` session commits the work when it holds.** The `work` session commits nothing: it puts
+  its files into the changelist of its ticket and writes them on the ticket. The `verify` session
+  updates those files and commits them as `<id>: <title>` (svn), or syncs, resolves and submits the
+  changelist (Perforce). The `svn` or the `perforce` pack gives the brief sections
+  `vcs.<kind>.<mode>`, and a `verify` launch holds `svn-commit` and `svn-update`, or `p4-submit`
+  and `p4-sync`. `check` reports a project whose `vcs` names a VCS whose pack it does not list.
 
 ## A repeatable ticket returns to Pipeline
 

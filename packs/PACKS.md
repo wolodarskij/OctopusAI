@@ -137,6 +137,29 @@ The commands denied to every session and the commit policy of each mode are in
 The core supplies `vcs.work` and `vcs.verify`; the pack supplies `vcs.plan`, `vcs.review` and
 `vcs.manager`.
 
+## The svn and the perforce packs
+
+`svn` and `perforce` guard what a launched session may do with Subversion and with Perforce. Each
+needs nothing else. A commit of either goes to the server at once, so a `work` session commits
+nothing: it puts its files into the changelist of its ticket. A `verify` launch always holds the
+two permits that commit (`modePermits`), and commits the changelist when the work holds. The
+commit policy reaches a brief only when `.octopus/project.json` sets `vcs` to `svn` or
+`perforce`, and `check` reports a project whose `vcs` is one of them while it does not list that
+pack. Add one with `octopus packs <project> add svn` or `add perforce`, then set `vcs`.
+
+| Pack | Permit | Grants | Denied while absent |
+|---|---|---|---|
+| `svn` | `svn-commit` | write to the repository | `svn commit`, `import`, and `mkdir`, `delete`, `move` on a URL |
+| `svn` | `svn-update` | bring the working copy up to date | `svn update`, `relocate` |
+| `svn` | `svn-branch` | change branches | `svn switch`, `copy`, `merge` |
+| `perforce` | `p4-submit` | submit to the depot | `p4 submit`, `populate` |
+| `perforce` | `p4-sync` | bring the workspace up to date | `p4 sync`, `update`, `flush`, `p4 set P4PORT`, `p4 set P4CLIENT` |
+| `perforce` | `p4-branch` | change streams and branches | `p4 switch`, `integrate`, `merge`, `copy`, a change of the workspace spec |
+
+The commands denied to every session are in `svn/rules/svn.md` and `perforce/rules/perforce.md`.
+The commit policy of each mode is in the brief sections `vcs.svn.<mode>` and
+`vcs.perforce.<mode>` of each pack.
+
 ## The asset packs
 
 Any project can take them; none requires another.

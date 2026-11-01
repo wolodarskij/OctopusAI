@@ -1,0 +1,97 @@
+{
+  "title": "Perforce: the p4-submit, p4-sync and p4-branch permits, the p4 commands no session runs, and the commit policy of each launch mode",
+  "detect": [
+    ".p4config",
+    "p4config.txt",
+    ".p4ignore",
+    "p4ignore.txt"
+  ],
+  "modePermits": {
+    "verify": [
+      "p4-submit",
+      "p4-sync"
+    ]
+  },
+  "permits": {
+    "p4-submit": {
+      "grants": "submit to the depot: submit and populate",
+      "deny": [
+        "Bash(p4 submit:*)",
+        "Bash(p4 populate:*)"
+      ]
+    },
+    "p4-sync": {
+      "grants": "bring the workspace up to date with the depot, and change the server or the workspace it uses: sync, update, flush, and p4 set P4PORT or P4CLIENT",
+      "deny": [
+        "Bash(p4 sync:*)",
+        "Bash(p4 update:*)",
+        "Bash(p4 flush:*)",
+        "Bash(p4 set P4PORT*)",
+        "Bash(p4 set P4CLIENT*)"
+      ]
+    },
+    "p4-branch": {
+      "grants": "change streams and branches: switch, integrate, merge, copy, and edit the workspace spec",
+      "deny": [
+        "Bash(p4 switch:*)",
+        "Bash(p4 integrate:*)",
+        "Bash(p4 integ:*)",
+        "Bash(p4 merge:*)",
+        "Bash(p4 copy:*)",
+        "Bash(p4 client -s*)",
+        "Bash(p4 client -i*)",
+        "Bash(p4 client -d*)",
+        "Bash(p4 workspace -s*)",
+        "Bash(p4 workspace -i*)",
+        "Bash(p4 workspace -d*)"
+      ]
+    }
+  },
+  "deny": [
+    {
+      "tools": [
+        "Bash(p4 submit)",
+        "Bash(p4 submit -d*)",
+        "Bash(p4 submit * -d*)",
+        "Bash(p4 revert:*)",
+        "Bash(p4 clean:*)",
+        "Bash(p4 obliterate:*)",
+        "Bash(p4 sync -f*)",
+        "Bash(p4 sync * -f*)",
+        "Bash(p4 sync -k*)",
+        "Bash(p4 sync * -k*)",
+        "Bash(p4 reconcile)",
+        "Bash(p4 reconcile ...)",
+        "Bash(p4 reconcile //...)",
+        "Bash(p4 resolve -at*)",
+        "Bash(p4 resolve * -at*)",
+        "Bash(p4 resolve -ay*)",
+        "Bash(p4 resolve * -ay*)",
+        "Bash(p4 change -d*)",
+        "Bash(p4 change -f*)",
+        "Bash(p4 change * -f*)",
+        "Bash(p4 changelist -d*)",
+        "Bash(p4 changelist -f*)",
+        "Bash(p4 shelve -d*)",
+        "Bash(p4 shelve * -d*)",
+        "Bash(p4 unlock -f*)",
+        "Bash(p4 unlock * -f*)",
+        "Bash(p4 unlock -x*)"
+      ],
+      "unless": []
+    }
+  ],
+  "brief": [
+    "vcs.perforce.work",
+    "vcs.perforce.verify",
+    "vcs.perforce.plan",
+    "vcs.perforce.review",
+    "vcs.perforce.manager"
+  ],
+  "payload": [
+    {
+      "from": "rules/",
+      "to": ".agents/rules/octopus/perforce/"
+    }
+  ]
+}

@@ -767,6 +767,11 @@ class Project:
             self.problems.append("%s/%s: `vcs` is %r; one of %s"
                                  % (self.config_dir, PROJECT_FILE, self.vcs, ", ".join(_vcs.KINDS)))
             self.vcs = "none"
+        if self.vcs in _vcs.PACK_KINDS and self.vcs not in rules["rulesets"]:
+            self.problems.append("%s/%s: `vcs` is %s, and the project does not list the %s pack;"
+                                 " run: octopus packs \"%s\" add %s"
+                                 % (self.config_dir, PROJECT_FILE, self.vcs, self.vcs,
+                                    self.name, self.vcs))
         self.vcs_pull = cfg.get("vcsPull") or _vcs.DEFAULT_PULL
         if self.vcs_pull not in _vcs.PULL_ARGS:
             self.problems.append("%s/%s: `vcsPull` is %r; one of %s"
