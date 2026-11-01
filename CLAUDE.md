@@ -4,6 +4,7 @@
 @.agents/rules/octopus/core/investigate-first.md
 @.agents/rules/octopus/core/local-information.md
 @.agents/rules/octopus/core/long-calls-in-background.md
+@.agents/rules/octopus/core/no-mutual-waits.md
 @.agents/rules/octopus/core/no-narration-in-comments.md
 @.agents/rules/octopus/core/no-owner-quotes.md
 @.agents/rules/octopus/core/owner-edits.md

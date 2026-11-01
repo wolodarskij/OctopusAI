@@ -48,6 +48,10 @@
       "title": "Keep machine, person and project facts out of the Octopus AI repository",
       "default": true
     },
+    "no-mutual-waits": {
+      "title": "Never wait for a ticket, a session or a resource whose holder waits for your ticket",
+      "default": true
+    },
     "no-narration-in-comments": {
       "title": "A comment describes the code, never the history of the work",
       "default": true
