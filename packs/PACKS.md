@@ -137,6 +137,12 @@ The commands denied to every session and the commit policy of each mode are in
 The core supplies `vcs.work` and `vcs.verify`; the pack supplies `vcs.plan`, `vcs.review` and
 `vcs.manager`.
 
+Two keys of `.octopus/project.json` belong to the pack, and the Git section of Project Settings
+edits them. `gitBranch` names the work branch: the guard `core/hooks/git_guard.py` refuses a
+commit, a merge and a pull of a session on any other branch. `gitPush: false` takes `git-sync`
+from every launch, and a `verify` session gets `vcs.verify-local`: it commits, and never pulls or
+pushes.
+
 ## The svn and the perforce packs
 
 `svn` and `perforce` guard what a launched session may do with Subversion and with Perforce. Each

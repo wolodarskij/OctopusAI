@@ -1655,7 +1655,8 @@ def project_view():
                        "all": dict(P.CATEGORY_MEANING)},
         "problems": list(P.problems),
         "installed": admin.status(P.ROOT, out=lambda *_a: None),
-        "vcs": {"kind": P.vcs, "pull": P.vcs_pull, "pulls": list(_vcs.PULL_ARGS)},
+        "vcs": {"kind": P.vcs, "pull": P.vcs_pull, "pulls": list(_vcs.PULL_ARGS),
+                "workBranch": P.git_branch, "push": P.git_push},
     }
 
 
@@ -1751,7 +1752,7 @@ def act_project(body):
     """Change one setting of the current project through `admin`, so the record of the
     installed files stays true. The ops: `meta` (name, description), `models` (`provider`, and
     its models, efforts, defaultModel, defaultEffort), `groups` (store, required), `categories` (the
-    project's own categories), `vcs` (vcs, vcsPull), `provider` (the default provider), `packAdd`
+    project's own categories), `vcs` (vcs, vcsPull, gitBranch, gitPush), `provider` (the default provider), `packAdd`
     and `packRemove` (a pack), `packsSet` (`packs`: every pack the project should have), `rules`
     (`rules`: an optional rule -> true, false, or null for no switch of the project's own),
     `dirs` (`dirs`: the project's `extraDirs`)."""
@@ -1794,7 +1795,15 @@ def act_project(body):
     elif op == "dirs":
         admin.set_settings(root, extraDirs=_extra_dirs(body.get("dirs")) or None)
     elif op == "vcs":
-        admin.set_settings(root, **{k: body[k] for k in ("vcs", "vcsPull") if k in body})
+        changes = {k: body[k] for k in ("vcs", "vcsPull") if k in body}
+        if "gitBranch" in body:
+            changes["gitBranch"] = str(body["gitBranch"] or "").strip() or None
+        if "gitPush" in body:
+            if not isinstance(body["gitPush"], bool):
+                raise ValueError("gitPush is true or false")
+            # Absent means true: the key is written only to turn the push off.
+            changes["gitPush"] = None if body["gitPush"] else False
+        admin.set_settings(root, **changes)
     elif op == "provider":
         # The provider a launch starts unless it names another; the built-in default is no key.
         provider = str(body.get("provider") or "")
@@ -1878,6 +1887,8 @@ def _vcs_state(root):
     b = _vcs.backend(root, "git" if found == "git" else "none")
     st = b.status()
     info = dict(st.info, vcs=p.vcs, detected=found, pull=p.vcs_pull,
+                workBranch=p.git_branch, push=p.git_push,
+                hasPack=T.GIT_PACK in p.RULES["rulesets"],
                 branches=b.branches().info["local"] if st.info.get("repo") else [])
     return info, list(st)
 

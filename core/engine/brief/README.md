@@ -21,7 +21,7 @@ files in this directory, in this order:
 | 10a | `projects` | the launch holds the `projects` permit: carry the change into every project, launch each follow-up |
 | 11 | `before.<mode>`, else `before` | always |
 | 12 | `finish.<mode>` | always |
-| 13 | `vcs.<kind>.<mode>`, and for git `vcs.<mode>` | the project has a `vcs` other than `none`. For `vcs: git` the core supplies `vcs.work` (commit the work before the move) and `vcs.verify` (push it when it holds), and the `git` pack supplies `vcs.plan`, `vcs.review` and `vcs.manager`. For `vcs: svn` and `vcs: perforce` the `svn` and the `perforce` pack supply `vcs.svn.<mode>` and `vcs.perforce.<mode>`. It continues the list of `finish.<mode>` |
+| 13 | `vcs.<kind>.<mode>`, and for git `vcs.<mode>` | the project has a `vcs` other than `none`. For `vcs: git` the core supplies `vcs.work` (commit the work before the move) and `vcs.verify` (push it when it holds), and `vcs.verify-local` in place of `vcs.verify` when `gitPush` is false (commit it, no pull and no push), and the `git` pack supplies `vcs.plan`, `vcs.review` and `vcs.manager`. For `vcs: svn` and `vcs: perforce` the `svn` and the `perforce` pack supply `vcs.svn.<mode>` and `vcs.perforce.<mode>`. It continues the list of `finish.<mode>` |
 | 14 | `finish` | always |
 | 15 | `close.<mode>` | always: `plan`, `work`, `review` and `verify` each have one |
 | 16 | `note` | the launch carries a note |
@@ -56,6 +56,7 @@ An empty file removes the section. A section no layer supplies is left out.
 | `{octopus}` | the command that runs `octopus.py` of this checkout: `python "<checkout>/octopus.py"` |
 | `{permit_rows}`, `{ungranted}`, `{denied}` | the permits the launch grants, the ones it does not, the denied tools |
 | `{extra_dirs}` | one list line per directory of `extraDirs` that exists, as an absolute path |
+| `{git_branch_line}` | for `vcs: git` with `gitBranch`, the list line that names the work branch; else nothing |
 | `{launch_lane}`, `{launch_label}`, `{launch_status}` | where the launch put the ticket |
 | `{state}`, `{state_label}`, `{status}` | where the ticket was before the launch |
 | `{note}` | the note, as plain text |

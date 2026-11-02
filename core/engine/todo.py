@@ -3427,6 +3427,8 @@ def session_uuid(ticket_id):
 MODES = ("work", "plan", "review", "verify")
 # The pack that holds the git permits and the `modePermits` that grant them to a launch.
 GIT_PACK = "git"
+# The git permit that pulls and pushes; `gitPush: false` in project.json takes it from every launch.
+GIT_SYNC = "git-sync"
 
 
 def launch_permits(t, mode):
@@ -3437,6 +3439,9 @@ def launch_permits(t, mode):
     out = list(t.permits)
     if t.repeat != MANAGER:
         out += [p for p in P.MODE_PERMITS.get(mode, ()) if p not in out]
+    if not P.git_push:
+        # `gitPush: false`: no launch pulls or pushes, whatever its ticket or its mode grants.
+        out = [p for p in out if p != GIT_SYNC]
     return out
 
 
@@ -3480,6 +3485,8 @@ def build_brief(t, mode="work", note="", provider="claude"):
     has_vcs = P.vcs != "none"
 
     def vcs_sec(m):
+        if P.vcs == "git" and m == "verify" and not P.git_push:
+            return sec("vcs.verify-local")
         return sec("vcs.%s.%s" % (P.vcs, m), *(["vcs.%s" % m] if P.vcs == "git" else []))
 
     permits = [sec("permits.granted") if granted else sec("permits.none")]
@@ -3602,7 +3609,18 @@ def brief_values(t, mode, note, granted, denied, ungranted):
         "projects": _project_rows(),
         "octopus": 'python "%s"' % (_project.OCTOPUS / "octopus.py").as_posix(),
         "extra_dirs": "\n".join("- `%s`" % d for d in P.extra_dirs()),
+        "git_branch_line": _git_branch_line(),
     }
+
+
+def _git_branch_line():
+    """The list line of the `vcs.*` sections on the project's `gitBranch`, or nothing."""
+    if P.vcs != "git" or not P.git_branch:
+        return ""
+    return ("- **Commit only on the branch `%s`.** `git branch --show-current` must print it"
+            " before you commit. The guard refuses a commit, a merge and a pull on any other"
+            " branch. Never switch branches: when another branch is checked out, ask the owner."
+            % P.git_branch)
 
 
 def _project_rows():

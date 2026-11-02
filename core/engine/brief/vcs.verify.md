@@ -21,3 +21,4 @@
   6. **It does not hold:** commit nothing more and push nothing.
   7. Never `git add -A`, `--all` or `.`, never `git commit -a`, never `git add -p`, never
      rebase, never stash and never force a push.
+{git_branch_line}
