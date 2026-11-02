@@ -193,6 +193,11 @@ everything that no permit guards.
 - A `repeat: test` ticket holds the project's `testerPermits` on every run, whatever its
   `permits:` line says.
 
+**A project's other directories need no permit.** `extraDirs` in `.octopus/project.json` lists
+more directories of the project, absolute or relative to its root; the Directories section of
+Project Settings edits it. Every launch adds each one that exists with `--add-dir`, in every
+mode, and the brief lists them. A session works in them as in the project root.
+
 **Remote control.** A Claude launch runs with Claude Code's Remote Control unless it is off:
 `remoteControl` in `project.json` is the default, `remote-control: on|off` on a ticket wins, and
 `remote-control <id> on|off|default` or the board's card menu sets it. `on` reaches a live

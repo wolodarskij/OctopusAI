@@ -1646,6 +1646,8 @@ def project_view():
                      "boardFile": "%s/.board.json" % P.todo_dir},
         "permits": [{"name": n, "grants": P.PERMITS[n], "tickets": counts.get(n, 0),
                      "tester": n in P.TESTER_PERMITS} for n in sorted(P.PERMITS)],
+        "extraDirs": [{"dir": d, "path": str(P.extra_dir_path(d)),
+                       "exists": P.extra_dir_path(d).is_dir()} for d in P.extra_dirs_cfg],
         "groups": {"store": P.groups_store, "required": P.groups_required,
                    "autoGroups": list(P.auto_groups)},
         "categories": {"defaults": dict(project.DEFAULT_CATEGORIES),
@@ -1724,13 +1726,35 @@ def _rename_served(old, new):
         DEFAULT[0] = new
 
 
+def _extra_dirs(dirs):
+    """The `extraDirs` list the page sends, checked: each entry a directory that exists
+    outside the project root, each once. An entry the project already lists stays when its
+    directory is missing, as on another machine."""
+    if not isinstance(dirs, list) or not all(isinstance(d, str) for d in dirs):
+        raise ValueError("`dirs` is the list of directory paths")
+    root, out, seen = P.ROOT.resolve(), [], set()
+    for d in (x.strip() for x in dirs):
+        if not d:
+            continue
+        p = P.extra_dir_path(d)
+        if not p.is_dir() and d not in P.extra_dirs_cfg:
+            raise ValueError("%s is not a directory" % p)
+        if p == root or root in p.parents:
+            raise ValueError("%s is inside the project; every session works there already" % p)
+        if p not in seen:
+            seen.add(p)
+            out.append(d)
+    return out
+
+
 def act_project(body):
     """Change one setting of the current project through `admin`, so the record of the
     installed files stays true. The ops: `meta` (name, description), `models` (`provider`, and
     its models, efforts, defaultModel, defaultEffort), `groups` (store, required), `categories` (the
     project's own categories), `vcs` (vcs, vcsPull), `provider` (the default provider), `packAdd`
     and `packRemove` (a pack), `packsSet` (`packs`: every pack the project should have), `rules`
-    (`rules`: an optional rule -> true, false, or null for no switch of the project's own)."""
+    (`rules`: an optional rule -> true, false, or null for no switch of the project's own),
+    `dirs` (`dirs`: the project's `extraDirs`)."""
     import admin
     op, root, name, log = body.get("op"), P.ROOT, _current_name(), []
     if op == "meta":
@@ -1767,6 +1791,8 @@ def act_project(body):
         if used:
             raise ValueError("tickets still carry the category %s" % ", ".join(used))
         admin.set_settings(root, categories=own or None)
+    elif op == "dirs":
+        admin.set_settings(root, extraDirs=_extra_dirs(body.get("dirs")) or None)
     elif op == "vcs":
         admin.set_settings(root, **{k: body[k] for k in ("vcs", "vcsPull") if k in body})
     elif op == "provider":

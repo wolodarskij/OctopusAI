@@ -1097,6 +1097,19 @@ a.icon{display:inline-flex;align-items:center;text-decoration:none}
       <tbody id="pPermits"></tbody>
     </table>
   </section>
+  <section id="pDirsSec" data-save>
+    <h3>Directories</h3>
+    <p>More directories of the project. Every session of the project reads and writes in each of them as in the project root, with no permit: each launch adds them with <code>--add-dir</code>. A path is absolute, or relative to the project root. Saved in <code class="pCfg"></code> as <code>extraDirs</code>.</p>
+    <table>
+      <thead><tr><th>Directory</th><th>Path</th><th></th></tr></thead>
+      <tbody id="pDirs"></tbody>
+    </table>
+    <div class="row">
+      <button class="icon" id="pDirAdd">Add directory</button>
+      <span class="grow"></span>
+      <button class="icon go" id="pDirsSave">Save</button>
+    </div>
+  </section>
   <section id="pFilesSec">
     <h3>Installed files</h3>
     <details class="files" id="pFilesBox">
@@ -3554,7 +3567,7 @@ function inputOf(value, ph) {
 }
 function drawProjectView() {
   const v = PROJ;
-  $(".pCfg").textContent = v.config;
+  for (const c of document.querySelectorAll(".pCfg")) c.textContent = v.config;
   $("#pName").value = v.name;
   $("#pSlug").value = v.slug;
   $("#pDesc").value = v.description || "";
@@ -3603,6 +3616,8 @@ function drawProjectView() {
     if (!(k in v.categories.own))
       cb.append(cells(el("tr", "fixed"), el("td", "dir", k), el("td", "st", m), el("td")));
   for (const [k, m] of Object.entries(v.categories.own)) addCatRow(k, m);
+  $("#pDirs").innerHTML = "";
+  for (const d of v.extraDirs || []) addDirRow(d.dir, d.exists ? d.path : `${d.path} · missing`);
   const pr = $("#pProblems");
   pr.innerHTML = "";
   for (const x of v.problems) pr.append(el("li", null, x));
@@ -3726,6 +3741,14 @@ function addCatRow(name, meaning) {
             tdOf("act", smallBtn("Remove", "danger", () => tr.remove())));
   $("#pCats").append(tr);
 }
+function addDirRow(dir, shown) {
+  const tr = el("tr");
+  tr.append(tdOf(null, inputOf(dir, "D:/Work/Shared or ../Assets")), el("td", "st", shown || ""),
+            tdOf("act", smallBtn("Remove", "danger", () => tr.remove())));
+  $("#pDirs").append(tr);
+}
+const dirsOf = () => [...$("#pDirs").querySelectorAll("input")].map(i => i.value.trim())
+  .filter(Boolean);
 function catsOf() {
   const out = {};
   for (const tr of $("#pCats").children) {
@@ -4036,6 +4059,9 @@ $("#pGroupsSave").addEventListener("click", () => projectOp(
 $("#pCatAdd").addEventListener("click", () => addCatRow("", ""));
 $("#pCatsSave").addEventListener("click", () => projectOp(
   {op: "categories", categories: catsOf()}, "categories saved"));
+$("#pDirAdd").addEventListener("click", () => addDirRow("", ""));
+$("#pDirsSave").addEventListener("click", () => projectOp(
+  {op: "dirs", dirs: dirsOf()}, "directories saved"));
 
 /* ── the Global settings view: the AI providers ─────────────────────── */
 /* `/api/providers` is read when the view opens and after each change. Adding a provider, or

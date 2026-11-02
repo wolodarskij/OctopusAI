@@ -15,6 +15,7 @@ files in this directory, in this order:
 | 7 | `job.work-plan` or `job.<mode>` | `job.work-plan` for a `work` launch on a ticket that has `## Plan` |
 | 7a | `readme.<mode>` | the rule `readme-needs-owner-approval` is on for the project: `readme.work` for a `work` launch (also on a ticket with `## Plan`), `readme.plan` for a `plan` launch |
 | 8 | `permits.granted` or `permits.none` | the ticket has permits, or it has none |
+| 8a | `dirs` | the project lists `extraDirs` in `project.json`, and at least one of them exists |
 | 9 | `permits.ungranted` | a permit exists that the ticket does not have |
 | 10 | `permits.denied` | the launch denies a tool |
 | 10a | `projects` | the launch holds the `projects` permit: carry the change into every project, launch each follow-up |
@@ -27,7 +28,7 @@ files in this directory, in this order:
 | 17 | `ticket` | always |
 
 A `manager` ticket never finishes and never moves its own ticket, so its brief is only
-`header`, `messages`, `provider`, `where`, `repeat.manager`, the `permits.*` sections (never `projects`: `repeat.manager` carries the projects), `before`, `vcs.manager` or `vcs.<kind>.manager` (on the
+`header`, `messages`, `provider`, `where`, `repeat.manager`, the `permits.*` sections and `dirs` (never `projects`: `repeat.manager` carries the projects), `before`, `vcs.manager` or `vcs.<kind>.manager` (on the
 same condition as `vcs.<mode>`), `note` and `ticket`.
 It leaves out `boundary`, `blocked`, `repeat`, `job.*`, `readme.*`, `finish.*` and `close.*`.
 
@@ -54,6 +55,7 @@ An empty file removes the section. A section no layer supplies is left out.
 | `{projects}` | a table of every registered project: name, root, and the command that runs its ticket engine |
 | `{octopus}` | the command that runs `octopus.py` of this checkout: `python "<checkout>/octopus.py"` |
 | `{permit_rows}`, `{ungranted}`, `{denied}` | the permits the launch grants, the ones it does not, the denied tools |
+| `{extra_dirs}` | one list line per directory of `extraDirs` that exists, as an absolute path |
 | `{launch_lane}`, `{launch_label}`, `{launch_status}` | where the launch put the ticket |
 | `{state}`, `{state_label}`, `{status}` | where the ticket was before the launch |
 | `{note}` | the note, as plain text |

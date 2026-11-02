@@ -3440,6 +3440,16 @@ def launch_permits(t, mode):
     return out
 
 
+def launch_dirs(granted):
+    """The directories a launch adds to its session: the project's `extraDirs`, which no
+    permit guards, then the directory of each granted permit."""
+    dirs = list(P.extra_dirs())
+    for p in P.PERMITS:
+        if p in granted:
+            dirs += [d for d in P.add_dirs(p) if d not in dirs]
+    return dirs
+
+
 def build_brief(t, mode="work", note="", provider="claude"):
     """The whole instruction set the launched session gets, as one file.
 
@@ -3473,6 +3483,8 @@ def build_brief(t, mode="work", note="", provider="claude"):
         return sec("vcs.%s.%s" % (P.vcs, m), *(["vcs.%s" % m] if P.vcs == "git" else []))
 
     permits = [sec("permits.granted") if granted else sec("permits.none")]
+    if vals["extra_dirs"]:
+        permits.append(sec("dirs"))
     if ungranted:
         permits.append(sec("permits.ungranted"))
     if denied:
@@ -3589,6 +3601,7 @@ def brief_values(t, mode, note, granted, denied, ungranted):
         if r["lookOnScreen"] else "",
         "projects": _project_rows(),
         "octopus": 'python "%s"' % (_project.OCTOPUS / "octopus.py").as_posix(),
+        "extra_dirs": "\n".join("- `%s`" % d for d in P.extra_dirs()),
     }
 
 
@@ -3897,10 +3910,7 @@ def _launch_argv(t, mode="work", model=None, no_fable=False, auto=False, effort=
     denied = denied_tools(granted)
     if denied:
         argv += ["--disallowedTools", " ".join(denied)]
-    dirs = []
-    for p in P.PERMITS:
-        if p in granted:
-            dirs += [d for d in P.add_dirs(p) if d not in dirs]
+    dirs = launch_dirs(granted)
     if dirs:
         argv += ["--add-dir"] + dirs
     # An explicit --model and --effort win; otherwise Claude's defaults in this project.
@@ -3920,10 +3930,7 @@ def _provider_argv(t, mode, provider, prompt, model=None, effort=None, auto=Fals
     spec = P.providers[provider]
     prov = _providers.get(provider)
     granted = launch_permits(t, mode)
-    dirs = []
-    for p in P.PERMITS:
-        if p in granted:
-            dirs += [d for d in P.add_dirs(p) if d not in dirs]
+    dirs = launch_dirs(granted)
     # Only a model and an effort of this provider; none of Claude's defaults.
     model, effort = P.choose(provider, model, effort)
     if prov["dialect"] == "template":
@@ -4190,9 +4197,11 @@ def chat_argv(model=None, effort=None, sid=None, provider=None):
             ["-c", "model_reasoning_effort=%s" % effort] if effort else []) + [note]
     if prov["dialect"] != "claude":
         raise ValueError("Codebase chat supports Claude Code and Codex")
+    dirs = P.extra_dirs()
     return argv + ["--session-id", sid or str(uuid.uuid4()),
             "--permission-mode", "plan",
-            "--disallowedTools", " ".join(CHAT_DENIED),
+            "--disallowedTools", " ".join(CHAT_DENIED)] + (
+            ["--add-dir"] + dirs if dirs else []) + [
             "--append-system-prompt", note] + (["--model", model] if model else []) + (
             ["--effort", effort] if effort else [])
 

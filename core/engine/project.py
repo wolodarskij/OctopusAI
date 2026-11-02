@@ -813,6 +813,14 @@ class Project:
                                  % (self.config_dir, PROJECT_FILE))
             rc = True
         self.reply_check = rc
+        # `extraDirs`: more directories of the project, absolute or relative to its root.
+        # Every launch adds each one that exists, with no permit.
+        xd = cfg.get("extraDirs") or []
+        if not _is_str_list(xd) or not all(d.strip() for d in xd):
+            self.problems.append("%s/%s: `extraDirs` must be a list of directory paths"
+                                 % (self.config_dir, PROJECT_FILE))
+            xd = []
+        self.extra_dirs_cfg = [d.strip() for d in xd]
         roles = cfg.get("statusRoles") or {}
         self._lanes(with_ai_lane(cfg.get("lanes") or DEFAULT_LANES, roles), roles)
         cats = cfg.get("categories") or {}
@@ -1008,6 +1016,24 @@ class Project:
         env = spec.get("addDirEnv", "")
         val = os.environ.get(env, "").strip() if env else ""
         return val or spec.get("addDir", "")
+
+    def extra_dir_path(self, d):
+        """One entry of `extraDirs` as an absolute, resolved path: `~` and environment
+        variables expanded, a relative path taken from the project root."""
+        p = Path(os.path.expandvars(os.path.expanduser(d.strip())))
+        if not p.is_absolute():
+            p = self.ROOT / p
+        return p.resolve()
+
+    def extra_dirs(self):
+        """Every directory of `extraDirs` that exists, resolved, each once. Every session of
+        the project works in them as in its root, with no permit."""
+        out = []
+        for d in self.extra_dirs_cfg:
+            p = self.extra_dir_path(d)
+            if p.is_dir() and p != self.ROOT and str(p) not in out:
+                out.append(str(p))
+        return out
 
     def add_dirs(self, permit):
         """Every path a granted permit adds to the session: its `add_dir`, then, for an
