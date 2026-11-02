@@ -1,15 +1,19 @@
-"""managercheck.py - the manager's 10-minute check, permanently on.
+"""managercheck.py - the manager's 10-minute check, on the owner's order.
 
     python octopus.py check [--job-created] [--dry-run]
 
-Every manager session runs it every 10 minutes: a recurring job it schedules itself (Claude
-Code's `CronCreate`), or the board's watchdog, which types `WAKE_TEXT` into a manager whose
-agent has no scheduler of its own. One run does five things:
+A manager session runs it every 10 minutes: a recurring job it schedules on the owner's
+order (Claude Code's `CronCreate`), or the board's watchdog, which types `WAKE_TEXT` into a
+manager whose agent has no scheduler of its own. One run does five things:
 
 1. FOLLOW-UPS. A ticket that holds `projects` and sits in the verify or the closed lane names
    its follow-ups under `## Follow-ups`, one line each: project, id and title. A follow-up
    in its project's start lane that was never launched gets its session now, `plan` when its
-   difficulty is `unknown`, else `work`. No other ticket is started.
+   difficulty is `unknown`, else `work`. A ticket in the `ai` lane is never a follow-up. The
+   first run after the manager starts or starts again, and the `--job-created` run, launch
+   nothing: they record each unlaunched follow-up as known (`check-followups.json` beside the
+   registry), and no later run launches a known one. The start of the manager is the
+   `launched:` line of its ticket. No other ticket is started.
 2. THE UPDATE. `sessions --if-any`: the four sections, every run, while any agent finished
    since the last update, waits for the owner, works or waits for anything else; nothing at
    all only when none does. Never a line that says nothing changed.
@@ -47,6 +51,7 @@ import project  # noqa: E402
 INTERVAL = 600
 RENEW_SECONDS = 6 * 24 * 3600
 JOBS_FILE = "check-jobs.json"
+FOLLOWUPS_FILE = "check-followups.json"
 RENEW = 3
 FOLLOWUPS = "Follow-ups"
 _TICKET = re.compile(r"\bT\d{4,}\b")
@@ -89,8 +94,8 @@ def named_followups(body, names, own):
 
 def unlaunched(registry=None):
     """`[(project name, root, ticket id, source)]`: each follow-up a finished cross-project
-    ticket named that sits in its start lane or its `ai` lane and was never launched.
-    `source` is `<project> <id>` of the ticket that named it."""
+    ticket named that sits in its start lane and was never launched. A ticket in the `ai`
+    lane is never a follow-up. `source` is `<project> <id>` of the ticket that named it."""
     import todo as T
     registry = project.load_registry() if registry is None else registry
     roots = {r["name"]: Path(r["path"]) for r in registry}
@@ -119,8 +124,8 @@ def unlaunched(registry=None):
             continue
         try:
             t = T.find(T.load_all(), tid)
-            if t is not None and t.state in (T.lane("start"), T.lane("ai")) \
-                    and not t.sessions and not t.repeat:
+            if t is not None and t.state == T.lane("start") \
+                    and not t.ai_filed and not t.sessions and not t.repeat:
                 out.append((name, roots[name], tid, source))
         except Exception:                               # noqa: BLE001
             pass
@@ -136,13 +141,66 @@ def _use(root):
         return None
 
 
-def launch_followups(registry=None, dry_run=False, err=None):
-    """Launch every `unlaunched` follow-up. What a launch prints is kept out of the update;
-    a launch that fails says so on `err`. Returns `[(project name, ticket id)]` launched."""
+def _key(name, tid):
+    return "%s|%s" % (name, tid)
+
+
+def manager_start():
+    """The start of the running manager: the `launched:` line of each manager ticket in the
+    active lane of the manager's home project. A launch, a restart by the watchdog and a claim
+    each write it anew. "" when there is none."""
+    import todo as T
+    try:
+        with T.in_manager_home():
+            return "; ".join(sorted("%s %s" % (t.id, t.meta.get("launched", ""))
+                                    for t in T.load_all()
+                                    if t.repeat == T.MANAGER and t.state == T.lane("active")))
+    except Exception:                                   # noqa: BLE001 - the check goes on
+        return ""
+
+
+def followups_file():
+    return project.home() / FOLLOWUPS_FILE
+
+
+def load_followups():
+    """`{"manager": <manager_start of the last run>, "known": [<project|id>]}`."""
+    try:
+        data = json.loads(followups_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def save_followups(start, known):
+    f = followups_file()
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(json.dumps({"manager": start, "known": sorted(known)}, indent=1),
+                 encoding="utf-8")
+
+
+def launch_followups(registry=None, dry_run=False, err=None, baseline=False):
+    """Launch every `unlaunched` follow-up that is not known. With `baseline`, and on the
+    first run after the manager starts or starts again, launch nothing and record each one as
+    known. What a launch prints is kept out of the update; a launch that fails says so on
+    `err`. Returns `[(project name, ticket id)]` launched."""
     import todo as T
     err = sys.stderr if err is None else err
+    rows = unlaunched(registry)
+    found = {_key(name, tid) for name, _root, tid, _source in rows}
+    state = load_followups()
+    start = manager_start()
+    known = {k for k in state.get("known", ()) if k in found}
+    if baseline or state.get("manager") != start:
+        if not dry_run:
+            save_followups(start, known | found)
+        return []
+    if not dry_run:
+        save_followups(start, known)
     done = []
-    for name, root, tid, source in unlaunched(registry):
+    for name, root, tid, source in rows:
+        if _key(name, tid) in known:
+            continue
         tok = project.use(root)
         try:
             args = argparse.Namespace(note="A follow-up of %s." % source, terminal=None,
@@ -279,7 +337,7 @@ def run(job_created=False, dry_run=False, registry=None, sid=None, out=None, err
             return 2
         record_job(sid, now)
     sort_ai_tickets(registry, dry_run, err)
-    launch_followups(registry, dry_run, err)
+    launch_followups(registry, dry_run, err, baseline=job_created)
     sessionreport.report(since_last=True, if_any=True, registry=registry, out=out,
                          save=not dry_run)
     list_notices(err)
@@ -297,13 +355,15 @@ def run(job_created=False, dry_run=False, registry=None, sid=None, out=None, err
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="octopus check",
                                  description="the manager's 10-minute check: launch the "
-                                             "unlaunched follow-ups, then print the update "
+                                             "unlaunched follow-ups, except on the first run "
+                                             "after the manager starts, then print the update "
                                              "while any agent finished, waits or works")
     ap.add_argument("--job-created", action="store_true",
                     help="this session just made its check job: record when")
     ap.add_argument("--dry-run", action="store_true",
                     help="launch no follow-up, print what each launch would run, and "
-                         "leave the snapshot of the last update as it was")
+                         "leave the snapshot of the last update and the known follow-ups "
+                         "as they were")
     a = ap.parse_args(argv)
     return run(job_created=a.job_created, dry_run=a.dry_run)
 

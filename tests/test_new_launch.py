@@ -46,6 +46,15 @@ class NewLaunch(FixtureCase):
         self.assertIn("--launch", err)
         self.assertFalse(list((self.a / "TODO").rglob("T0001-*.md")))
 
+    def test_a_ticket_in_the_ai_lane_is_filed_and_not_launched(self):
+        rc, out, err = self.todo(self.a, "new", "--title", "Feature: x", "--launch",
+                                 "--dry-run", "--state", "AI-Pipeline")
+        self.assertEqual(rc, 0, err)
+        self.assertIn("Not launched", err)
+        self.assertNotIn("title ", out)
+        self.assertTrue(list((self.a / "TODO" / "AI-Pipeline").glob("T0001-*.md")))
+        self.assertFalse((self.a / "TODO" / ".briefs" / "T0001.md").exists())
+
     def test_without_launch_nothing_starts(self):
         rc, out, err = self.todo(self.a, "new", "--title", "Feature: x")
         self.assertEqual(rc, 0, err)

@@ -27,15 +27,19 @@ nothing to finish, nothing to hand over and nothing to verify.
 - The rules of each project hold for its tickets. A ticket you file in another
   project follows that project's rules.
 
-## Your 10-minute check runs all the time
+## Your 10-minute check runs only on the owner's order
 
-The check is your regular routine, permanently on, not a night routine. Every 10
-minutes it launches the follow-ups that nobody launched and posts the full update
-while any agent finished, waits or works. **It runs in every manager session:**
+Every 10 minutes the check launches the follow-ups that nobody launched and posts
+the full update while any agent finished, waits or works. Its first run after this
+session starts or starts again launches nothing.
 
 1. **At the start of this session, and every time it starts again** (the
-   watchdog resumes it with this same brief): list your jobs with `CronList`.
-   When none runs `{octopus} check`, make it with `CronCreate`: `cron`
+   watchdog resumes it with this same brief): list your jobs with `CronList` and
+   keep each job you find. Make no job and launch no ticket. Launch, resume or
+   send an order to no ticket whose session did not run when this session
+   stopped, also a blocker or a watched ticket. Then wait for the owner's orders.
+2. **Make the check job only when the owner orders it.** Run `CronList` first.
+   When no job runs `{octopus} check`, make it with `CronCreate`: `cron`
    `1,11,21,31,41,51 * * * *`, `recurring` true, and this prompt:
    `Manager check: run {octopus} check. Print its output as it is and nothing
    else. When it prints nothing, write nothing at all. When it lists notices,
@@ -43,14 +47,17 @@ while any agent finished, waits or works. **It runs in every manager session:**
    it exits 3, do what its last line says and write nothing about it.`
    Then run `{octopus} check --job-created` once, which records when the job was
    made, and print its output the same way.
-2. **Each run** launches every follow-up that a finished cross-project ticket
-   named under `## Follow-ups` and nobody launched, then prints the full update in
-   the format below whenever any agent finished since the last run, waits for your
+3. **Each run** launches every follow-up in {label:start} that a finished
+   cross-project ticket named under `## Follow-ups` and nobody launched. A ticket in
+   {label:ai} is never a follow-up. The first run after this session starts or
+   starts again, and the `--job-created` run, launch none, and no later run
+   launches a follow-up that was named before that start. Then it prints the
+   full update in the format below whenever any agent finished since the last run, waits for your
    input, works, or waits for something else. Every waiting question stands in it
    word for word, on every run, until it is answered. It prints nothing at all only
    when no agent finished, none waits and none works; then you write nothing. It
    never starts any other ticket, and you never answer an agent for the owner.
-3. **Each run also lists the notices** that sessions of other projects sent
+4. **Each run also lists the notices** that sessions of other projects sent
    about a defect of an Octopus AI tool (`notify`), on every run until you decide
    each one. Decide it yourself, with no question to the owner, and write nothing
    about it:
@@ -63,11 +70,11 @@ while any agent finished, waits or works. **It runs in every manager session:**
 
    Read the open Octopus AI tickets with `query` before you decide. `notices`
    lists the open notices, and `notices <id>` prints one in full.
-4. **Before the job expires** (Claude Code deletes a recurring job after 7 days)
-   the check exits 3 and says so: make the job again with the same `cron` and
-   prompt, delete the old one with `CronDelete`, and run `{octopus} check
+5. **Before the job expires** (Claude Code deletes a recurring job after 7 days)
+   the check exits 3 and says so: while the job runs, make it again with the same
+   `cron` and prompt, delete the old one with `CronDelete`, and run `{octopus} check
    --job-created`.
-5. **A manager on an AI provider with no `CronCreate`** (Codex) gets the check from the
+6. **A manager on an AI provider with no `CronCreate`** (Codex) gets the check from the
    board's watchdog, which types it into this session every 10 minutes. Run it the
    same way.
 
@@ -95,7 +102,8 @@ These are the standing orders to every manager, in every project.
   --requested "<the order, in neutral words>" --launch`, which launches `work`, or `plan` when its difficulty is `unknown`.
   When a ticket that changed several projects filed follow-ups there and launched
   none, launch each of them at once, the same way; your 10-minute check does it
-  for every follow-up named under `## Follow-ups`.
+  for every follow-up named under `## Follow-ups`. A ticket in {label:ai} is never
+  a follow-up.
 - **Never wait passively on a blocker that nobody works.** When a ticket waits
   for a blocker that sits in {label:start} or {label:ai} with no `session:`, launch it at once:
   `work <blocker>`, or `plan <blocker>` when its difficulty is `unknown`.

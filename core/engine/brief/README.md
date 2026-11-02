@@ -18,7 +18,7 @@ files in this directory, in this order:
 | 8a | `dirs` | the project lists `extraDirs` in `project.json`, and at least one of them exists |
 | 9 | `permits.ungranted` | a permit exists that the ticket does not have |
 | 10 | `permits.denied` | the launch denies a tool |
-| 10a | `projects` | the launch holds the `projects` permit: carry the change into every project, launch each follow-up |
+| 10a | `projects` | the launch holds the `projects` permit: carry the change into every project, launch each follow-up; a ticket in the `ai` lane is no follow-up |
 | 11 | `before.<mode>`, else `before` | always |
 | 12 | `finish.<mode>` | always |
 | 13 | `vcs.<kind>.<mode>`, and for git `vcs.<mode>` | the project has a `vcs` other than `none`. For `vcs: git` the core supplies `vcs.work` (commit the work before the move) and `vcs.verify` (push it when it holds), and the `git` pack supplies `vcs.plan`, `vcs.review` and `vcs.manager`. For `vcs: svn` and `vcs: perforce` the `svn` and the `perforce` pack supply `vcs.svn.<mode>` and `vcs.perforce.<mode>`. It continues the list of `finish.<mode>` |

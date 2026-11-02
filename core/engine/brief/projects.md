@@ -11,6 +11,9 @@ never has to launch a session in another project by hand.
   from this ticket. Do the same in every project the change reaches.
 - **A follow-up filed without a session** gets one now: `work <id>`, or
   `plan <id>` when its difficulty is `unknown`, with the same command.
+- **A ticket that `new` sends to {label:ai} is no follow-up.** `--launch` files it
+  and launches nothing. Launch no session on it, and do not name it under
+  `## Follow-ups`.
 - **Name every follow-up on this ticket**, under `## Follow-ups`: one line each,
   project, id and title.
 

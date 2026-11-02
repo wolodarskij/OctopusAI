@@ -2181,8 +2181,8 @@ def cmd_new(args):
               "order, in neutral words>\"." % (lane("ai"), lane("start")), file=sys.stderr)
         return 2
     if getattr(args, "launch", False) and args.state not in (lane("start"), lane("ai")):
-        print("Error: --launch files the ticket into %s or %s; it does not go with --state %s"
-              % (lane("start"), lane("ai"), args.state), file=sys.stderr)
+        print("Error: --launch files the ticket into %s; it does not go with --state %s"
+              % (lane("start"), args.state), file=sys.stderr)
         return 2
     tool = "" if _files_for_octopus() else octopus_tool_source(args.source)
     if tool:
@@ -2291,6 +2291,10 @@ def cmd_new(args):
     print("%s  %s" % (tid, path.relative_to(P.ROOT)))
     write_index(quiet=True)
     if getattr(args, "launch", False):
+        if args.state != lane("start"):
+            print("Not launched: %s is in %s. A ticket there is no follow-up, and it gets a "
+                  "session only on the owner's order." % (tid, args.state), file=sys.stderr)
+            return 0
         return launch_new(tid, args)
     return 0
 
@@ -6691,7 +6695,8 @@ def _main(argv):
                         % (lane("start"), lane("ai")))
     p.add_argument("--launch", action="store_true",
                    help="launch its session at once: `plan` when its difficulty is unknown, "
-                        "`work` otherwise")
+                        "`work` otherwise. A ticket that goes to %s is filed and not "
+                        "launched" % lane("ai"))
     p.add_argument("--note", help="with --launch: what the launched session should know")
     p.add_argument("--terminal", default=None, choices=["cmd", "wt", "own", "none"],
                    help="with --launch: none prints the command instead of launching")

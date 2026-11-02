@@ -63,8 +63,8 @@ AI ticket with a move to Pipeline; the line stays.
 - **Only the owner's order moves a ticket from AI-Pipeline to Pipeline.** In an AI session, `move`
   of a ticket or an epic from AI-Pipeline to Pipeline needs `--owner-order "<the order, in
   neutral words>"`, and the same check of the owner's words for each ticket.
-- A group run launches no AI-Pipeline ticket. A blocker and a named follow-up in AI-Pipeline with no
-  session get a worker, as in Pipeline.
+- A group run launches no AI-Pipeline ticket, and an AI-Pipeline ticket is never a follow-up. A
+  blocker in AI-Pipeline with no session gets a worker, as in Pipeline.
 - **The engine moves an unmarked AI ticket to AI-Pipeline.** The manager's 10-minute check and
   `octopus ai-filed` read the transcript of the session that filed each open ticket in Pipeline or
   Blocked. A ticket that a turn with no owner's prompt filed, with no `--requested`, moves to
@@ -153,8 +153,10 @@ follow-up ticket it files in another project gets its session from the filing se
 way in every project: `new --project "<name>" --title "..." --requested "<the order>" --launch`
 files it and launches `work`, or `plan` when its difficulty is `unknown`. A follow-up filed
 without a session gets one
-at once. The filing session names every follow-up on its own ticket, under `## Follow-ups`. The
-owner never launches them by hand. The brief of a ticket that holds `projects` carries the
+at once. A ticket that `new` sends to AI-Pipeline is no follow-up: `--launch` files it and
+launches nothing, and the filing session neither launches it nor names it under
+`## Follow-ups`. The filing session names every follow-up on its own ticket, under
+`## Follow-ups`. The owner never launches them by hand. The brief of a ticket that holds `projects` carries the
 registered projects and their commands.
 
 ## A defect of an Octopus AI tool goes to Octopus AI
@@ -509,11 +511,16 @@ the owner. It grants `projects`, so the session reaches every registered project
   `input` state.** A finished, closed or idle agent never stands there, and nor does a decision
   that a finished ticket's result names: that agent stands only under Finished. The reply check
   fails a Waiting line about any other agent.
-- **The manager's 10-minute check is always on.** Every manager session keeps a recurring
-  job that runs `octopus check` every 10 minutes: it makes the job at its start and after
-  every restart, and makes it again before Claude Code expires it after 7 days (the check
-  exits 3 then). Each run launches every follow-up that a ticket holding `projects`, in
-  Verification or Done, names under `## Follow-ups` and nobody launched, and prints the
+- **The manager's 10-minute check runs only on the owner's order.** A manager session that
+  starts or starts again runs `CronList`, keeps each job it finds, makes no job and launches
+  no ticket. On the owner's order it makes a recurring job that runs `octopus check` every
+  10 minutes, and makes it again before Claude Code expires it after 7 days (the check
+  exits 3 then). Each run launches every follow-up in Pipeline that a ticket holding
+  `projects`, in Verification or Done, names under `## Follow-ups` and nobody launched. An
+  AI-Pipeline ticket is never a follow-up. The first run after the manager starts or starts
+  again, and the run after the job is made, launch none, and no later run launches a
+  follow-up named before that start. A restarted manager launches, resumes or sends an order
+  to no ticket whose session did not run when it stopped. Each run prints the
   full update whenever any agent finished since the last run, waits for the owner, works or
   waits for something else, each waiting question word for word on every run until it is
   answered. Only when no agent finished, none waits and none works does the manager write

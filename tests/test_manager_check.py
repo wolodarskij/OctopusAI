@@ -130,6 +130,10 @@ class FollowUps(FixtureCase):
     def found(self):
         return [(n, tid) for n, _r, tid, _s in C.unlaunched()]
 
+    def running(self):
+        """The manager runs, and the check ran once since it started, with nothing known."""
+        C.save_followups(C.manager_start(), [])
+
     def test_the_section_names_its_project_and_ids(self):
         body = "## Plan\n\nT0009\n\n## Follow-ups\n\n- Other Game T0003: x\n- T0004 here\n"
         self.assertEqual(C.named_followups(body, ["Other Game", "Other"], "Own"),
@@ -154,7 +158,35 @@ class FollowUps(FixtureCase):
         self.assertEqual(rc, 0, err)
         self.assertEqual(self.found(), [])
 
+    def test_a_follow_up_in_the_ai_lane_is_never_found(self):
+        rc, _o, err = self.todo(self.other, "move", self.fu, "AI-Pipeline")
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(self.found(), [])
+
+    def test_the_first_run_after_a_manager_start_launches_nothing(self):
+        work = mock.Mock(return_value=0)
+        with mock.patch.object(T, "cmd_work", work):
+            self.assertEqual(C.launch_followups(), [])
+            self.assertEqual(C.launch_followups(), [])
+        self.assertFalse(work.called)
+
+    def test_a_new_manager_start_launches_no_follow_up_named_before_it(self):
+        C.save_followups("T0001 work 2026-01-01 10:00", [])
+        work = mock.Mock(return_value=0)
+        with mock.patch.object(T, "cmd_work", work):
+            self.assertEqual(C.launch_followups(), [])
+        self.assertFalse(work.called)
+
+    def test_the_job_created_run_launches_nothing(self):
+        self.running()
+        work = mock.Mock(return_value=0)
+        with mock.patch.object(T, "cmd_work", work):
+            self.assertEqual(C.launch_followups(baseline=True), [])
+            self.assertEqual(C.launch_followups(), [])
+        self.assertFalse(work.called)
+
     def test_the_check_launches_it_by_its_difficulty(self):
+        self.running()
         work = mock.Mock(return_value=0)
         with mock.patch.object(T, "cmd_work", work):
             done = C.launch_followups()
@@ -164,6 +196,7 @@ class FollowUps(FixtureCase):
         self.assertIn("Sample Game %s" % self.parent, a.note)
 
     def test_a_failed_launch_says_so_and_prints_nothing_to_the_update(self):
+        self.running()
         err = io.StringIO()
         with mock.patch.object(T, "cmd_work", side_effect=lambda a: print("boom") or 2):
             done = C.launch_followups(err=err)
