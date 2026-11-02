@@ -137,7 +137,8 @@ ticket that nobody can size.
     python .octopus/todo.py sessions                      every session that still has a terminal
     python .octopus/todo.py sessions --input              only the sessions that wait for the owner's input
     python .octopus/todo.py focus  T0001                  bring its window to the front; an own session gets a window that shows it
-    python .octopus/todo.py screen T0001 --mode work      print its screen
+    python .octopus/todo.py screen T0001 --mode work      print its screen; Claude Code's suggested prompt in the
+                                                          input box shows as `[suggestion, not typed]`: nobody typed it
     python .octopus/todo.py send   T0001 --text "yes" --keys Enter
     python .octopus/todo.py close  T0001                  close it
     python .octopus/todo.py close --finished              close every terminal whose session is finished

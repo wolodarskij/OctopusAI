@@ -85,7 +85,9 @@ k.CreateFileW.restype = w.HANDLE
 k.GetConsoleScreenBufferInfo.argtypes = [w.HANDLE, ctypes.POINTER(CONSOLE_SCREEN_BUFFER_INFO)]
 k.ReadConsoleOutputCharacterW.argtypes = [w.HANDLE, w.LPWSTR, w.DWORD, COORD,
                                           ctypes.POINTER(w.DWORD)]
-k.WriteConsoleInputW.argtypes = [w.HANDLE, ctypes.POINTER(INPUT_RECORD), w.DWORD,
+k.ReadConsoleOutputAttribute.argtypes = [w.HANDLE, ctypes.POINTER(w.WORD), w.DWORD, COORD,
+                                         ctypes.POINTER(w.DWORD)]
+k.WriteConsoleInputW.argtypes =[w.HANDLE, ctypes.POINTER(INPUT_RECORD), w.DWORD,
                                  ctypes.POINTER(w.DWORD)]
 k.GetConsoleWindow.restype = w.HANDLE
 _user32 = ctypes.windll.user32
@@ -98,6 +100,25 @@ GA_ROOTOWNER = 3
 
 def MapVirtualKeyW(vk, kind):
     return _user32.MapVirtualKeyW(vk, kind)
+
+
+# The foreground of a dim cell: dark gray. The console stores SGR 2 (faint) and a gray RGB
+# color both as this legacy color, and the default foreground of typed text is 0x07.
+DIM_FOREGROUND = 0x08
+
+
+def dim_ranges(flags):
+    """The `[start, end)` column ranges where `flags` (one bool per column) is true."""
+    out, start, end = [], None, 0
+    for end, flag in enumerate(flags, 1):
+        if flag and start is None:
+            start = end - 1
+        elif not flag and start is not None:
+            out.append([start, end - 1])
+            start = None
+    if start is not None:
+        out.append([start, end])
+    return out
 
 # Named keys: the virtual-key code and the character a key record carries, and the VT
 # sequence a pseudoconsole's input pipe takes for the same key.
@@ -245,24 +266,34 @@ class Console:
 
     def screen(self):
         """The whole screen buffer: `cols`, `rows`, `cursor` `[x, y]`, `window`
-        `[top, bottom]`, and `lines` with trailing spaces removed."""
+        `[top, bottom]`, `lines` with trailing spaces removed, and `dim`: per line, the
+        `[start, end)` column ranges of dim cells."""
         info = CONSOLE_SCREEN_BUFFER_INFO()
         if not k.GetConsoleScreenBufferInfo(self.out, ctypes.byref(info)):
             err = ctypes.GetLastError()
             raise OSError(err, "GetConsoleScreenBufferInfo: %s" % ctypes.FormatError(err))
         cols, rows = info.dwSize.X, info.dwSize.Y
-        lines = []
+        lines, dim = [], []
         buf = ctypes.create_unicode_buffer(cols + 1)
-        n = w.DWORD()
+        attrs = (w.WORD * cols)()
+        n, na = w.DWORD(), w.DWORD()
         for y in range(rows):
             if not k.ReadConsoleOutputCharacterW(self.out, buf, cols, COORD(0, y), ctypes.byref(n)):
                 lines.append("")
+                dim.append([])
                 continue
-            lines.append(buf.value[:n.value].rstrip())
+            line = buf.value[:n.value].rstrip()
+            lines.append(line)
+            if not line or not k.ReadConsoleOutputAttribute(self.out, attrs, cols, COORD(0, y),
+                                                            ctypes.byref(na)):
+                dim.append([])
+                continue
+            dim.append(dim_ranges(attrs[x] & 0x0F == DIM_FOREGROUND
+                                  for x in range(min(len(line), na.value))))
         return {"cols": cols, "rows": rows,
                 "cursor": [info.dwCursorPosition.X, info.dwCursorPosition.Y],
                 "window": [info.srWindow.Top, info.srWindow.Bottom],
-                "lines": lines}
+                "lines": lines, "dim": dim}
 
     def send(self, text="", keys=()):
         """Type `text`, then the named `keys`. Returns the number of records written.

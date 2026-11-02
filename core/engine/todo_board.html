@@ -452,6 +452,7 @@ button.danger:hover{background:#3a1c1f!important;color:#ffb3b3!important}
   opacity:0;resize:none;overflow:hidden;white-space:pre;outline:none;
 }
 #tdlg pre .cur{box-shadow:inset 0 0 0 1px #c6cbd6}
+#tdlg pre .sugg{color:#6b7280;font-style:italic}
 #tdlg .twrap:focus-within pre .cur{background:#c6cbd6;color:#0b0d11;box-shadow:none}
 #tdlg pre.log{white-space:pre-wrap;overflow-wrap:anywhere}
 #tdlg .keys{display:flex;flex-wrap:wrap;gap:5px;align-items:center}
@@ -2933,21 +2934,31 @@ function drawScreen(scr) {
   const pre = $("#tScreen");
   // An unchanged screen is not redrawn, and neither is one that holds a selection, so a
   // drag that selects text survives until it is copied.
-  const sig = JSON.stringify([scr.cursor, scr.lines]);
+  const sig = JSON.stringify([scr.cursor, scr.lines, scr.suggestion || null]);
   if (term && (sig === term.drawn || screenSelection())) return;
   if (term) term.drawn = sig;
   const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 4;
   const [cx, cy] = scr.cursor || [-1, -1];
   const lines = scr.lines.slice();
   while (lines.length && !lines[lines.length - 1] && lines.length - 1 > cy) lines.pop();
+  // Claude Code's suggested prompt in the input box is drawn as a suggestion: nobody typed it.
+  const sug = scr.suggestion;
+  const sugAt = sug ? [sug.col, sug.col + sug.text.length] : [-1, -1];
   pre.innerHTML = "";
   lines.forEach((l, y) => {
-    if (y === cy) {
-      const before = l.slice(0, cx).padEnd(cx, " "), at = l.slice(cx, cx + 1) || " ";
-      pre.append(document.createTextNode(before));
-      const c = el("span", "cur", at); pre.append(c);
-      pre.append(document.createTextNode(l.slice(cx + 1)));
-    } else pre.append(document.createTextNode(l));
+    if (y === cy) l = l.padEnd(cx + 1, " ");
+    const cuts = [...new Set([0, l.length,
+      ...(y === cy ? [cx, cx + 1] : []),
+      ...(sug && y === sug.row ? sugAt : [])])].filter(x => x >= 0 && x <= l.length).sort((a, b) => a - b);
+    for (let i = 0; i + 1 < cuts.length; i++) {
+      const a = cuts[i], text = l.slice(a, cuts[i + 1]);
+      const cls = [y === cy && a === cx ? "cur" : "",
+                   sug && y === sug.row && a >= sugAt[0] && a < sugAt[1] ? "sugg" : ""].filter(Boolean).join(" ");
+      if (!cls) { pre.append(document.createTextNode(text)); continue; }
+      const s = el("span", cls, text);
+      if (cls.includes("sugg")) s.title = "Claude Code's suggested prompt. Nobody typed it";
+      pre.append(s);
+    }
     if (y < lines.length - 1) pre.append(document.createTextNode(BR));
   });
   if (atBottom) pre.scrollTop = pre.scrollHeight;

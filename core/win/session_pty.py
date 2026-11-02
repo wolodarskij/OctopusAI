@@ -24,7 +24,7 @@ raw VT, kept under 4 MB.
 
 Protocol: one JSON object per line on the socket, answered by one JSON line.
 
-    {"token": ..., "cmd": "screen"}                    -> {"screen": {cols, rows, cursor, lines}}
+    {"token": ..., "cmd": "screen"}                    -> {"screen": {cols, rows, cursor, lines, dim}}
     {"token": ..., "cmd": "send", "text": "", "keys": []} -> {"written": n}
     {"token": ..., "cmd": "log", "offset": 0}          -> {"text": ..., "offset": n, "size": n}
     {"token": ..., "cmd": "resize", "cols": c, "rows": r} -> {"cols": c, "rows": r}

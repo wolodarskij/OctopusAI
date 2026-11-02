@@ -238,13 +238,91 @@ def screen(pid):
     pane = _pane(pid)
     out = tmux("display-message", "-p", "-t", pane,
                "#{pane_width} #{pane_height} #{cursor_x} #{cursor_y}",
-               ";", "capture-pane", "-p", "-t", pane)
+               ";", "capture-pane", "-p", "-e", "-t", pane)
     head, _sep, body = out.partition("\n")
     cols, rows, x, y = (int(v) for v in head.split())
-    lines = [ln.rstrip() for ln in body.split("\n")][:rows]
+    lines, dim = [], []
+    for raw in body.split("\n")[:rows]:
+        text, ranges = _sgr_line(raw)
+        lines.append(text.rstrip())
+        dim.append([[a, min(b, len(lines[-1]))] for a, b in ranges if a < len(lines[-1])])
     lines += [""] * (rows - len(lines))
+    dim += [[]] * (rows - len(dim))
     return {"cols": cols, "rows": rows, "cursor": [x, y], "window": [0, rows - 1],
-            "lines": lines}
+            "lines": lines, "dim": dim}
+
+
+_SGR = re.compile("\x1b\\[([0-9;:]*)m")
+_ESC = re.compile("\x1b\\[[0-?]*[ -/]*[@-~]|\x1b\\][^\x07\x1b]*(?:\x07|\x1b\\\\)|\x1b[@-Z\\\\-_]")
+
+
+def _gray(params, i):
+    """`(is_gray, next_index)` for the color that starts at `params[i]` after a 38."""
+    kind = params[i] if i < len(params) else ""
+    if kind == "5" and i + 1 < len(params):
+        n = int(params[i + 1] or 0)
+        return n == 8 or 240 <= n <= 248, i + 2
+    if kind == "2" and i + 3 < len(params):
+        r, g, b = (int(v or 0) for v in params[i + 1:i + 4])
+        return max(r, g, b) - min(r, g, b) <= 24 and 80 <= max(r, g, b) <= 170, i + 4
+    return False, i + 1
+
+
+def _sgr_line(raw):
+    """One line of `capture-pane -e` as `(text, dim ranges)`. A character is dim under
+    SGR 2 (faint) or a gray foreground: 90, 38;5;8, 38;5;240-248, or a gray RGB color.
+    These are the styles Claude Code draws a suggested prompt with; typed text has the
+    default foreground."""
+    text, flags = [], []
+    faint = gray = False
+    pos = 0
+    for m in _ESC.finditer(raw):
+        chunk = raw[pos:m.start()]
+        text.append(chunk)
+        flags.extend([faint or gray] * len(chunk))
+        pos = m.end()
+        sgr = _SGR.fullmatch(m.group(0))
+        if not sgr:
+            continue
+        params = re.split("[;:]", sgr.group(1)) if sgr.group(1) else ["0"]
+        i = 0
+        while i < len(params):
+            p = params[i]
+            if p in ("", "0"):
+                faint = gray = False
+            elif p == "2":
+                faint = True
+            elif p == "22":
+                faint = False
+            elif p == "90":
+                gray = True
+            elif p == "39" or (len(p) == 2 and p[0] in "39" and p[1] in "01234567"):
+                gray = False
+            elif p == "38":
+                gray, i = _gray(params, i + 1)
+                continue
+            elif p == "48":
+                i = _gray(params, i + 1)[1]
+                continue
+            i += 1
+    chunk = raw[pos:]
+    text.append(chunk)
+    flags.extend([faint or gray] * len(chunk))
+    return "".join(text), _ranges(flags)
+
+
+def _ranges(flags):
+    """The `[start, end)` ranges where `flags` is true."""
+    out, start = [], None
+    for x, flag in enumerate(flags):
+        if flag and start is None:
+            start = x
+        elif not flag and start is not None:
+            out.append([start, x])
+            start = None
+    if start is not None:
+        out.append([start, len(flags)])
+    return out
 
 
 # The board's key names (`console_io.KEYS`) as tmux names them.

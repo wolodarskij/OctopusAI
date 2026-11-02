@@ -5617,13 +5617,55 @@ def _console_io(cmd, s, **fields):
 
 
 def screen_session(s):
-    """The screen of the session's terminal: `cols`, `rows`, `cursor`, `lines`."""
+    """The screen of the session's terminal: `cols`, `rows`, `cursor`, `lines`, `dim` (per
+    line, the `[start, end)` column ranges of dim cells) and `suggestion`
+    (`suggested_prompt`)."""
     if not WINDOWS:
         import posixterm
-        return posixterm.screen(s["shell"])
-    if s.get("own"):
-        return pty_call(s, {"cmd": "screen"})["screen"]
-    return _console_io("screen", s)
+        scr = posixterm.screen(s["shell"])
+    elif s.get("own"):
+        scr = pty_call(s, {"cmd": "screen"})["screen"]
+        if "dim" not in scr:
+            # A pseudoconsole host that started before the screen carried `dim`.
+            try:
+                scr["dim"] = _console_io("screen", s).get("dim")
+            except OSError:
+                pass
+    else:
+        scr = _console_io("screen", s)
+    scr["suggestion"] = suggested_prompt(scr)
+    return scr
+
+
+# The prompt of Claude Code's input box, at the start of its line: `❯` or `>`, then a space
+# or a no-break space.
+_PROMPT_LINE = re.compile("^([\u276f>])[ \u00a0]")
+
+
+def suggested_prompt(scr):
+    """The text in Claude Code's input box that nobody typed: the suggested prompt, or a
+    placeholder, which Claude Code draws dim in an empty box. `{"row", "col", "text"}`, or
+    `None` when the box holds typed text, is empty, or the screen carries no `dim`.
+
+    The input box is the last line that starts with the prompt under a line of `─`. The
+    first cell after the prompt may be the cursor, drawn inverse, so it does not count."""
+    lines, dim = scr.get("lines") or [], scr.get("dim")
+    if not dim:
+        return None
+    for y in range(len(lines) - 1, 0, -1):
+        m = _PROMPT_LINE.match(lines[y])
+        if not m or not lines[y - 1].lstrip().startswith("\u2500"):
+            continue
+        col = m.end()
+        text = lines[y][col:].rstrip()
+        if not text.strip():
+            return None
+        ranges = dim[y] if y < len(dim) else []
+        cells = [x for x in range(col + 1, col + len(text)) if not lines[y][x].isspace()]
+        if cells and all(any(a <= x < b for a, b in ranges) for x in cells):
+            return {"row": y, "col": col, "text": text}
+        return None
+    return None
 
 
 def send_session(s, text="", keys=()):
@@ -5945,6 +5987,15 @@ def cmd_focus(args):
     return 1
 
 
+# The mark `screen` puts before a suggested prompt in the input box.
+SUGGESTION_MARK = "[suggestion, not typed] "
+
+# The keys that `send` refuses as its first key while the input box shows a suggested
+# prompt: Tab accepts the suggestion into the box, Right and End may, and Enter submits
+# what the box holds.
+SUGGESTION_KEYS = {"tab", "right", "end", "enter"}
+
+
 def cmd_screen(args):
     import json
     s = find_session(args.id, getattr(args, "mode", None))
@@ -5963,7 +6014,12 @@ def cmd_screen(args):
     if getattr(args, "json", False):
         print(json.dumps(scr, ensure_ascii=False))
         return 0
-    lines = scr["lines"]
+    lines = list(scr["lines"])
+    sug = scr.get("suggestion")
+    if sug:
+        # Claude Code's suggested prompt: nobody typed it, and the plain text does not show it.
+        y, x = sug["row"], sug["col"]
+        lines[y] = lines[y][:x] + SUGGESTION_MARK + lines[y][x:]
     while lines and not lines[-1]:
         lines.pop()
     print("%s  %dx%d  cursor %d,%d  %s" % (s["key"], scr["cols"], scr["rows"],
@@ -5989,6 +6045,17 @@ def cmd_send(args):
     if not args.text and not keys:
         print("Error: give --text, --keys, or both", file=sys.stderr)
         return 2
+    if not args.text and keys and keys[0].lower() in SUGGESTION_KEYS:
+        # Typed text replaces a suggestion; a bare key would send it as if the owner typed it.
+        try:
+            sug = screen_session(s).get("suggestion")
+        except OSError:
+            sug = None
+        if sug:
+            print("Error: the input box of %s shows Claude Code's suggested prompt, which "
+                  "nobody typed: %r. %s would take it as typed text. Give --text"
+                  % (s["key"], sug["text"], keys[0]), file=sys.stderr)
+            return 1
     try:
         n = send_session(s, args.text or "", keys)
     except (OSError, ValueError) as exc:
@@ -6934,7 +7001,9 @@ def _main(argv):
     p.add_argument("--mode", choices=list(MODES) + ["cli"])
     p.set_defaults(fn=cmd_focus)
 
-    p = sub.add_parser("screen", help="print the screen of a session's terminal")
+    p = sub.add_parser("screen", help="print the screen of a session's terminal; Claude "
+                       "Code's suggested prompt in the input box shows as "
+                       "'[suggestion, not typed]'")
     p.add_argument("id", help="a ticket id, or the first 8+ characters of a session id")
     p.add_argument("--mode", choices=list(MODES) + ["cli"])
     p.add_argument("--json", action="store_true")
