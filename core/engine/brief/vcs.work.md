@@ -21,4 +21,3 @@
   7. When git reports a lock (`index.lock`), wait 30 seconds and commit again, at most 5
      times. When the commit still fails, write the error on the ticket, then move the ticket
      to {lane:verify}.
-{git_branch_line}

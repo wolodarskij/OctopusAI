@@ -322,23 +322,6 @@ def _is_str_list(v):
     return isinstance(v, list) and all(isinstance(x, str) for x in v)
 
 
-# The pack whose settings are `gitBranch` and `gitPush`.
-GIT_PACK = "git"
-
-
-def valid_branch(name):
-    """Whether `name` is a git branch name, by the rules of `git check-ref-format --branch`."""
-    if not isinstance(name, str) or not name or name != name.strip():
-        return False
-    if any(ord(c) < 32 or ord(c) == 127 or c in " ~^:?*[\\" for c in name):
-        return False
-    if ".." in name or "@{" in name or "//" in name or name == "@":
-        return False
-    if name.startswith(("-", "/", ".")) or name.endswith(("/", ".", ".lock")):
-        return False
-    return not any(part.startswith(".") or part.endswith(".lock") for part in name.split("/"))
-
-
 def pack_name(name):
     """The name a pack goes by now: `name`, or the new name of a renamed pack."""
     return PACK_ALIASES.get(name, name)
@@ -795,25 +778,6 @@ class Project:
                                  % (self.config_dir, PROJECT_FILE, self.vcs_pull,
                                     ", ".join(_vcs.PULL_ARGS)))
             self.vcs_pull = _vcs.DEFAULT_PULL
-        # `gitBranch`: the only branch a session commits on (`core/hooks/git_guard.py`); absent,
-        # any branch. `gitPush`: false takes `git-sync` from every launch, so no session pulls or
-        # pushes. Both belong to the git pack.
-        gb = cfg.get("gitBranch")
-        if gb is not None and not valid_branch(gb):
-            self.problems.append("%s/%s: `gitBranch` is %r; a git branch name"
-                                 % (self.config_dir, PROJECT_FILE, gb))
-            gb = None
-        self.git_branch = gb or ""
-        gp = cfg.get("gitPush", True)
-        if not isinstance(gp, bool):
-            self.problems.append("%s/%s: `gitPush` is true or false"
-                                 % (self.config_dir, PROJECT_FILE))
-            gp = True
-        self.git_push = gp
-        for key, on in (("gitBranch", "gitBranch" in cfg), ("gitPush", "gitPush" in cfg)):
-            if on and GIT_PACK not in rules["rulesets"]:
-                self.problems.append("%s/%s: `%s` needs the git pack; run: octopus packs \"%s\" add %s"
-                                     % (self.config_dir, PROJECT_FILE, key, self.name, GIT_PACK))
         self.auto_groups = []
         for ag in cfg.get("autoGroups") or []:
             if isinstance(ag, dict) and ag.get("name") and ag.get("tag"):

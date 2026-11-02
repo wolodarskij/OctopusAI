@@ -8,9 +8,7 @@ status-hook <provider>` is that hook:
     codex      SessionStart, UserPromptSubmit, Stop               PostToolUse
 
 On `PreToolUse` the same hook line is the README guard (`readme_guard.py`): it refuses a tool
-call that writes a project-wide README file the owner did not approve. Then it is the git
-branch guard (`git_guard.py`): it refuses a commit on a branch other than the project's
-`gitBranch`.
+call that writes a project-wide README file the owner did not approve.
 
 After a tool call it also reads the new lines of the session's transcript: visible assistant
 text starts the clock again too, from the `timestamp` of its line when the line has one. Once `INTERVAL` seconds passed, the hook adds
@@ -324,9 +322,6 @@ def main(argv):
         if str(payload.get("hook_event_name") or "") == "PreToolUse":
             import readme_guard
             out = readme_guard.decide(payload)
-            if out is None:
-                import git_guard
-                out = git_guard.decide(payload)
         else:
             out = handle(provider, payload)
     except Exception:                                   # noqa: BLE001 - a hook never raises

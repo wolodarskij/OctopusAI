@@ -46,15 +46,3 @@ or a rejected push, a `verify` session waits 30 seconds, pulls and pushes again,
 On a conflict it aborts the merge, pushes nothing, and writes the conflict on the ticket.
 
 There is no branch per ticket: every session commits to the branch that is checked out.
-
-## The project's git settings
-
-Both are keys of `.octopus/project.json`, and the Git section of the board's Project Settings
-edits them.
-
-| Key | Effect |
-|---|---|
-| `gitBranch` | The work branch. A session commits only on it. A guard (`core/hooks/git_guard.py`) refuses `git commit`, `revert`, `cherry-pick`, `merge`, `pull`, `am` and `rebase` on any other branch, also on `main` or `master`, and on a detached HEAD. Absent: any branch |
-| `gitPush` | `false`: no launch holds `git-sync`, so no session pulls or pushes. A `verify` session commits the work and pushes nothing. Absent: `true` |
-
-When the work branch is not checked out, never switch branches: ask the owner.

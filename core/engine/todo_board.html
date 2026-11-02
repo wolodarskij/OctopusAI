@@ -957,13 +957,6 @@ a.icon{display:inline-flex;align-items:center;text-decoration:none}
       <button class="icon" id="gitPullSave" title="how Synchronize pulls: vcsPull">Save</button>
       <button class="icon go needsrepo" id="gitSync" title="fetch, pull, push">Synchronize</button>
     </div>
-    <div class="gitrow" id="gitSessRow">
-      <span>Sessions</span>
-      <input id="gitWork" placeholder="work branch: any branch" autocomplete="off" spellcheck="false"
-        title="gitBranch: the only branch a session commits on; empty for any branch">
-      <label title="gitPush: off takes the git-sync permit from every launch"><input type="checkbox" id="gitPushOn">verify sessions pull and push</label>
-      <button class="icon needspack" id="gitSessSave" title="save gitBranch and gitPush">Save</button>
-    </div>
     <div class="gitrow">
       <span>Remote</span>
       <input id="gitUrl" placeholder="https://github.com/owner/repo.git" autocomplete="off" spellcheck="false">
@@ -4395,9 +4388,6 @@ function drawGit(s) {
     for (const x of (PROJ && PROJ.vcs && PROJ.vcs.pulls) || ["rebase", "merge", "ff-only"])
       pull.append(new Option(x, x));
   pull.value = s.pull;
-  if (document.activeElement !== $("#gitWork")) $("#gitWork").value = s.workBranch || "";
-  $("#gitPushOn").checked = s.push !== false;
-  $("#gitSessRow").title = s.hasPack ? "" : "these settings need the git pack";
   $("#gitInitRow").hidden = s.repo && s.vcs === "git";
   $("#gitInit").hidden = s.repo;
   $("#gitEnable").hidden = !s.repo;
@@ -4410,8 +4400,7 @@ function drawGit(s) {
 }
 function gitBusy(on) {
   for (const b of document.querySelectorAll("#pGit button"))
-    b.disabled = on || (b.classList.contains("needsrepo") && !(GIT && GIT.repo))
-      || (b.classList.contains("needspack") && !(GIT && GIT.hasPack));
+    b.disabled = on || (b.classList.contains("needsrepo") && !(GIT && GIT.repo));
 }
 function gitLog(text) {
   const pre = $("#gitLog");
@@ -4459,11 +4448,6 @@ $("#gitEnable").addEventListener("click", () => gitOp(
   {op: "enable", pack: $("#gitPack").checked}, "git enabled"));
 $("#gitPullSave").addEventListener("click", () => projectOp(
   {op: "vcs", vcsPull: $("#gitPull").value}, "pull strategy saved"));
-$("#gitSessSave").addEventListener("click", async () => {
-  if (await projectOp({op: "vcs", gitBranch: $("#gitWork").value.trim(),
-                       gitPush: $("#gitPushOn").checked}, "session git settings saved"))
-    gitStatus();
-});
 $("#gitSync").addEventListener("click", () => gitOp({op: "sync"}, "synchronized"));
 $("#gitRemote").addEventListener("click", () => gitOp(
   {op: "remote", url: $("#gitUrl").value.trim()}, "remote set"));

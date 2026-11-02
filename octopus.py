@@ -17,11 +17,9 @@
                                                   UserPromptSubmit, Stop, Notification,
                                                   PreToolUse and PostToolUse; PreToolUse also
                                                   runs the README guard (readme_guard.py)
-                                                  and the git branch guard (git_guard.py)
     python octopus.py status-hook codex           the Codex hook: the status reminder
                                                   once every 5 minutes (status_reminder.py),
-                                                  and the README guard and the git branch
-                                                  guard on PreToolUse
+                                                  and the README guard on PreToolUse
     python octopus.py new <path> --name <name> [--packs <pack,pack>]
                                                   create the directory and install into it;
                                                   every pack is optional, and `packs` adds
@@ -113,9 +111,6 @@ def cmd_hook(argv):
             import readme_guard
             if payload.get("tool_name") in readme_guard.CLAUDE_TOOLS:
                 out = readme_guard.decide(payload)
-                if not out:
-                    import git_guard
-                    out = git_guard.decide(payload)
                 if out:
                     sys.stdout.write(json.dumps(out) + "\n")
                     sys.stdout.flush()
