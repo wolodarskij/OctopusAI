@@ -42,7 +42,8 @@ def is_url(text):
 def _git(args, cwd=None):
     env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
     r = subprocess.run(["git"] + args, cwd=cwd, capture_output=True, text=True, env=env,
-                       encoding="utf-8", errors="replace")
+                       encoding="utf-8", errors="replace",
+                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     if r.returncode != 0:
         msg = (r.stderr or r.stdout or "").strip().splitlines()
         raise ValueError("git %s failed: %s" % (args[0], msg[-1] if msg else r.returncode))

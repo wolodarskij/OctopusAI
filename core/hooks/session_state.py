@@ -1037,8 +1037,7 @@ def start_judge(session_id, shell, text, root, recap=False):
                                                     encoding="utf-8")
     argv = [sys.executable, str(Path(__file__).resolve()), "--judge", session_id,
             str(int(shell or 0)), "--project", str(root)] + (["--recap"] if recap else [])
-    flags = (getattr(subprocess, "DETACHED_PROCESS", 0)
-             | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    flags = (getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
              | getattr(subprocess, "CREATE_NO_WINDOW", 0))
     kw = dict(stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
               stderr=subprocess.DEVNULL, close_fds=True)

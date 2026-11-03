@@ -23,6 +23,7 @@ PROCESS_QUERY_INFORMATION = 0x0400
 PROCESS_VM_READ = 0x0010
 PROCESS_TERMINATE = 0x0001
 SYNCHRONIZE = 0x00100000
+CREATE_NO_WINDOW = 0x08000000
 MAX_PATH = 260
 
 SW_SHOW = 5
@@ -201,7 +202,8 @@ def _cim_command_lines(pids):
               "Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress" % want)
     try:
         r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
-                           capture_output=True, text=True, timeout=30)
+                           capture_output=True, text=True, timeout=30,
+                           creationflags=CREATE_NO_WINDOW)
         data = json.loads(r.stdout.strip() or "[]")
     except (OSError, ValueError, subprocess.SubprocessError):
         return {}
@@ -236,7 +238,8 @@ def taskkill(pid, force=False, tree=True):
     if force:
         argv.append("/F")
     try:
-        return subprocess.run(argv, capture_output=True, text=True, timeout=30).returncode
+        return subprocess.run(argv, capture_output=True, text=True, timeout=30,
+                              creationflags=CREATE_NO_WINDOW).returncode
     except (OSError, subprocess.SubprocessError):
         return 1
 

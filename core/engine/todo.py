@@ -5850,11 +5850,10 @@ SELF_CLOSE_WAIT = 600
 
 
 def spawn_detached(argv):
-    """Start `argv` with no console and out of the caller's job, and return at once. The
-    child outlives the session that started it."""
+    """Start `argv` in a console of its own that has no window, out of the caller's job, and
+    return at once. The child outlives the session that started it."""
     import subprocess
-    flags = (getattr(subprocess, "DETACHED_PROCESS", 0)
-             | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    flags = (getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
              | getattr(subprocess, "CREATE_NO_WINDOW", 0))
     kw = dict(stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
               stderr=subprocess.DEVNULL, close_fds=True)

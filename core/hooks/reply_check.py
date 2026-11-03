@@ -429,8 +429,7 @@ def start(job_path, job):
               stderr=subprocess.DEVNULL, close_fds=True)
     if os.name != "nt":
         return subprocess.Popen(argv, start_new_session=True, **kw)
-    flags = (getattr(subprocess, "DETACHED_PROCESS", 0)
-             | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    flags = (getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
              | getattr(subprocess, "CREATE_NO_WINDOW", 0))
     # Out of the hook's job object, when it allows it, so the end of the hook does not end
     # the check.
