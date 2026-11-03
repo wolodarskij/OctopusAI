@@ -511,29 +511,25 @@ the owner. It grants `projects`, so the session reaches every registered project
   `input` state.** A finished, closed or idle agent never stands there, and nor does a decision
   that a finished ticket's result names: that agent stands only under Finished. The reply check
   fails a Waiting line about any other agent.
-- **The manager's 10-minute check runs only on the owner's order.** A manager session that
-  starts or starts again runs `CronList`, keeps each job it finds, makes no job and launches
-  no ticket. On the owner's order it makes a recurring job that runs `octopus check` every
-  10 minutes, and makes it again before Claude Code expires it after 7 days (the check
-  exits 3 then). Each run launches every follow-up in Pipeline that a ticket holding
-  `projects`, in Verification or Done, names under `## Follow-ups` and nobody launched. An
-  AI-Pipeline ticket is never a follow-up. The first run after the manager starts or starts
-  again, and the run after the job is made, launch none, and no later run launches a
-  follow-up named before that start. A restarted manager launches, resumes or sends an order
-  to no ticket whose session did not run when it stopped. Each run prints the
+- **The manager's 10-minute check always runs.** A manager session that starts or starts
+  again runs `CronList`, keeps each job it finds, and makes a recurring job that runs
+  `octopus check` every 10 minutes when none does, then runs `octopus check --job-created`.
+  It makes the job again before Claude Code expires it after 7 days, and when its recorded
+  check job is gone or no check job of the session is recorded: the check exits 3 then. The
+  check launches no ticket and no follow-up. A restarted manager launches, resumes or sends
+  an order to no ticket whose session did not run when it stopped. Each run prints the
   full update whenever any agent finished since the last run, waits for the owner, works or
   waits for something else, each waiting question word for word on every run until it is
   answered. Only when no agent finished, none waits and none works does the manager write
-  nothing at all; it never writes "no change" or any line like it. It starts no other
-  ticket and answers no agent. A manager on an AI provider
-  with no scheduler of its own (Codex) gets the check from the board's watchdog,
-  which types it into the manager session every 10 minutes.
+  nothing at all; it never writes "no change" or any line like it. It answers no agent. A
+  manager on an AI provider with no scheduler of its own (Codex) gets the check from the
+  board's watchdog, which types it into the manager session every 10 minutes.
 
     python .octopus/todo.py manager                    the Octopus AI project's manager ticket, from the template when there is none
     python .octopus/todo.py manager --start            start it unless it runs
     python .octopus/todo.py manager --claim            this session becomes the manager, from any project
     python octopus.py sessions --since-last            the manager's update, every project
-    python octopus.py check                            the 10-minute check: follow-ups, then the update while any agent finished, waits or works
+    python octopus.py check                            the 10-minute check: the update while any agent finished, waits or works
     python .octopus/todo.py watchdog                   every manager ticket of the Octopus AI project, alive or dead
 
 ## Parent and children

@@ -28,11 +28,10 @@ board starts no second manager.
 sections are the standing orders to every manager. They outrank this skill, and they
 hold for the rest of this session.
 
-**3. Keep the jobs you find, and start nothing,** as the brief says: run `CronList` and keep
-each job it shows. Make no job and launch no ticket. Make the 10-minute check job only on the
-owner's order: when `CronList` shows no job that runs `python "<octopus.py>" check`, make it
+**3. Start the 10-minute check, and launch no ticket,** as the brief says: run `CronList` and
+keep each job it shows. When it shows no job that runs `python "<octopus.py>" check`, make it
 with `CronCreate` with the brief's cron and prompt, then run
-`python "<octopus.py>" check --job-created`.
+`python "<octopus.py>" check --job-created`. The job stays on for the life of this session.
 
 **4. Behave as the manager from now on.** Wait for the owner's orders. Every status update is
 the output of `python "<octopus.py>" sessions --since-last`, the command the brief names: the four

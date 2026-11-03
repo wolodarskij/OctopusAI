@@ -1,7 +1,7 @@
 """The manager's 10-minute check (`octopus check`): the full update while any agent finished,
 waits or works, nothing only when none does,
-the follow-ups a finished cross-project ticket left unlaunched, the age of the check job,
-and the watchdog's wake of a manager whose agent has no scheduler.
+no launch of a follow-up, the record and the age of the check job, and the watchdog's
+wake of a manager whose agent has no scheduler.
 python -m unittest discover tests"""
 
 import io
@@ -112,96 +112,30 @@ class FollowUps(FixtureCase):
         self.fu = self.new_ticket(self.other, "Feature: the follow-up")
         self.parent = self.new_ticket(self.root, "Feature: every project",
                                       "--permits", "projects")
-        self.finish(self.parent, ["- Other Game %s: Feature: the follow-up" % self.fu])
-
-    def finish(self, tid, lines, lane="Verification"):
-        for to in ("InProgress", lane):
-            rc, _o, err = self.todo(self.root, "move", tid, to)
+        for to in ("InProgress", "Verification"):
+            rc, _o, err = self.todo(self.root, "move", self.parent, to)
             self.assertEqual(rc, 0, err)
         tok = project.use(self.root)
         try:
-            t = T.find(T.load_all(), tid)
+            t = T.find(T.load_all(), self.parent)
             t.path.write_text(t.path.read_text(encoding="utf-8")
-                              + "\n## Follow-ups\n\n" + "\n".join(lines) + "\n",
-                              encoding="utf-8")
+                              + "\n## Follow-ups\n\n- Other Game %s: Feature: the follow-up\n"
+                              % self.fu, encoding="utf-8")
         finally:
             project.reset(tok)
-
-    def found(self):
-        return [(n, tid) for n, _r, tid, _s in C.unlaunched()]
-
-    def running(self):
-        """The manager runs, and the check ran once since it started, with nothing known."""
-        C.save_followups(C.manager_start(), [])
 
     def test_the_section_names_its_project_and_ids(self):
         body = "## Plan\n\nT0009\n\n## Follow-ups\n\n- Other Game T0003: x\n- T0004 here\n"
         self.assertEqual(C.named_followups(body, ["Other Game", "Other"], "Own"),
                          [("Other Game", "T0003"), ("Own", "T0004")])
 
-    def test_an_unlaunched_follow_up_of_a_finished_ticket_is_found(self):
-        self.assertEqual(self.found(), [("Other Game", self.fu)])
-
-    def test_a_launched_follow_up_is_left_alone(self):
-        tok = project.use(self.other)
-        try:
-            T.record_launch(T.find(T.load_all(), self.fu), "work")
-        finally:
-            project.reset(tok)
-        self.assertEqual(self.found(), [])
-
-    def test_a_ticket_still_open_or_without_the_permit_names_none(self):
-        own = self.new_ticket(self.other, "Feature: another")
-        plain = self.new_ticket(self.root, "Feature: no permit")
-        self.finish(plain, ["- Other Game %s" % own])
-        rc, _o, err = self.todo(self.root, "move", self.parent, "InProgress")
-        self.assertEqual(rc, 0, err)
-        self.assertEqual(self.found(), [])
-
-    def test_a_follow_up_in_the_ai_lane_is_never_found(self):
-        rc, _o, err = self.todo(self.other, "move", self.fu, "AI-Pipeline")
-        self.assertEqual(rc, 0, err)
-        self.assertEqual(self.found(), [])
-
-    def test_the_first_run_after_a_manager_start_launches_nothing(self):
+    def test_the_check_launches_no_follow_up(self):
         work = mock.Mock(return_value=0)
-        with mock.patch.object(T, "cmd_work", work):
-            self.assertEqual(C.launch_followups(), [])
-            self.assertEqual(C.launch_followups(), [])
+        with mock.patch.object(T, "cmd_work", work), \
+                mock.patch.object(R, "report", return_value=0):
+            for _ in range(3):
+                C.run(sid=SID_A, held={}, out=io.StringIO(), err=io.StringIO())
         self.assertFalse(work.called)
-
-    def test_a_new_manager_start_launches_no_follow_up_named_before_it(self):
-        C.save_followups("T0001 work 2026-01-01 10:00", [])
-        work = mock.Mock(return_value=0)
-        with mock.patch.object(T, "cmd_work", work):
-            self.assertEqual(C.launch_followups(), [])
-        self.assertFalse(work.called)
-
-    def test_the_job_created_run_launches_nothing(self):
-        self.running()
-        work = mock.Mock(return_value=0)
-        with mock.patch.object(T, "cmd_work", work):
-            self.assertEqual(C.launch_followups(baseline=True), [])
-            self.assertEqual(C.launch_followups(), [])
-        self.assertFalse(work.called)
-
-    def test_the_check_launches_it_by_its_difficulty(self):
-        self.running()
-        work = mock.Mock(return_value=0)
-        with mock.patch.object(T, "cmd_work", work):
-            done = C.launch_followups()
-        self.assertEqual(done, [("Other Game", self.fu)])
-        a = work.call_args[0][0]
-        self.assertEqual((a.id, a.mode), (self.fu, "plan"))
-        self.assertIn("Sample Game %s" % self.parent, a.note)
-
-    def test_a_failed_launch_says_so_and_prints_nothing_to_the_update(self):
-        self.running()
-        err = io.StringIO()
-        with mock.patch.object(T, "cmd_work", side_effect=lambda a: print("boom") or 2):
-            done = C.launch_followups(err=err)
-        self.assertEqual(done, [])
-        self.assertIn("the launch failed: boom", err.getvalue())
 
 
 class JobAge(FixtureCase):
@@ -211,32 +145,57 @@ class JobAge(FixtureCase):
 
     def run_check(self, **kw):
         out, err = io.StringIO(), io.StringIO()
-        with mock.patch.object(C, "launch_followups", return_value=[]), \
-                mock.patch.object(R, "report", return_value=0):
+        with mock.patch.object(R, "report", return_value=0):
             rc = C.run(out=out, err=err, **kw)
         return rc, err.getvalue()
 
-    def test_job_created_records_the_session(self):
-        rc, _e = self.run_check(job_created=True, sid=SID_A, now=1000)
+    def test_job_created_records_the_newest_job_of_the_session(self):
+        held = {"old1": 10, "new2": 900}
+        rc, _e = self.run_check(job_created=True, sid=SID_A, now=1000, held=held)
         self.assertEqual(rc, 0)
-        self.assertEqual(C.load_jobs()[SID_A], 1000)
+        self.assertEqual(C.load_jobs()[SID_A], {"job": "new2", "made": 1000})
+
+    def test_job_created_without_a_job_refuses(self):
+        self.assertEqual(self.run_check(job_created=True, sid=SID_A, held={})[0], 2)
+
+    def test_job_created_without_a_session_refuses(self):
+        self.assertEqual(self.run_check(job_created=True, sid="", held={})[0], 2)
 
     def test_a_fresh_job_needs_nothing(self):
-        C.record_job(SID_A, now=0)
-        self.assertEqual(self.run_check(sid=SID_A, now=5 * DAY)[0], 0)
+        C.record_job(SID_A, "j1", now=0)
+        self.assertEqual(self.run_check(sid=SID_A, now=5 * DAY, held={"j1": 0})[0], 0)
 
     def test_an_old_job_exits_three_and_says_to_make_it_again(self):
-        C.record_job(SID_A, now=0)
-        rc, err = self.run_check(sid=SID_A, now=6 * DAY + 1)
+        C.record_job(SID_A, "j1", now=0)
+        rc, err = self.run_check(sid=SID_A, now=6 * DAY + 1, held={"j1": 0})
         self.assertEqual(rc, C.RENEW)
         self.assertIn("CronCreate", err)
 
-    def test_a_session_with_no_record_needs_nothing(self):
-        C.record_job(SID_A, now=0)
-        self.assertEqual(self.run_check(sid=SID_B, now=30 * DAY)[0], 0)
+    def test_a_gone_check_job_exits_three_while_an_older_job_runs(self):
+        C.record_job(SID_A, "deleted", now=5 * DAY)
+        rc, err = self.run_check(sid=SID_A, now=5 * DAY + 60, held={"older": 0})
+        self.assertEqual(rc, C.RENEW)
+        self.assertIn("deleted", err)
 
-    def test_job_created_without_a_session_refuses(self):
-        self.assertEqual(self.run_check(job_created=True, sid="")[0], 2)
+    def test_a_job_with_no_record_exits_three(self):
+        rc, err = self.run_check(sid=SID_B, now=DAY, held={"j1": 0})
+        self.assertEqual(rc, C.RENEW)
+        self.assertIn("CronCreate", err)
+
+    def test_a_mark_without_a_job_id_exits_three(self):
+        C.jobs_file().parent.mkdir(parents=True, exist_ok=True)
+        C.jobs_file().write_text('{"%s": 1000}' % SID_A, encoding="utf-8")
+        self.assertEqual(self.run_check(sid=SID_A, now=2000, held={"j1": 0})[0], C.RENEW)
+
+    def test_a_session_with_no_job_needs_nothing(self):
+        self.assertEqual(self.run_check(sid=SID_B, now=30 * DAY, held={})[0], 0)
+
+    def test_session_jobs_reads_the_hook_record_of_every_terminal(self):
+        now = 1e9
+        session_state.add_job(SID_A, 41, "a1", now=now - 100)
+        session_state.add_job(SID_A, 42, "b2", now=now - 50)
+        session_state.add_job(SID_A, 43, "old", now=now - session_state.JOB_SECONDS - 1)
+        self.assertEqual(C.session_jobs(SID_A, now=now), {"a1": now - 100, "b2": now - 50})
 
 
 class Wake(FixtureCase):

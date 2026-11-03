@@ -1,39 +1,34 @@
-"""managercheck.py - the manager's 10-minute check, on the owner's order.
+"""managercheck.py - the manager's 10-minute check.
 
     python octopus.py check [--job-created] [--dry-run]
 
-A manager session runs it every 10 minutes: a recurring job it schedules on the owner's
-order (Claude Code's `CronCreate`), or the board's watchdog, which types `WAKE_TEXT` into a
-manager whose agent has no scheduler of its own. One run does five things:
+A manager session runs it every 10 minutes: a recurring job it makes at its start and at
+each restart (Claude Code's `CronCreate`), or the board's watchdog, which types `WAKE_TEXT`
+into a manager whose agent has no scheduler of its own. It launches no ticket and no
+follow-up. One run does four things:
 
-1. FOLLOW-UPS. A ticket that holds `projects` and sits in the verify or the closed lane names
-   its follow-ups under `## Follow-ups`, one line each: project, id and title. A follow-up
-   in its project's start lane that was never launched gets its session now, `plan` when its
-   difficulty is `unknown`, else `work`. A ticket in the `ai` lane is never a follow-up. The
-   first run after the manager starts or starts again, and the `--job-created` run, launch
-   nothing: they record each unlaunched follow-up as known (`check-followups.json` beside the
-   registry), and no later run launches a known one. The start of the manager is the
-   `launched:` line of its ticket. No other ticket is started.
-2. THE UPDATE. `sessions --if-any`: the four sections, every run, while any agent finished
+1. THE UPDATE. `sessions --if-any`: the four sections, every run, while any agent finished
    since the last update, waits for the owner, works or waits for anything else; nothing at
    all only when none does. Never a line that says nothing changed.
-3. THE NOTICES. Each notice that a session of another project sent about a defect of an
+2. THE NOTICES. Each notice that a session of another project sent about a defect of an
    Octopus AI tool (`todo notify`) and the manager did not decide yet stands on stderr, every
    run, with the commands that decide it: a new Octopus AI ticket, its evidence on an existing
    ticket, or no ticket.
-4. THE AI TICKETS. Each open ticket of a registered project that an AI filed without an
+3. THE AI TICKETS. Each open ticket of a registered project that an AI filed without an
    owner's request and that sits outside AI-Pipeline with no `filed-by: ai` moves there
    (`aifiled.sweep`). It writes nothing to the update.
-5. THE JOB'S AGE. `--job-created` records, after `CronCreate`, when the calling session made
-   its check job (`check-jobs.json` beside the registry). Claude Code deletes a recurring job
-   after 7 days; a check whose job is older than `RENEW_SECONDS` exits 3 and says on stderr
-   to make the job again.
+4. THE CHECK JOB. `--job-created` records, after `CronCreate`, the newest recurring job of
+   the calling session as its check job, with the time (`check-jobs.json` beside the
+   registry). Claude Code deletes a recurring job after 7 days. A run in a session that holds
+   recurring jobs exits 3 and says on stderr to make the job again when its check job is not
+   recorded, is gone, or is older than `RENEW_SECONDS`.
+
+`named_followups` reads the `## Follow-ups` section of a ticket for `aifiled`.
 """
 
 from __future__ import annotations
 
 import argparse
-import contextlib
 import io
 import json
 import re
@@ -51,7 +46,6 @@ import project  # noqa: E402
 INTERVAL = 600
 RENEW_SECONDS = 6 * 24 * 3600
 JOBS_FILE = "check-jobs.json"
-FOLLOWUPS_FILE = "check-followups.json"
 RENEW = 3
 FOLLOWUPS = "Follow-ups"
 _TICKET = re.compile(r"\bT\d{4,}\b")
@@ -90,136 +84,6 @@ def named_followups(body, names, own):
             if (name, tid) not in found:
                 found.append((name, tid))
     return found
-
-
-def unlaunched(registry=None):
-    """`[(project name, root, ticket id, source)]`: each follow-up a finished cross-project
-    ticket named that sits in its start lane and was never launched. A ticket in the `ai`
-    lane is never a follow-up. `source` is `<project> <id>` of the ticket that named it."""
-    import todo as T
-    registry = project.load_registry() if registry is None else registry
-    roots = {r["name"]: Path(r["path"]) for r in registry}
-    named = []
-    for name, root in roots.items():
-        tok = _use(root)
-        if tok is None:
-            continue
-        try:
-            done = (T.lane("verify"), T.lane("closed"))
-            for t in T.load_all():
-                if t.state in done and "projects" in t.permits:
-                    named += [(p, tid, "%s %s" % (name, t.id))
-                              for p, tid in named_followups(t.body, roots, name)]
-        except Exception:                               # noqa: BLE001 - the check goes on
-            pass
-        finally:
-            project.reset(tok)
-    out, seen = [], set()
-    for name, tid, source in named:
-        if (name, tid) in seen or name not in roots:
-            continue
-        seen.add((name, tid))
-        tok = _use(roots[name])
-        if tok is None:
-            continue
-        try:
-            t = T.find(T.load_all(), tid)
-            if t is not None and t.state == T.lane("start") \
-                    and not t.ai_filed and not t.sessions and not t.repeat:
-                out.append((name, roots[name], tid, source))
-        except Exception:                               # noqa: BLE001
-            pass
-        finally:
-            project.reset(tok)
-    return out
-
-
-def _use(root):
-    try:
-        return project.use(root)
-    except Exception:                                   # noqa: BLE001 - an unreachable project
-        return None
-
-
-def _key(name, tid):
-    return "%s|%s" % (name, tid)
-
-
-def manager_start():
-    """The start of the running manager: the `launched:` line of each manager ticket in the
-    active lane of the manager's home project. A launch, a restart by the watchdog and a claim
-    each write it anew. "" when there is none."""
-    import todo as T
-    try:
-        with T.in_manager_home():
-            return "; ".join(sorted("%s %s" % (t.id, t.meta.get("launched", ""))
-                                    for t in T.load_all()
-                                    if t.repeat == T.MANAGER and t.state == T.lane("active")))
-    except Exception:                                   # noqa: BLE001 - the check goes on
-        return ""
-
-
-def followups_file():
-    return project.home() / FOLLOWUPS_FILE
-
-
-def load_followups():
-    """`{"manager": <manager_start of the last run>, "known": [<project|id>]}`."""
-    try:
-        data = json.loads(followups_file().read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
-def save_followups(start, known):
-    f = followups_file()
-    f.parent.mkdir(parents=True, exist_ok=True)
-    f.write_text(json.dumps({"manager": start, "known": sorted(known)}, indent=1),
-                 encoding="utf-8")
-
-
-def launch_followups(registry=None, dry_run=False, err=None, baseline=False):
-    """Launch every `unlaunched` follow-up that is not known. With `baseline`, and on the
-    first run after the manager starts or starts again, launch nothing and record each one as
-    known. What a launch prints is kept out of the update; a launch that fails says so on
-    `err`. Returns `[(project name, ticket id)]` launched."""
-    import todo as T
-    err = sys.stderr if err is None else err
-    rows = unlaunched(registry)
-    found = {_key(name, tid) for name, _root, tid, _source in rows}
-    state = load_followups()
-    start = manager_start()
-    known = {k for k in state.get("known", ()) if k in found}
-    if baseline or state.get("manager") != start:
-        if not dry_run:
-            save_followups(start, known | found)
-        return []
-    if not dry_run:
-        save_followups(start, known)
-    done = []
-    for name, root, tid, source in rows:
-        if _key(name, tid) in known:
-            continue
-        tok = project.use(root)
-        try:
-            args = argparse.Namespace(note="A follow-up of %s." % source, terminal=None,
-                                      dry_run=dry_run)
-            buf = io.StringIO()
-            with contextlib.redirect_stdout(buf):
-                rc = T.launch_new(tid, args)
-        except Exception as exc:                        # noqa: BLE001 - the check goes on
-            rc, buf = 1, io.StringIO("%s: %s" % (type(exc).__name__, exc))
-        finally:
-            project.reset(tok)
-        if dry_run:
-            err.write(buf.getvalue())
-        if rc:
-            err.write("check: %s %s: the launch failed: %s\n"
-                      % (name, tid, " ".join(buf.getvalue().split())[:200]))
-        else:
-            done.append((name, tid))
-    return done
 
 
 # ── the notices ────────────────────────────────────────────────────────────
@@ -264,13 +128,22 @@ def sort_ai_tickets(registry=None, dry_run=False, err=None):
         err.write("check: the AI ticket sweep failed: %s: %s\n" % (type(exc).__name__, exc))
 
 
-# ── the age of the check job ───────────────────────────────────────────────
+# ── the check job ──────────────────────────────────────────────────────────
+
+def _use(root):
+    try:
+        return project.use(root)
+    except Exception:                                   # noqa: BLE001 - an unreachable project
+        return None
+
 
 def jobs_file():
     return project.home() / JOBS_FILE
 
 
 def load_jobs():
+    """`{session id: {"job": <job id>, "made": <seconds>}}`. A mark in another form names
+    no job."""
     try:
         data = json.loads(jobs_file().read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -278,28 +151,80 @@ def load_jobs():
     return data if isinstance(data, dict) else {}
 
 
-def record_job(sid, now=None):
-    """Record that session `sid` made its check job now. Forgets marks older than a job
-    lives."""
+def _made(mark):
+    return mark.get("made") if isinstance(mark, dict) \
+        and isinstance(mark.get("made"), (int, float)) else None
+
+
+def record_job(sid, job, now=None):
+    """Record `job` as the check job of session `sid`, made now. Forgets marks older than a
+    job lives."""
     now = time.time() if now is None else now
     data = {k: v for k, v in load_jobs().items()
-            if isinstance(v, (int, float)) and now - v < 2 * RENEW_SECONDS}
-    data[sid] = now
+            if _made(v) is not None and now - _made(v) < 2 * RENEW_SECONDS}
+    data[sid] = {"job": job, "made": now}
     f = jobs_file()
     f.parent.mkdir(parents=True, exist_ok=True)
     f.write_text(json.dumps(data, indent=1), encoding="utf-8")
 
 
-def job_too_old(sid, now=None):
-    """Whether the check job of session `sid` is older than `RENEW_SECONDS`."""
-    made = load_jobs().get(sid)
+def session_jobs(sid, root=None, now=None):
+    """`{job id: when it was made}`: every recurring job that session `sid` holds, by the
+    hook's record of each of its terminals and by its transcript, in the project at `root`
+    (the current project when None). A cancelled job is not held, and nor is a job older
+    than a job lives that did not fire within `FIRE_SECONDS`."""
+    import session_state as S
+    import todo as T
     now = time.time() if now is None else now
-    return isinstance(made, (int, float)) and now - made > RENEW_SECONDS
+    tok = _use(root) if root is not None else None
+    if root is not None and tok is None:
+        return {}
+    try:
+        found = {}
+        for p in S._dir().glob("%s.*.cron" % sid.lower()):
+            for j, t in S._read_jobs(p).items():
+                if isinstance(t, (int, float)) and t >= now - S.JOB_SECONDS \
+                        and not j.startswith("?"):
+                    found[j] = min(found.get(j, t), t)
+        transcript = T.session_transcript(sid)
+        alive = S.transcript_jobs(sid, transcript, now)
+        st = S.scan_transcript(sid, transcript) or {}
+        gone = st.get("gone") or {}
+        found = {j: t for j, t in found.items() if j not in gone}
+        for j in alive:
+            found[j] = (st.get("made") or {}).get(j) or found.get(j) \
+                or (st.get("fired") or {}).get(j) or now
+    except Exception:                                   # noqa: BLE001 - the check goes on
+        return {}
+    finally:
+        if tok is not None:
+            project.reset(tok)
+    return found
+
+
+def stale_job(sid, held, now=None):
+    """Why the check job of session `sid` must be made again, or "" when it need not: no
+    check job of the session is recorded, its recorded job is gone, or it is older than
+    `RENEW_SECONDS`. `held` is `session_jobs` of the session. A session that holds no
+    recurring job (a check typed by hand, or by the watchdog) needs none."""
+    if not held:
+        return ""
+    now = time.time() if now is None else now
+    mark = load_jobs().get(sid)
+    if _made(mark) is None or not mark.get("job"):
+        return "no check job of this session is recorded"
+    if mark["job"] not in held:
+        return "the recorded check job %s is gone" % mark["job"]
+    if now - _made(mark) > RENEW_SECONDS:
+        return "the check job %s is older than %d days" % (mark["job"],
+                                                          RENEW_SECONDS // 86400)
+    return ""
 
 
 def own_session(registry=None):
-    """The session id of the Claude this process runs under: looked up in the project of
-    the working directory first, then in every registered project. "" when none names it."""
+    """`(session id, project root)` of the Claude this process runs under: looked up in the
+    project of the working directory first, then in every registered project. `("", None)`
+    when none names it."""
     import todo as T
     roots = []
     here = project.find_root()
@@ -318,52 +243,60 @@ def own_session(registry=None):
         finally:
             project.reset(tok)
         if sid:
-            return sid
-    return ""
+            return sid, root
+    return "", None
 
 
 # ── the run ────────────────────────────────────────────────────────────────
 
 def run(job_created=False, dry_run=False, registry=None, sid=None, out=None, err=None,
-        now=None):
-    """One check. Returns 0, or `RENEW` when the caller's check job must be made again."""
+        now=None, held=None):
+    """One check. Returns 0, 2 when `--job-created` finds no job, or `RENEW` when the
+    caller's check job must be made again. `held` stands for `session_jobs` of the caller."""
     import sessionreport
     out = sys.stdout if out is None else out
     err = sys.stderr if err is None else err
+    root = None
+    if sid is None:
+        sid, root = own_session(registry)
+    if held is None:
+        held = session_jobs(sid, root, now) if sid else {}
     if job_created:
-        sid = sid if sid is not None else own_session(registry)
         if not sid:
             err.write("check: no hook names the session this runs in\n")
             return 2
-        record_job(sid, now)
+        if not held:
+            err.write("check: this session holds no recurring job: make the check job with "
+                      "CronCreate first, then run check --job-created\n")
+            return 2
+        if not dry_run:
+            record_job(sid, max(held, key=lambda j: held[j]), now)
     sort_ai_tickets(registry, dry_run, err)
-    launch_followups(registry, dry_run, err, baseline=job_created)
     sessionreport.report(since_last=True, if_any=True, registry=registry, out=out,
                          save=not dry_run)
     list_notices(err)
     if job_created:
         return 0
-    sid = sid if sid is not None else own_session(registry)
-    if sid and job_too_old(sid, now):
-        err.write("check: the check job is older than %d days: make it again with "
-                  "CronCreate, delete the old one with CronDelete, then run check "
-                  "--job-created\n" % (RENEW_SECONDS // 86400))
+    why = stale_job(sid, held, now) if sid else ""
+    if why:
+        err.write("check: %s: make the check job again with CronCreate, with the same cron "
+                  "and prompt, delete every other job that runs check with CronDelete, then "
+                  "run check --job-created\n" % why)
         return RENEW
     return 0
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="octopus check",
-                                 description="the manager's 10-minute check: launch the "
-                                             "unlaunched follow-ups, except on the first run "
-                                             "after the manager starts, then print the update "
-                                             "while any agent finished, waits or works")
+                                 description="the manager's 10-minute check: print the "
+                                             "update while any agent finished, waits or "
+                                             "works. It launches nothing")
     ap.add_argument("--job-created", action="store_true",
-                    help="this session just made its check job: record when")
+                    help="this session just made its check job: record its newest "
+                         "recurring job as the check job, and when")
     ap.add_argument("--dry-run", action="store_true",
-                    help="launch no follow-up, print what each launch would run, and "
-                         "leave the snapshot of the last update and the known follow-ups "
-                         "as they were")
+                    help="move no ticket, record no job, and leave the snapshot of the "
+                         "last update as it was")
     a = ap.parse_args(argv)
     return run(job_created=a.job_created, dry_run=a.dry_run)
 
