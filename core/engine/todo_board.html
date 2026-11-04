@@ -236,9 +236,9 @@ header{
 .pill.idle{color:#8a93a6;border-color:#2b3140;font-style:italic;cursor:pointer}
 .pill.finished{color:var(--dim);border-color:#2b3140;cursor:pointer}
 
-/* the Sessions view: one wide list, every caption whole, the session rows unfolded */
-#board.wide{overflow-x:hidden;overflow-y:auto}
-#board.wide .lane{flex:1 1 auto;width:auto;max-width:1180px;min-height:0}
+/* The Active view shows complete captions and unfolded session rows. */
+#board.wide{overflow-x:auto;overflow-y:auto}
+#board.wide .lane{flex:1 1 auto;width:auto;max-width:1200px;min-height:0}
 #board.wide .card .t{display:block;-webkit-line-clamp:unset;overflow:visible;white-space:normal}
 #board.wide .lh .nm{overflow:visible;white-space:normal}
 #board.wide .lh .sub{white-space:normal}
@@ -292,6 +292,7 @@ header{
 
 .det{flex:0 0 auto;border-top:1px solid var(--line);padding-top:8px;display:none}
 .card.open .det{display:block}
+.det .ticket-group{font-size:11.5px;color:var(--dim);overflow-wrap:anywhere;margin-bottom:6px}
 .det .src{
   font:10.5px ui-monospace,Consolas,monospace;color:var(--dim);overflow-wrap:anywhere;
   margin-bottom:6px;
@@ -347,18 +348,32 @@ button.danger:hover{background:#3a1c1f!important;color:#ffb3b3!important}
 .lane.shut .sub,
 .lane.shut .slug{display:none}
 #board.grid .lane.shut{max-height:none}
+#board.grid .grp{max-height:none}
+#board.grid .grp > .stack{flex:0 1 auto;max-height:36vh}
+.group-children{display:flex;flex-direction:column;gap:10px;padding:8px;border-top:1px solid var(--line)}
+.group-children > .lane{flex:none;width:100%}
+.grp.shut > .group-children{display:none}
+.group-grab{border:0;background:transparent;color:var(--dim);cursor:grab;padding:0 3px}
+.group-grab:active{cursor:grabbing}
+.grp.moving{opacity:.4}
+.group-dropbar{display:none;gap:4px;margin-top:7px}
+.group-drag .group-dropbar{display:flex}
+.group-dropzone{flex:1;padding:5px 2px;text-align:center;border:1px dashed var(--faint);border-radius:4px;font-size:10px}
+.group-dropzone.over,.group-root.over{border-color:var(--accent);background:var(--card-h);color:var(--fg)}
+.grp.over{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.group-root{flex:0 0 100%;padding:8px;border:1px dashed var(--line);border-radius:6px;color:var(--dim);font-size:11px}
 
-/* ── the lane columns the owner arranges: Lanes and Repeatable views ── */
+/* ── the lane columns the owner arranges: Boards view ──────────────── */
 /* The header drags the column to a new place, the grip on its right edge sets its width,
    the caret folds it to a strip. The order, the widths and the folded lanes live in
    TODO/.board.json. A folded lane still takes a dropped card. */
-.lane.col{position:relative}
+.lane.sized{position:relative}
 .lane.col > .lh{cursor:grab}
 .lane.col > .lh .car{color:var(--faint);font-size:10px;width:9px;flex:0 0 9px;cursor:pointer}
 .lane.col > .lh .car:hover{color:var(--fg)}
 .lane.col.moving{opacity:.4}
 .lane.col.slot{border-color:var(--accent)}
-.lane .grip{position:absolute;top:0;right:0;bottom:0;width:6px;cursor:col-resize;z-index:2}
+.lane .grip{position:absolute;top:0;right:0;bottom:0;width:6px;cursor:col-resize;touch-action:none;z-index:2}
 .lane .grip:hover,.lane .grip.on{background:var(--accent);opacity:.45}
 .lane.col.shut{flex:0 0 36px;width:36px}
 .lane.col.shut .bar,.lane.col.shut .grip{display:none}
@@ -512,13 +527,32 @@ button.danger:hover{background:#3a1c1f!important;color:#ffb3b3!important}
 #gselG{height:26px;max-width:200px;padding:0 6px;background:var(--inset);color:var(--fg);
   border:1px solid var(--line);border-radius:var(--r);font-size:12px;outline:none}
 #gselG:focus{border-color:var(--accent)}
-#xdlg{display:none;width:680px;max-width:92vw;max-height:92vh;overflow:auto;
+#ngdlg{display:none;width:520px;max-width:92vw;max-height:92vh;overflow:auto;
+  background:#1a1e26;border:1px solid #333b4a;border-radius:11px;padding:16px}
+#veil.newgroup #ngdlg{display:block}
+#ngdlg h3{margin:0 0 4px;font-size:13.5px}
+#ngdlg p{margin:0 0 12px;font-size:12px;color:var(--dim)}
+#ngdlg label{display:flex;flex-direction:column;gap:6px;margin-top:12px;font-size:12px}
+#ngdlg input,#ngdlg textarea{width:100%;padding:8px;background:var(--inset);color:var(--fg);
+  border:1px solid var(--line);border-radius:7px;font:inherit;font-size:12px;line-height:1.5}
+#ngdlg textarea{min-height:110px;resize:vertical}
+#ngdlg .row{display:flex;gap:7px;justify-content:flex-end;margin-top:12px}
+#ngdlg .go{background:var(--accent);border-color:var(--accent);color:#fff}
+#ngErr{min-height:16px;margin-top:8px;font-size:12px;color:#dd7b7b}
+.grp .description{margin-top:7px;color:var(--dim);font-size:12px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere}
+.grp.shut .description{display:none}
+#xdlg,#egdlg{display:none;width:680px;max-width:92vw;max-height:92vh;overflow:auto;
   background:#1a1e26;border:1px solid #333b4a;border-radius:11px;padding:16px}
 #veil.gprop #xdlg{display:block}
-#xdlg h3{margin:0 0 4px;font-size:13.5px}
-#xdlg p{margin:0 0 10px;font-size:11.5px;color:var(--dim)}
-#xdlg .row{display:flex;gap:7px;justify-content:flex-end;margin-top:11px}
-#xdlg .go{background:var(--accent);border-color:var(--accent);color:#fff}
+#veil.geval #egdlg{display:block}
+#egdlg{width:520px}
+#egdlg label{display:flex;flex-direction:column;gap:6px;font-size:12px}
+#egdlg select{width:100%;height:32px;padding:0 8px;background:var(--inset);color:var(--fg);
+  border:1px solid var(--line);border-radius:7px;font:12px inherit}
+#xdlg h3,#egdlg h3{margin:0 0 4px;font-size:13.5px}
+#xdlg p,#egdlg p{margin:0 0 10px;font-size:11.5px;color:var(--dim)}
+#xdlg .row,#egdlg .row{display:flex;gap:7px;justify-content:flex-end;margin-top:11px}
+#xdlg .go,#egdlg .go{background:var(--accent);border-color:var(--accent);color:#fff}
 #xdlg .prop{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:0 0 8px}
 #xdlg .prop.off{opacity:.45}
 #xdlg .ph{display:flex;align-items:center;gap:8px;font-size:12.5px}
@@ -819,6 +853,7 @@ a.icon{display:inline-flex;align-items:center;text-decoration:none}
   <div class="hbar" id="hProject" aria-label="This project">
     <div class="hgrp">
       <button class="icon" id="newtask">New task</button>
+      <button class="icon" id="newgroup" style="display:none">New group</button>
       <button class="icon" id="chat" title="a read-only terminal chat with the project's default AI provider">Chat with codebase</button>
     </div>
     <div class="hgrp">
@@ -826,7 +861,6 @@ a.icon{display:inline-flex;align-items:center;text-decoration:none}
         <span class="cap">View</span>
         <button data-v="lanes">Boards</button>
         <button data-v="groups">Groups</button>
-        <button data-v="sessions">Sessions</button>
         <button data-v="repeatable" id="repview">Repeatable</button>
         <button data-v="artifacts" title="the pages agents made for this project, and its wiki">Artifacts</button>
         <button data-v="project" title="every setting of this project">Project Settings</button>
@@ -843,16 +877,17 @@ a.icon{display:inline-flex;align-items:center;text-decoration:none}
         <button class="icon" id="gselClr">Clear</button>
       </span>
       <button class="icon" id="collapse">Collapse all</button>
+      <button class="icon" id="evaltickets" style="display:none" title="use the project AI model to assign tickets to existing groups">Evaluate tickets</button>
       <details class="hmenu" id="grpmore">
         <summary class="icon" title="make a group by hand or with AI">Group actions</summary>
         <div class="hpop">
-          <button class="icon" id="newgroup">New group</button>
           <button class="icon" id="aigroup" title="say what a group is for; a headless AI session proposes the group and its tickets">New group with AI</button>
           <button class="icon" id="aigroups" title="a headless AI session proposes a group for every open ticket in no group">Generate groups with AI</button>
         </div>
       </details>
     </div>
     <div class="hgrp" id="states">
+      <button class="icon" data-v="sessions" title="Show the open sessions of this project">Active</button>
       <span id="live" class="num"></span>
       <button class="icon sym" id="reload" title="Reload" aria-label="Reload"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M12.6 1.6v3.2H9.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
       <button class="icon warn" id="closefin">Close finished</button>
@@ -1144,6 +1179,11 @@ a.icon{display:inline-flex;align-items:center;text-decoration:none}
   <iframe id="avFrame" title="Artifact" sandbox="allow-scripts allow-popups allow-forms allow-popups-to-escape-sandbox" referrerpolicy="no-referrer"></iframe>
 </div>
 <div id="globalview" hidden>
+  <section>
+    <h3>Manager</h3>
+    <div class="feats"><label><input id="gsManagerAutostart" type="checkbox" disabled>Autostart manager</label></div>
+    <p>Start the manager when the board opens and restart it if it exits. When off, use the Manager button to start it manually. An open manager stays available for input.</p>
+  </section>
   <section id="gsDefault">
     <h3>Default AI provider and model</h3>
     <p>The AI provider and the model of this machine. A project that names no AI provider launches this one, and its default model is the one a launch takes unless the project or the launch names another. A change runs one short headless call of them; only an answer makes them the default. Saved in <code id="gsDefaultFile"></code>.</p>
@@ -1175,11 +1215,12 @@ a.icon{display:inline-flex;align-items:center;text-decoration:none}
         <label class="wide"><span>Executable path or command</span><input id="gaCommand" placeholder="C:\Tools\Codex\codex.exe" autocomplete="off" spellcheck="false"><small>Paste the full path to codex.exe (quotes are accepted), or use codex for automatic detection. Put arguments in the next field.</small></label>
         <label class="wide"><span>Arguments of every launch and check</span><input id="gaArgs" placeholder="--oss -c model_provider=local" autocomplete="off" spellcheck="false"><small>separated by spaces; "double quotes" keep a space. Placeholders: {prompt} {model} {effort} {dir} {session} {root}</small></label>
         <label id="gaApprovalField" class="wide"><span>Interactive approval policy</span><select id="gaApproval">
+          <option value="auto-review">Automatic review (default)</option>
           <option value="">Use Codex configuration</option>
           <option value="on-request">Ask when needed</option>
           <option value="untrusted">Ask for untrusted commands</option>
           <option value="never">Never ask</option>
-        </select><small>Applies to new workers and codebase chats. Headless answers cannot ask for approval.</small></label>
+        </select><small>Automatic review handles eligible approvals. Explicit approval arguments take precedence. Applies to new sessions.</small></label>
         <label class="tpl"><span>Prompt</span><input id="gaPrompt" placeholder="{prompt}" autocomplete="off" spellcheck="false"></label>
         <label class="tpl"><span>Model</span><input id="gaModel" placeholder="--model {model}" autocomplete="off" spellcheck="false"></label>
         <label class="tpl"><span>Effort</span><input id="gaEffort" placeholder="--effort {effort}" autocomplete="off" spellcheck="false"></label>
@@ -1351,6 +1392,38 @@ a.icon{display:inline-flex;align-items:center;text-decoration:none}
   </div>
   <div class="err" id="tErr"></div>
 </div>
+<div id="ngdlg" role="dialog" aria-modal="true" aria-labelledby="ngTitle" aria-describedby="ngHint">
+  <h3 id="ngTitle">New group</h3>
+  <p id="ngHint">Give the group a name. Describe which tickets belong in it.</p>
+  <label for="ngName">Name
+    <input id="ngName" type="text" maxlength="200" required autocomplete="off">
+  </label>
+  <label for="ngDescription">Description
+    <textarea id="ngDescription" maxlength="1000" required placeholder="For example: Tickets about parsing files, including syntax errors and parser performance."></textarea>
+  </label>
+  <div class="row">
+    <button class="icon" id="ngImprove" title="Improve the description with the project's AI model">Improve with AI</button>
+  </div>
+  <div id="ngErr" role="status" aria-live="polite"></div>
+  <div class="row">
+    <button class="icon" id="ngCancel">Cancel</button>
+    <button class="icon go" id="ngSave">Create group</button>
+  </div>
+</div>
+<div id="egdlg">
+  <h3>Evaluate tickets</h3>
+  <p>Use the project AI model to assign open tickets to existing groups. Review the assignments before you apply them.</p>
+  <label for="egScope">Tickets to evaluate
+    <select id="egScope">
+      <option value="ungrouped">Tickets without a group</option>
+      <option value="all">All open tickets, including tickets with a group</option>
+    </select>
+  </label>
+  <div class="row">
+    <button class="icon" id="egX">Cancel</button>
+    <button class="icon go" id="egOK">Evaluate tickets</button>
+  </div>
+</div>
 <div id="xdlg">
   <h3 id="xdlgT">Groups proposed by AI</h3>
   <p id="xdlgP"></p>
@@ -1516,7 +1589,7 @@ function visible(t) {
 
 /* ── render ─────────────────────────────────────────────────────────── */
 function render() {
-  if (!DATA) return;
+  if (!DATA || GROUP_MOVING) return;
   if (DATA.serverStale && !STALE_SAID) { STALE_SAID = true; toast(STALE, true); }
   const b = $("#board"), sx = b.scrollLeft, sb = b.scrollTop, sy = {};
   b.querySelectorAll(".stack").forEach(s => sy[s.dataset.s] = s.scrollTop);
@@ -1549,18 +1622,14 @@ function render() {
 
 /* The lanes of the project, in the order the owner arranged them: a card in the lane its
    file sits in. */
-function laneView(b, shown, repeatable) {
-  const pool = shown.filter(t => repeatable ? !!t.repeat : !t.repeat);
+function laneView(b, shown) {
+  const pool = shown.filter(t => !t.repeat);
   for (const st of laneOrder()) {
     const rows = pool.filter(t => t.state === st).sort(byOrder);
     const shut = LSHUT.has(st);
     const lane = el("section", "lane col" + (shut ? " shut" : ""));
     lane.dataset.state = st;
     lane.style.setProperty("--tone", laneTone(st));
-    if (!shut && LANEW[st]) {
-      lane.style.flex = `0 0 ${LANEW[st]}px`;
-      lane.style.width = `${LANEW[st]}px`;
-    }
 
     const lh = el("div", "lh"), r1 = el("div", "r1");
     const car = el("span", "car", shut ? "▸" : "▾");
@@ -1591,28 +1660,17 @@ function laneView(b, shown, repeatable) {
       bar.append(i);
     }
     lh.append(bar);
-    if (repeatable) {
-      const roles = {};
-      for (const t of rows) roles[t.repeat] = (roles[t.repeat] || 0) + 1;
-      lh.append(el("div", "sub", Object.keys(roles).sort()
-        .map(r => `${roles[r]} ${(DATA.repeatLabel[r] || r).toLowerCase()}`).join(" · ")
-        || (st === laneOf("closed") ? "retired" : "none")));
-    }
     lane.append(lh);
 
     const stack = el("div", "stack");
-    stack.dataset.s = (repeatable ? "r:" : "") + st;
+    stack.dataset.s = st;
     const g = {};
     for (const t of rows) if (t.epic) (g[t.epic] ||= []).push(t);
     for (const nm of Object.keys(g).sort()) stack.append(epicNode(nm, g[nm]));
     for (const t of rows) if (!t.epic) stack.append(cardNode(t));
     if (!rows.length) stack.append(el("div", "none", "empty"));
     lane.append(stack);
-    const grip = el("div", "grip");
-    grip.title = "Drag to set the width";
-    grip.addEventListener("pointerdown", e => resizeLane(e, st));
-    grip.addEventListener("dblclick", e => { e.stopPropagation(); setLaneWidth(st, 0); });
-    lane.append(grip);
+    sizeColumn(lane, st, !shut);
 
     /* A dragged lane header carries its own type, so it never reaches the ticket move. */
     const isLane = e => [...e.dataTransfer.types].includes(LANE_DRAG);
@@ -1668,7 +1726,21 @@ function toggleLane(st) {
   render();
   saveLanes({laneShut: [...LSHUT]});
 }
-/* 0 returns the lane to the default width. */
+/* View columns use namespaced keys in the project's saved width map. */
+function sizeColumn(lane, key, open = true) {
+  lane.classList.add("sized");
+  lane.dataset.widthKey = key;
+  if (open && LANEW[key]) {
+    lane.style.flex = `0 0 ${LANEW[key]}px`;
+    lane.style.width = `${LANEW[key]}px`;
+  }
+  const grip = el("div", "grip");
+  grip.title = "Drag to set the width · double-click for the default width";
+  grip.addEventListener("pointerdown", e => resizeLane(e, key));
+  grip.addEventListener("dblclick", e => { e.stopPropagation(); setLaneWidth(key, 0); });
+  lane.append(grip);
+}
+/* 0 returns the column to the default width. */
 function setLaneWidth(st, w) {
   if (w) LANEW[st] = w; else delete LANEW[st];
   render();
@@ -1680,7 +1752,7 @@ function resizeLane(e, st) {
   e.preventDefault(); e.stopPropagation();
   const lane = e.target.closest(".lane");
   const x0 = e.clientX, w0 = lane.getBoundingClientRect().width;
-  const find = () => document.querySelector(`.lane.col[data-state="${CSS.escape(st)}"]`);
+  const find = () => document.querySelector(`.lane.sized[data-width-key="${CSS.escape(st)}"]`);
   const on = x => { const n = find(); if (!n) return;
     const w = Math.round(Math.max(LANE_MIN, Math.min(LANE_MAX, w0 + x - x0)));
     LANEW[st] = w;
@@ -1717,15 +1789,39 @@ function laneMenu(e, st) {
 }
 
 /* ── the repeatable view ────────────────────────────────────────────── */
-/* The repeatable tickets only, in the lanes. The Lanes view leaves them out, so a test
-   run, a verification sweep or a board pass that waits for its next run does not sit
-   among the tickets that close once. A pass in the verify lane returns one to the start
-   lane. */
+/* A repeatable ticket is in Running when any of its current sessions runs.
+   These columns show session state and do not accept ticket moves. */
 function repeatView(b, shown) {
-  if (!shown.some(t => t.repeat))
-    return b.append(el("div", "none",
-      "no repeatable ticket · file one with New task, or right-click a card, Repeatable"));
-  laneView(b, shown, true);
+  const run = [], idle = [];
+  for (const t of shown) {
+    if (t.repeat) (sessOf(t.id).some(s => s.running) ? run : idle).push(t);
+  }
+  for (const [key, name, rows, tone] of [
+    ["run", "Running", run, "#4fbf72"],
+    ["idle", "not running", idle, "var(--dim)"],
+  ]) {
+    rows.sort(byOrder);
+    const lane = el("section", "lane");
+    lane.style.setProperty("--tone", tone);
+    const lh = el("div", "lh"), r1 = el("div", "r1");
+    r1.append(el("span", "nm", name), el("span", "n num", String(rows.length)));
+    lh.append(r1);
+    const roles = {};
+    for (const t of rows) roles[t.repeat] = (roles[t.repeat] || 0) + 1;
+    lh.append(el("div", "sub", Object.keys(roles).sort()
+      .map(r => `${roles[r]} ${(DATA.repeatLabel[r] || r).toLowerCase()}`).join(" · ") || "none"));
+    lane.append(lh);
+    const stack = el("div", "stack");
+    sizeColumn(lane, "repeatable:" + key);
+    stack.dataset.s = "r:" + key;
+    const g = {};
+    for (const t of rows) if (t.epic) (g[t.epic] ||= []).push(t);
+    for (const nm of Object.keys(g).sort()) stack.append(epicNode(nm, g[nm]));
+    for (const t of rows) if (!t.epic) stack.append(cardNode(t));
+    if (!rows.length) stack.append(el("div", "none", "empty"));
+    lane.append(stack);
+    b.append(lane);
+  }
 }
 
 /* ── the group views ────────────────────────────────────────────────── */
@@ -1746,17 +1842,83 @@ function groupRows() {
 function groupView(b, shown) {
   const by = {};
   for (const t of shown) by[t.id] = t;
-  let drawn = 0;
-  // An empty group stays: it is a place to drop a ticket.
-  for (const g of groupRows()) {
+  const rows = groupRows(), named = new Map(rows.filter(g => g.kind === "group").map(g => [g.name, g]));
+  const root = el("div", "group-root", "Drag ↕ to move a group. Drop inside another group to nest it. Drop here to move it to the top level.");
+  bindGroupDrop(root, () => ({parent: "", before: null}));
+  b.append(root);
+  const order = [...new Set([...((DATA.groupLayout || {}).order || []), ...named.keys()])]
+    .filter(name => named.has(name));
+  const children = new Map();
+  for (const name of order) {
+    const parent = groupParent(name);
+    if (!children.has(parent)) children.set(parent, []);
+    children.get(parent).push(name);
+  }
+  const draw = name => {
+    const g = named.get(name), kids = (children.get(name) || []).map(draw);
+    return groupLane(g, g.ids.map(i => by[i]).filter(Boolean).sort(byOrder), kids);
+  };
+  for (const name of children.get("") || []) b.append(draw(name));
+  for (const g of rows.filter(g => g.kind !== "group")) {
     const rows = g.ids.map(i => by[i]).filter(Boolean).sort(byOrder);
     b.append(groupLane(g, rows));
-    drawn++;
   }
-  if (!drawn) b.append(el("div", "none", "no group matches the filter"));
 }
 
-function groupLane(g, rows) {
+const GROUP_DRAG = "application/x-todo-group";
+let GROUP_MOVING = null;
+const isGroupDrag = e => [...e.dataTransfer.types].includes(GROUP_DRAG);
+function groupParent(name) {
+  const parents = (DATA.groupLayout || {}).parents || {};
+  return Object.prototype.hasOwnProperty.call(parents, name) ? parents[name] : "";
+}
+function canPlaceGroup(name, parent) {
+  const seen = new Set([name]);
+  while (parent) {
+    if (seen.has(parent)) return false;
+    seen.add(parent); parent = groupParent(parent);
+  }
+  return true;
+}
+function groupPlacement(name, position) {
+  const layout = DATA.groupLayout || {}, parent = groupParent(name);
+  if (position === "inside" || name === GROUP_MOVING?.name) return {parent: name, before: null};
+  const siblings = (layout.order || Object.keys(DATA.groups))
+    .filter(n => groupParent(n) === parent && n !== GROUP_MOVING?.name);
+  return {parent, before: position === "before" ? name : siblings[siblings.indexOf(name) + 1] || null};
+}
+function finishGroupDrag() {
+  GROUP_MOVING = null;
+  $("#board").classList.remove("group-drag");
+  render();
+}
+function bindGroupDrop(node, placement) {
+  node.addEventListener("dragover", e => {
+    if (!isGroupDrag(e)) return;
+    e.stopPropagation();
+    const target = placement();
+    if (!GROUP_MOVING || GROUP_MOVING.project !== PROJECT
+        || target.before === GROUP_MOVING.name || !canPlaceGroup(GROUP_MOVING.name, target.parent)) {
+      e.dataTransfer.dropEffect = "none";
+      return;
+    }
+    e.preventDefault(); e.dataTransfer.dropEffect = "move"; node.classList.add("over");
+  });
+  node.addEventListener("dragleave", e => {
+    if (!node.contains(e.relatedTarget)) node.classList.remove("over");
+  });
+  node.addEventListener("drop", e => {
+    if (!isGroupDrag(e)) return;
+    e.preventDefault(); e.stopPropagation(); node.classList.remove("over");
+    const source = GROUP_MOVING, target = placement();
+    if (!source || source.project !== PROJECT || source.name !== e.dataTransfer.getData(GROUP_DRAG)
+        || target.before === source.name || !canPlaceGroup(source.name, target.parent)) return;
+    finishGroupDrag();
+    groupOp({op: "move", name: source.name, ...target, manual: true}, `${source.name} moved`);
+  });
+}
+
+function groupLane(g, rows, children = []) {
   const shut = GSHUT.has(g.name);
   const lane = el("section", "lane grp" + (g.kind === "tag" ? " tag" : "")
                              + (shut ? " shut" : ""));
@@ -1769,9 +1931,37 @@ function groupLane(g, rows) {
   if (g.kind === "group" && groupTitle(g.name)) nm.title = groupTitle(g.name);
   r1.append(el("span", "car", shut ? "▸" : "▾"),
             nm, el("span", "n num", String(rows.length)));
+  if (g.kind === "group") {
+    const grab = el("button", "group-grab", "↕");
+    grab.title = "Drag to move this group and its nested groups";
+    grab.setAttribute("aria-label", "Drag group " + groupShown(g.name));
+    grab.draggable = true;
+    grab.addEventListener("click", e => e.stopPropagation());
+    grab.addEventListener("dragstart", e => {
+      e.stopPropagation();
+      GROUP_MOVING = {name: g.name, project: PROJECT};
+      e.dataTransfer.setData(GROUP_DRAG, g.name); e.dataTransfer.effectAllowed = "move";
+      lane.classList.add("moving"); $("#board").classList.add("group-drag");
+    });
+    grab.addEventListener("dragend", finishGroupDrag);
+    r1.prepend(grab);
+  }
   r1.title = shut ? "Open the group" : "Collapse the group";
   r1.addEventListener("click", e => { e.stopPropagation(); toggleGroup(g.name); });
   lh.append(r1);
+  if (g.kind === "group") {
+    const targets = el("div", "group-dropbar");
+    for (const [position, label] of [["before", "Before"], ["inside", "Inside"], ["after", "After"]]) {
+      const zone = el("div", "group-dropzone", label);
+      bindGroupDrop(zone, () => groupPlacement(g.name, position));
+      targets.append(zone);
+    }
+    lh.append(targets);
+    bindGroupDrop(lane, () => groupPlacement(g.name, "inside"));
+  }
+
+  if (g.kind === "group" && (DATA.groupDescriptions || {})[g.name])
+    lh.append(el("div", "description", DATA.groupDescriptions[g.name]));
 
   const bar = el("div", "bar");
   for (const sv of DATA.severities) {
@@ -1814,6 +2004,9 @@ function groupLane(g, rows) {
     btn("Rename", "Rename this Todo group", () => renameGroup(g.name));
     btn("Delete", "Drop the group; its tickets fall into In no group",
         () => deleteGroup(g.name));
+    if (groupParent(g.name))
+      btn("Move out", "Move this group and its children to the top level",
+          () => groupOp({op: "move", name: g.name, parent: "", manual: true}, `${g.name} moved`));
   }
   if (g.kind !== "tag" && rows.length)
     btn("Select", "Select every ticket shown in this group, or clear them when all are "
@@ -1828,23 +2021,31 @@ function groupLane(g, rows) {
   for (const t of rows) stack.append(cardNode(t));
   if (!rows.length) stack.append(el("div", "none", g.kind === "tag" ? "empty" : "drop a ticket here"));
   lane.append(stack);
+  if (children.length) {
+    const nested = el("div", "group-children");
+    nested.append(...children); lane.append(nested);
+  }
 
   if (g.kind !== "tag") {
-    lane.addEventListener("dragover", e => { e.preventDefault(); lane.classList.add("drop"); });
+    lane.addEventListener("dragover", e => {
+      if (isGroupDrag(e)) return;
+      e.preventDefault(); e.stopPropagation(); lane.classList.add("drop");
+    });
     lane.addEventListener("dragleave", e => {
       if (!lane.contains(e.relatedTarget)) lane.classList.remove("drop"); });
     lane.addEventListener("drop", e => {
-      e.preventDefault(); lane.classList.remove("drop");
+      if (isGroupDrag(e)) return;
+      e.preventDefault(); e.stopPropagation(); lane.classList.remove("drop");
       const w = e.dataTransfer.getData("text/plain"); if (!w) return;
       const d = JSON.parse(w);
       if (d.epic) return toast("an epic moves between boards, not between groups", true);
-      assignGroup(d.ids, g.kind === "none" ? "" : g.name);
+      if (Array.isArray(d.ids)) assignGroup(d.ids, g.kind === "none" ? "" : g.name);
     });
   }
   return lane;
 }
 
-/* ── the sessions view ──────────────────────────────────────────────── */
+/* ── the Active view ──────────────────────────────────────────────── */
 /* Every session with a terminal open, as one wide list: the tickets whose terminals
    run first, then the tickets whose terminals wait at the prompt, then the sessions with
    no ticket. Each card shows its session rows unfolded. */
@@ -1866,6 +2067,7 @@ function sessionView(b, shown) {
     lh.title = "The terminals the Claude sessions of the project " + p.name + " have open.";
     lane.append(lh);
     const stack = el("div", "stack");
+    sizeColumn(lane, "sessions:project:" + p.name);
     stack.dataset.s = "p:" + p.name;
     for (const s of ss) stack.append(otherCard(p.name, s));
     if (!ss.length) stack.append(el("div", "none", noSession()));
@@ -1907,7 +2109,7 @@ function otherCard(proj, s) {
   return c;
 }
 
-/* The sessions of every other project, fetched while the Sessions view shows all projects. */
+/* Sessions of other projects, fetched while the Active view shows all projects. */
 async function refreshAll() {
   if (OTHERS !== "shown") return;
   const want = PROJECT;
@@ -1933,7 +2135,7 @@ function sessionViewHere(b, shown) {
   const hand = live.filter(x => !x.id && sessShown(x)).sort((a, b) => (b.running - a.running) || ((a.created || 0) - (b.created || 0)));
   const rows = [...run.sort(byOrder), ...idle.sort(byOrder), ...hand];
   b.append(sessionLane(OTHERS === "shown" && ALLSESS.length
-      ? (DATA.project || {}).name || "Sessions" : "Sessions",
+      ? (DATA.project || {}).name || "Active" : "Active",
     rows, "#4fbf72", countWaits(live),
     "Every terminal a Claude session of this project has open. Close finished closes the finished"
     + " ones only: a session that waits for input, for an event, for a subagent or for a"
@@ -1957,6 +2159,7 @@ function sessionLane(name, rows, tone, sub, help) {
   lh.title = help;
   lane.append(lh);
   const stack = el("div", "stack");
+  sizeColumn(lane, "sessions:here");
   stack.dataset.s = "s:" + name;
   for (const r of rows) stack.append(isSession(r) ? cliCard(r) : cardNode(r));
   if (!rows.length) stack.append(el("div", "none", noSession()));
@@ -2114,7 +2317,7 @@ function cardNode(t) {
     sp.append(dp);
   }
   if (t.blockedBy.length) sp.append(el("span", "pill blk", "← " + t.blockedBy[0]));
-  if (VIEW !== "lanes" && VIEW !== "repeatable") {
+  if (VIEW !== "lanes") {
     const st = el("span", "pill st", DATA.stateLabels[t.state] || t.state);
     st.style.color = laneTone(t.state);
     st.title = "board: " + DATA.stateLabels[t.state] + " · status: " + t.status;
@@ -2182,6 +2385,9 @@ function cardNode(t) {
 
   if (open) {
     const det = el("div", "det");
+    const group = DATA.groupsStore === "files" ? t.group
+      : Object.keys(DATA.groups).find(name => DATA.groups[name].includes(t.id));
+    det.append(el("div", "ticket-group", "Todo group: " + (group ? groupShown(group) : "none")));
     if (t.source) det.append(el("div", "src", t.source));
     det.append(el("div", "bd", t.body || "(no body)"));
     const act = el("div", "act");
@@ -2739,6 +2945,7 @@ function askGroupNote(name) {
 const NOTE_HINT = $("#dlgN").placeholder, NOTE_GO = $("#dlgOK").textContent;
 function closeNote() {
   $("#veil").className = ""; pending = null; closeTerm();
+  NEWGROUP = null;
   $("#dlgN").placeholder = NOTE_HINT; $("#dlgOK").textContent = NOTE_GO;
 }
 async function runPending() {
@@ -3136,16 +3343,47 @@ const assignGroup = (ids, name) => groupOp({op: "assign", ids, name}, r => {
     ? odd.map(i => `${i} → ${p[i] || "no group"}`).join(", ")
     : `${ids.length} → ${name || "no group"}`;
 });
-/* In the files store a group is a file: its name is a slug, and it carries a title. */
+let NEWGROUP = null;
 const newGroup = () => {
-  if (DATA.groupsStore === "files") {
-    const slug = (prompt("The slug of the new Todo group (the file name)") || "").trim();
-    if (!slug) return;
-    const title = (prompt(`The title of the Todo group ${slug}`, slug) || "").trim();
-    return groupOp({op: "create", name: slug, title: title || slug}, `${slug} created`);
+  NEWGROUP = {proj: PROJECT, busy: ""};
+  $("#ngName").value = ""; $("#ngDescription").value = ""; $("#ngErr").textContent = "";
+  drawNewGroup();
+  openVeil("newgroup");
+  $("#ngName").focus();
+};
+function drawNewGroup() {
+  const busy = NEWGROUP?.busy || "";
+  const valid = $("#ngName").value.trim() && $("#ngDescription").value.trim();
+  $("#ngName").disabled = $("#ngDescription").disabled = !!busy;
+  $("#ngImprove").disabled = $("#ngSave").disabled = !!busy || !valid;
+  $("#ngImprove").textContent = busy === "ai" ? "AI is improving…" : "Improve with AI";
+  $("#ngSave").textContent = busy === "save" ? "Creating…" : "Create group";
+}
+async function submitNewGroup(improve = false) {
+  const form = NEWGROUP;
+  if (!form || form.busy || form.proj !== PROJECT) return;
+  const name = $("#ngName").value.trim(), description = $("#ngDescription").value.trim();
+  if (!name || !description) {
+    $("#ngErr").textContent = "Enter a name and describe which tickets belong in the group.";
+    return;
   }
-  const n = (prompt("Name the new Todo group") || "").trim();
-  if (n) groupOp({op: "create", name: n}, `${n} created`); };
+  form.busy = improve ? "ai" : "save";
+  $("#ngErr").textContent = ""; drawNewGroup();
+  try {
+    const r = await api(improve ? "/api/groupDescription" : "/api/group",
+      improve ? {name, description} : {op: "create", name, description, fromTitle: true}, form.proj);
+    if (NEWGROUP !== form || PROJECT !== form.proj) return;
+    if (improve) {
+      $("#ngDescription").value = r.description;
+    } else {
+      closeNote(); DATA = r.snapshot; render(); toast(`${name} created`);
+    }
+  } catch (e) {
+    if (NEWGROUP === form && PROJECT === form.proj) $("#ngErr").textContent = String(e.message || e);
+  } finally {
+    if (NEWGROUP === form) { form.busy = ""; drawNewGroup(); }
+  }
+}
 const renameGroup = old => { const n = (prompt(DATA.groupsStore === "files"
     ? "The new slug of the Todo group " + groupShown(old) : "Rename the Todo group", old) || "").trim();
   if (n && n !== old) groupOp({op: "rename", name: old, to: n}, `${old} → ${n}`); };
@@ -3182,8 +3420,20 @@ function drawGroupSel() {
    what to keep; only Apply writes. One request at a time. */
 let AIBUSY = false, PROPS = null;
 function drawAIBusy() {
-  for (const id of ["#aigroup", "#aigroups"]) $(id).disabled = AIBUSY;
+  for (const id of ["#aigroup", "#aigroups", "#evaltickets", "#egOK"]) $(id).disabled = AIBUSY;
   $("#aigroups").textContent = AIBUSY ? "AI is grouping…" : "Generate groups with AI";
+}
+function askTicketGroups() {
+  if (AIBUSY) return toast("AI is already grouping", true);
+  if (!Object.keys(DATA.groups).length) return toast("create a group first", true);
+  $("#egScope").value = "ungrouped";
+  openVeil("geval");
+  $("#egScope").focus();
+}
+function evaluateTicketGroups() {
+  const scope = $("#egScope").value;
+  closeNote();
+  return draftGroups("assign", "", {scope});
 }
 function askAIGroup(mode = "one") {
   if (AIBUSY) return toast("AI is already grouping", true);
@@ -3224,8 +3474,10 @@ function showProposals(props, mode, proj) {
   const where = {};
   for (const g of groupRows()) if (g.kind === "group") for (const i of g.ids) where[i] = g.name;
   const byId = Object.fromEntries(DATA.tickets.map(t => [t.id, t]));
-  $("#xdlgT").textContent = mode === "one" ? "New group with AI" : "Groups generated with AI";
-  $("#xdlgP").textContent = "Untick a group to leave it out. You can rename a new group. "
+  $("#xdlgT").textContent = mode === "one" ? "New group with AI"
+    : mode === "assign" ? "Ticket assignments" : "Groups generated with AI";
+  $("#xdlgP").textContent = "Untick a group to leave it out. "
+    + (mode === "assign" ? "" : "You can rename a new group. ")
     + "Nothing is written until you press Apply.";
   const L = $("#xdlgL");
   L.innerHTML = "";
@@ -3319,7 +3571,7 @@ function filters() {
 /* `#groups`, `#sessions` or `#project` in the address selects a view, so a view is
    linkable. The Groups view took in the old Manage view, so `#manage` still opens it. */
 const VIEWS = ["lanes", "groups", "sessions", "repeatable", "artifacts", "project"];
-const VIEW_RENAMED = {manage: "groups"};
+const VIEW_RENAMED = {manage: "groups", active: "sessions"};
 function applyViewHash() {
   let h = (location.hash || "").replace(/^#/, "").trim().toLowerCase();
   h = VIEW_RENAMED[h] || h;
@@ -3329,9 +3581,11 @@ function applyViewHash() {
 }
 
 function drawView() {
-  for (const b of document.querySelectorAll("#viewbar button"))
+  for (const b of document.querySelectorAll("#hProject button[data-v]"))
     b.setAttribute("aria-pressed", b.dataset.v === VIEW);
   $("#grpmore").style.display = VIEW === "groups" ? "" : "none";
+  $("#newgroup").style.display = VIEW === "groups" ? "" : "none";
+  $("#evaltickets").style.display = VIEW === "groups" && Object.keys(DATA.groups).length ? "" : "none";
   if (VIEW !== "groups") $("#grpmore").open = false;
   drawGroupSel();
   $("#others").style.display = VIEW === "sessions" ? "" : "none";
@@ -4074,7 +4328,28 @@ function openGlobal() {
   PROVIDERS_V = null;
   PACKS_V = null;
   RULES_V = null;
+  loadManagerSettings();
   render();
+}
+async function loadManagerSettings() {
+  const input = $("#gsManagerAutostart");
+  input.disabled = true;
+  try {
+    const r = await api("/api/managerSettings", {op:"list"}, null);
+    input.checked = r.autostart;
+    input.disabled = false;
+  } catch (e) { toast(String(e.message || e), true); }
+}
+async function saveManagerSettings() {
+  const input = $("#gsManagerAutostart"), enabled = input.checked;
+  input.disabled = true;
+  try {
+    const r = await api("/api/managerSettings", {op:"save", autostart:enabled}, null);
+    input.checked = r.autostart;
+  } catch (e) {
+    input.checked = !enabled;
+    toast(String(e.message || e), true);
+  } finally { input.disabled = false; }
 }
 function globalView() {
   if (!PROVIDERS_V) loadProviders();
@@ -4137,7 +4412,7 @@ function editProvider(a) {
   $("#gaDialect").disabled = !!(a && a.builtin);
   $("#gaCommand").value = x.command || "";
   $("#gaArgs").value = argLine(x.args);
-  $("#gaApproval").value = x.approvalPolicy || "";
+  $("#gaApproval").value = x.approvalPolicy ?? "auto-review";
   for (const [id, k] of Object.entries(TPL_FIELDS)) $("#" + id).value = argLine(x[k]);
   $("#gaCheck").value = argLine(x.check);
   $("#gaEnv").value = pairLines(x.env);
@@ -4303,6 +4578,7 @@ async function runSetup(id, model) {
   }
 }
 $("#globalset").addEventListener("click", openGlobal);
+$("#gsManagerAutostart").addEventListener("change", saveManagerSettings);
 $("#pPacksApply").addEventListener("click", applyPacks);
 $("#pRulesApply").addEventListener("click", applyRules);
 $("#gsRulesApply").addEventListener("click", applyGlobalRules);
@@ -4757,8 +5033,25 @@ $("#search").addEventListener("input", e => {
 $("#reload").addEventListener("click", reload);
 $("#closefin").addEventListener("click", closeFinished);
 $("#newgroup").addEventListener("click", newGroup);
+$("#ngCancel").addEventListener("click", closeNote);
+$("#ngSave").addEventListener("click", () => submitNewGroup());
+$("#ngImprove").addEventListener("click", () => submitNewGroup(true));
+for (const id of ["#ngName", "#ngDescription"]) $(id).addEventListener("input", drawNewGroup);
+$("#ngdlg").addEventListener("keydown", e => {
+  if (e.key === "Escape") { e.stopPropagation(); closeNote(); }
+  if (e.key === "Enter" && e.target.tagName === "INPUT") {
+    e.preventDefault(); submitNewGroup();
+  }
+});
 $("#aigroup").addEventListener("click", () => askAIGroup());
 $("#aigroups").addEventListener("click", generateGroups);
+$("#evaltickets").addEventListener("click", askTicketGroups);
+$("#egX").addEventListener("click", closeNote);
+$("#egOK").addEventListener("click", evaluateTicketGroups);
+$("#egdlg").addEventListener("keydown", e => {
+  if (e.key === "Escape") closeNote();
+  if (e.key === "Enter" && e.target.tagName === "SELECT") evaluateTicketGroups();
+});
 $("#gselPut").addEventListener("click", () => {
   const name = $("#gselG").value;
   if (name && SEL.size) assignGroup([...SEL], name); });
@@ -4787,7 +5080,7 @@ $("#ndlg").addEventListener("keydown", e => {
   if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) submitTask();
   if (e.key === "Escape") closeNote();
 });
-for (const b of document.querySelectorAll("#viewbar button"))
+for (const b of document.querySelectorAll("#hProject button[data-v]"))
   b.addEventListener("click", () => setView(b.dataset.v));
 window.addEventListener("keydown", e => {
   if (!DATA || $("#veil").classList.contains("on")) return;

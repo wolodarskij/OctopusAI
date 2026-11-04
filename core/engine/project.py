@@ -657,6 +657,33 @@ def load_rules(root, project=None):
     return rules, problems
 
 
+def manager_autostart():
+    """Whether the board automatically starts and restarts the manager."""
+    try:
+        data = json.loads((home() / "manager-settings.json").read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return True
+    except (OSError, ValueError):
+        return False
+    return isinstance(data, dict) and data.get("autostart") is True
+
+
+def save_manager_autostart(enabled):
+    if not isinstance(enabled, bool):
+        raise ValueError("autostart must be true or false")
+    import tempfile
+    path = home() / "manager-settings.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
+                                     delete=False) as fh:
+        tmp = Path(fh.name)
+        fh.write(json.dumps({"autostart": enabled}) + "\n")
+    try:
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
 def global_rules_file():
     """The global switches of the optional rules. Outside the Octopus AI tree."""
     return home() / "rules.json"

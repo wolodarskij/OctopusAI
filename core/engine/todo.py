@@ -987,6 +987,21 @@ def save_groups(mapping):
     _write(P.GROUPS_MAP, json.dumps(mapping, indent=1, ensure_ascii=False) + "\n")
 
 
+def load_group_descriptions():
+    """Descriptions by group name, separate from membership in the map store."""
+    import json
+    if P.groups_store == "files":
+        return {g["slug"]: g["description"] for g in group_table()["groups"]}
+    path = P.TODO / ".group-descriptions.json"
+    return json.loads(_read(path)) if path.exists() else {}
+
+
+def _save_group_descriptions(descriptions):
+    import json
+    _write(P.TODO / ".group-descriptions.json",
+           json.dumps(descriptions, indent=1, ensure_ascii=False) + "\n")
+
+
 def todo_groups(tickets, mapping):
     """(members by group name, open tickets in no group). Only open tickets count.
 
@@ -1015,6 +1030,79 @@ def group_names():
     if P.groups_store == "files":
         return sorted(load_group_files())
     return list(load_groups().keys())
+
+
+def load_group_layout():
+    """The manual group order and parent links, independent of ticket membership."""
+    import json
+    names = group_names()
+    try:
+        data = json.loads(_read(P.TODO / ".group-layout.json"))
+    except (OSError, ValueError):
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    order = [name for name in _lane_list(data.get("order")) if name in names]
+    order += [name for name in names if name not in order]
+    raw = data.get("parents")
+    parents = {}
+    for name, parent in (raw.items() if isinstance(raw, dict) else ()):
+        if name not in names or not isinstance(parent, str) or parent not in names:
+            continue
+        ancestor = parent
+        while ancestor in parents and ancestor != name:
+            ancestor = parents[ancestor]
+        if ancestor != name:
+            parents[name] = parent
+    return {"order": order, "parents": parents}
+
+
+def _save_group_layout(layout):
+    import json
+    _write(P.TODO / ".group-layout.json", json.dumps(layout, indent=1, ensure_ascii=False) + "\n")
+
+
+def group_move(name, parent="", before=None, *, manual=False):
+    """Move one group with its children. Only a manual board action can set parent links."""
+    if manual is not True:
+        raise ValueError("move groups by hand on the Groups page")
+    layout = load_group_layout()
+    order, parents = layout["order"], layout["parents"]
+    if not isinstance(name, str) or name not in order:
+        raise ValueError("no Todo group %r" % name)
+    if not isinstance(parent, str) or (parent and parent not in order):
+        raise ValueError("no parent group %r" % parent)
+    ancestor = parent
+    while ancestor:
+        if ancestor == name:
+            raise ValueError("a group cannot be inside itself or one of its children")
+        ancestor = parents.get(ancestor, "")
+    if before is not None:
+        if (not isinstance(before, str) or before not in order or before == name
+                or parents.get(before, "") != parent):
+            raise ValueError("the placement must name another group with the same parent")
+    if parent:
+        parents[name] = parent
+    else:
+        parents.pop(name, None)
+    order.remove(name)
+    order.insert(order.index(before) if before is not None else len(order), name)
+    _save_group_layout(layout)
+    return layout
+
+
+def _rename_group_layout(layout, old, new):
+    layout["order"] = [new if name == old else name for name in layout["order"]]
+    layout["parents"] = {new if name == old else name: new if parent == old else parent
+                         for name, parent in layout["parents"].items()}
+    _save_group_layout(layout)
+
+
+def _delete_group_layout(layout, name):
+    layout["order"] = [item for item in layout["order"] if item != name]
+    layout["parents"] = {child: parent for child, parent in layout["parents"].items()
+                         if child != name and parent != name}
+    _save_group_layout(layout)
 
 
 def group_assign(ids, name):
@@ -1047,6 +1135,9 @@ def group_create(name, title=None, description=None):
     if name in mapping:
         raise ValueError("%r is already a Todo group" % name)
     mapping[name] = []
+    descriptions = load_group_descriptions()
+    descriptions[name] = (description or "").strip()
+    _save_group_descriptions(descriptions)
     _save_and_render(mapping)
     return mapping
 
@@ -1063,10 +1154,16 @@ def group_rename(old, new):
         raise ValueError("a group needs a name")
     if new != old and new in mapping:
         raise ValueError("%r is already a Todo group" % new)
+    layout = load_group_layout()
     out = {}
     for k, v in mapping.items():
         out[new if k == old else k] = v
+    descriptions = load_group_descriptions()
+    if old in descriptions:
+        descriptions[new] = descriptions.pop(old)
+        _save_group_descriptions(descriptions)
     _save_and_render(out)
+    _rename_group_layout(layout, old, new)
     return out
 
 
@@ -1077,8 +1174,14 @@ def group_delete(name, into=None):
     mapping = load_groups()
     if name not in mapping:
         raise ValueError("no Todo group %r" % name)
+    layout = load_group_layout()
     del mapping[name]
+    descriptions = load_group_descriptions()
+    if name in descriptions:
+        del descriptions[name]
+        _save_group_descriptions(descriptions)
     _save_and_render(mapping)
+    _delete_group_layout(layout, name)
     return mapping
 
 
@@ -1102,6 +1205,7 @@ def auto_group(name):
 
 def build_groups(members, ungrouped, autos):
     n = sum(len(v) for v in members.values())
+    descriptions = load_group_descriptions()
     lines = ["# Todo groups", "",
              "%d open tickets in %d groups. A group holds tickets that share a `group`, a "
              "`related` or a `blocked-by` field, so one session can work them together. Name "
@@ -1110,6 +1214,8 @@ def build_groups(members, ungrouped, autos):
              "no group." % (n, len(members), P.cli), ""]
     for name, ts in members.items():
         lines += ["## %s (%d)" % (name, len(ts)), ""]
+        if descriptions.get(name):
+            lines += [descriptions[name], ""]
         for t in sorted(ts, key=lambda t: t.id):
             state = "" if t.state == lane("start") else " (%s)" % t.state
             lines.append("- %s — %s%s" % (t.id, t.title, state))
@@ -1185,6 +1291,7 @@ def group_file_rename(old, new):
         return []
     if new in groups:
         raise ValueError("group %r already exists" % new)
+    layout = load_group_layout()
     src = groups[old][1]
     meta, body = parse(_read(src))
     meta["id"] = new
@@ -1196,6 +1303,7 @@ def group_file_rename(old, new):
             t.meta["group"] = new
             _write(t.path, render(t.meta, t.body))
             moved.append(t.id)
+    _rename_group_layout(layout, old, new)
     write_index(quiet=True)
     return moved
 
@@ -1237,7 +1345,9 @@ def group_file_delete(slug, into=None):
         raise ValueError("%d open ticket(s) name group %r: %s. Regroup them, or pass --into "
                          "<other>" % (len(members), slug, " ".join(t.id for t in members)))
     moved = [i for i, _ in group_file_assign([t.id for t in members], into)] if members else []
+    layout = load_group_layout()
     groups[slug][1].unlink()
+    _delete_group_layout(layout, slug)
     write_index(quiet=True)
     return moved
 
@@ -3860,7 +3970,8 @@ def _launch_argv(t, mode="work", model=None, no_fable=False, auto=False, effort=
         "verify": "prove the work landed, or send the ticket back with what is still wrong.",
     }.get(mode, "get on with it.")
     if t.repeat == MANAGER:
-        tail = "wait for the owner's orders. Never exit."
+        tail = ("end this turn and wait for the owner's orders in this open session. "
+                "Never use sleep or a polling loop to wait. Do not close the session.")
     verb = {"review": "Re-evaluate", "verify": "Verify"}.get(mode, "Work")
     prompt = ("%s ticket %s. Read %s/.briefs/%s.md first and in full - it carries the "
               "ticket, what you may and may not use, and what to do when you finish. "

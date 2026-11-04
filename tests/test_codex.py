@@ -198,41 +198,156 @@ print("progress which is not the final answer")
         self.assertIn("--sandbox read-only", result["command"])
         self.assertIn("--model gpt-6-luna", result["command"])
         self.assertNotIn("--session-id", result["argv"])
-        self.assertNotIn("--ask-for-approval", result["argv"])
+        self.assert_auto_review(result["argv"])
+
+    def assert_auto_review(self, argv):
+        self.assertEqual(argv.count("--ask-for-approval"), 1)
+        self.assertEqual(argv[argv.index("--ask-for-approval") + 1], "on-request")
+        self.assertEqual(argv.count("on-request"), 1)
+        self.assertEqual(argv.count("approvals_reviewer=auto_review"), 1)
+        self.assertEqual(argv[argv.index("approvals_reviewer=auto_review") - 1], "-c")
+        for flag in ("auto-review", "--approve-for-me", "--full-auto", "--yolo",
+                     "--dangerously-bypass-approvals-and-sandbox"):
+            self.assertNotIn(flag, argv)
+
+    def test_codex_defaults_cover_all_ticket_modes_and_chats(self):
+        other = self.make("Shared workspace")
+        tid = self.new_ticket(self.root, "Approval defaults", "--permits", "projects")
+        ticket = todo.find(todo.load_all(), tid)
+        variants = (None, {"id": "codex", "label": "Codex override"},
+                    {"id": "local-codex", "dialect": "codex", "command": "local-codex",
+                     "models": {"fast": "gpt-6-luna"}, "defaultModel": "fast",
+                     "efforts": ["high"], "defaultEffort": "high",
+                     "features": {"effort": True, "addDir": True}})
+        for row in variants:
+            with self.subTest(row=row):
+                pid = row["id"] if row else "codex"
+                if row:
+                    providers.save(row)
+                    project.reset(self.token)
+                    self.token = project.use(self.root)
+                self.assertEqual(providers.get(pid)["approvalPolicy"], "auto-review")
+                for mode in ("work", "plan", "review", "verify"):
+                    with self.subTest(mode=mode):
+                        argv = todo._launch_argv(ticket, mode=mode, provider=pid)
+                        self.assert_auto_review(argv)
+                        self.assertIn("--no-daemon", argv)
+                        self.assertEqual(argv[argv.index("--sandbox") + 1], "workspace-write")
+                        self.assertEqual(argv[argv.index("--model") + 1], "gpt-6-luna")
+                        self.assertIn("model_reasoning_effort=high", argv)
+                        dirs = [argv[i + 1] for i, a in enumerate(argv) if a == "--add-dir"]
+                        self.assertEqual(dirs, [] if mode == "review" else [str(other.resolve())])
+                        self.assertIn("TODO/.briefs/%s.md" % tid, argv[-1])
+                chat = todo.chat_argv(provider=pid)
+                self.assert_auto_review(chat)
+                self.assertIn("--no-daemon", chat)
+                self.assertEqual(chat[chat.index("--sandbox") + 1], "read-only")
+                self.assertEqual(chat[chat.index("--model") + 1], "gpt-6-luna")
+                self.assertIn("model_reasoning_effort=high", chat)
+                self.assertNotIn("--add-dir", chat)
+        self.assertEqual(providers.get("claude")["approvalPolicy"], "")
+        self.assertEqual(providers.approval_argv(providers.get("claude")), [])
 
     def test_interactive_approval_override_round_trips_through_provider_settings(self):
         tid = self.new_ticket(self.root, "Approval policy")
         ticket = todo.find(todo.load_all(), tid)
         claude = todo._launch_argv(ticket, provider="claude")
         self.assertEqual(claude[claude.index("--permission-mode") + 1], "auto")
-        for policy in ("on-request", "untrusted", "never", ""):
+        # `untrusted` checks legacy argument preservation, not installed CLI support.
+        for policy in ("auto-review", "on-request", "untrusted", "never", ""):
             with self.subTest(policy=policy):
                 result = todo_server.act_providers({"op": "save", "check": False,
                     "provider": {"id": "codex", "approvalPolicy": policy}})
                 saved = next(p for p in result["providers"] if p["id"] == "codex")
                 self.assertEqual(saved["approvalPolicy"], policy)
+                providers._CACHE.clear()
+                self.assertEqual(providers.get("codex")["approvalPolicy"], policy)
                 worker = todo._launch_argv(ticket, provider="codex")
                 chat = todo_server.act_chat({"dryRun": True})["argv"]
                 for argv in (worker, chat):
-                    if policy:
+                    if policy == "auto-review":
+                        self.assert_auto_review(argv)
+                    elif policy:
+                        self.assertEqual(argv.count("--ask-for-approval"), 1)
                         self.assertEqual(argv[argv.index("--ask-for-approval") + 1], policy)
                     else:
                         self.assertNotIn("--ask-for-approval", argv)
+                    if policy != "auto-review":
+                        self.assertNotIn("approvals_reviewer=auto_review", argv)
                 headless = providers.answer_argv(providers.get("codex"), "", "")
                 self.assertIn('approval_policy="never"', headless)
+                self.assertIn("features.shell_tool=false", headless)
+                self.assertEqual(headless[headless.index("--sandbox") + 1], "read-only")
                 self.assertNotIn("--ask-for-approval", headless)
+                self.assertNotIn("approvals_reviewer=auto_review", headless)
+                health = providers.check_argv(providers.get("codex"))
+                self.assertNotIn("--ask-for-approval", health)
+                self.assertNotIn("approvals_reviewer=auto_review", health)
                 self.assertEqual(todo._launch_argv(ticket, provider="claude"), claude)
+        result = todo_server.act_providers({"op": "remove", "id": "codex"})
+        reset = next(p for p in result["providers"] if p["id"] == "codex")
+        self.assertEqual(reset["approvalPolicy"], "auto-review")
+        self.assertFalse(reset["overridden"])
+        self.assert_auto_review(todo._launch_argv(ticket, provider="codex"))
+        self.assert_auto_review(todo.chat_argv(provider="codex"))
 
-    def test_explicit_approval_arguments_are_preserved_when_inheriting(self):
-        providers.save({"id": "codex", "args": ["--ask-for-approval", "untrusted"]})
-        argv = todo_server.act_chat({"dryRun": True})["argv"]
-        self.assertEqual(argv.count("--ask-for-approval"), 1)
-        self.assertEqual(argv[argv.index("--ask-for-approval") + 1], "untrusted")
+    def test_custom_codex_preserves_explicit_empty_policy(self):
+        providers.save({"id": "local-codex", "dialect": "codex", "command": "local-codex",
+                        "approvalPolicy": ""})
+        project.reset(self.token)
+        self.token = project.use(self.root)
+        self.assertEqual(providers.get("local-codex")["approvalPolicy"], "")
+        self.assertNotIn("--ask-for-approval", todo.chat_argv(provider="local-codex"))
+
+    def test_explicit_approval_arguments_override_the_automatic_default(self):
+        tid = self.new_ticket(self.root, "Explicit approval arguments")
+        ticket = todo.find(todo.load_all(), tid)
+        forms = [["-a", "never"], ["-anever"], ["-a=never"],
+                 ["--ask-for-approval", "untrusted"], ["--ask-for-approval=never"],
+                 ["--approve-for-me"], ["--full-auto"], ["--yolo"],
+                 ["--dangerously-bypass-approvals-and-sandbox"]]
+        for key, value in (("approval_policy", '"never"'), ("approvals_reviewer", '"user"')):
+            assignment = "%s=%s" % (key, value)
+            forms += [["-c", assignment], ["--config", assignment],
+                      ["--config=" + assignment], ["-c" + assignment],
+                      ["-c=" + assignment], ["-c", " %s = %s" % (key, value)]]
+        for args in forms:
+            for policy in (None, "auto-review", ""):
+                with self.subTest(args=args, policy=policy):
+                    row = {"id": "codex", "args": args}
+                    if policy is not None:
+                        row["approvalPolicy"] = policy
+                    for _ in range(2):
+                        saved = providers.save(row)
+                        self.assertEqual(saved["args"], args)
+                        for argv in (todo._launch_argv(ticket, provider="codex"),
+                                     todo.chat_argv(provider="codex")):
+                            self.assertEqual(argv[1:1 + len(args)], args)
+                            self.assertEqual(argv.count("--ask-for-approval"),
+                                             args.count("--ask-for-approval"))
+                            self.assertNotIn("approvals_reviewer=auto_review", argv)
+                        row = {k: saved[k] for k in providers.FIELDS if k in saved}
+
+    def test_unrelated_arguments_keep_automatic_review(self):
+        for args in (["--oss"], ["-c", "model_provider=local"],
+                     ["--config=model_provider=local"], ["-cmodel_provider=local"],
+                     ["-c=model_provider=local"],
+                     ["--config", "profiles.local.approval_policy=never"],
+                     ["-c", "note=approvals_reviewer=user"],
+                     ["-c", "--ask-for-approval"],
+                     ["--config", "approval_policy_hint=never"]):
+            with self.subTest(args=args):
+                providers.save({"id": "codex", "args": args})
+                argv = todo.chat_argv(provider="codex")
+                self.assertEqual(argv[1:1 + len(args)], args)
+                self.assert_auto_review(argv[1 + len(args):])
 
     def test_invalid_approval_settings_are_rejected(self):
-        for row in ({"id": "codex", "approvalPolicy": "typo"},
-                    {"id": "codex", "approvalPolicy": []},
-                    {"id": "claude", "approvalPolicy": "never"}):
+        rows = [{"id": "codex", "approvalPolicy": value}
+                for value in ("typo", "auto_review", [], {}, None, True, 1)]
+        rows += [{"id": "claude", "approvalPolicy": value} for value in ("never", "auto-review")]
+        rows.append({"id": "local", "command": "local-cli", "approvalPolicy": "auto-review"})
+        for row in rows:
             with self.subTest(row=row), self.assertRaisesRegex(ValueError, "approvalPolicy"):
                 providers.save(row)
 

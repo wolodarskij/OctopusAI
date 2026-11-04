@@ -20,8 +20,9 @@ THE FIELDS of a provider:
     dialect                how a launch's command line is built: `claude` or `codex` (the
                            launch of that CLI, `todo.py`), or `template` (the fields below)
     command, args          the executable; the arguments every launch and every check carries first
-    approvalPolicy        Codex interactive launches: empty inherits its config, or on-request,
-                           untrusted, never. Headless answer calls remain noninteractive.
+    approvalPolicy         Codex interactive launches: auto-review (default), empty inherits its
+                           config, or on-request, untrusted, never. Explicit approval arguments
+                           override auto-review. Headless answer calls remain noninteractive.
     prompt                 template: where the prompt goes, `["{prompt}"]`
     model, effort          template: `["--model", "{model}"]`; empty when the CLI takes none
     auto, plan             template: the permission or sandbox mode of a launch that may edit,
@@ -76,7 +77,7 @@ DEFAULT_FILE = "default-provider.json"
 OLD_FILE = "agents.json"
 OLD_KEY = "agents"
 DIALECTS = ("claude", "codex", "template")
-APPROVAL_POLICIES = ("", "on-request", "untrusted", "never")
+APPROVAL_POLICIES = ("auto-review", "", "on-request", "untrusted", "never")
 # `hooks`: the board reads its state from the hook files and its transcript; without them,
 # from its process and `report`. `remoteControl`: Claude Code's Remote Control. `planMode`: a
 # permission mode that keeps a plan from editing. `deny`: a tool denied per launch. `resume`:
@@ -124,6 +125,7 @@ BUILTIN = {
     },
     "codex": {
         "label": "OpenAI Codex", "dialect": "codex", "command": "codex",
+        "approvalPolicy": "auto-review",
         "features": _none(addDir=1, effort=1, skills=1),
         # No default model or effort: Codex takes its own, from its config.
         "models": {"codex": "gpt-6.1-sol", "gpt-6.1-sol": "gpt-6.1-sol",
@@ -299,6 +301,8 @@ def _merge(base, over):
 def _complete(pid, spec):
     """Every field present: the template's defaults under what the spec names."""
     out = _merge(_TEMPLATE, spec)
+    if out["dialect"] == "codex" and "approvalPolicy" not in spec:
+        out["approvalPolicy"] = "auto-review"
     out["id"] = pid
     out["label"] = out.get("label") or pid
     out["features"] = {f: bool((out.get("features") or {}).get(f)) for f in FEATURES}
@@ -416,7 +420,7 @@ def validate(row):
         out.append("a built-in keeps its dialect, %s" % BUILTIN[pid]["dialect"])
     policy = row.get("approvalPolicy", "")
     if policy not in APPROVAL_POLICIES:
-        out.append("`approvalPolicy` must be empty, on-request, untrusted or never")
+        out.append("`approvalPolicy` must be auto-review, empty, on-request, untrusted or never")
     elif policy and d != "codex":
         out.append("`approvalPolicy` applies only to the codex dialect")
     if not builtin and not (isinstance(row.get("command"), str) and row["command"].strip()):
@@ -523,10 +527,40 @@ def fill(args, **values):
     return out
 
 
+def _has_approval_args(args):
+    """Whether explicit Codex arguments select an approval policy or reviewer."""
+    flags = {"--ask-for-approval", "--approve-for-me", "--full-auto", "--yolo",
+             "--dangerously-bypass-approvals-and-sandbox"}
+    args = iter(args)
+    for arg in args:
+        if arg == "--":
+            break
+        if arg.partition("=")[0] in flags or arg.startswith("-a"):
+            return True
+        if arg in ("-c", "--config"):
+            assignment = next(args, "")
+        elif arg.startswith("--config="):
+            assignment = arg[len("--config="):]
+        elif arg.startswith("-c"):
+            assignment = arg[2:].removeprefix("=")
+        else:
+            continue
+        key, sep, _ = assignment.partition("=")
+        if sep and key.strip() in ("approval_policy", "approvals_reviewer"):
+            return True
+    return False
+
+
 def approval_argv(p):
-    """An optional Codex interactive override; otherwise let its config decide."""
+    """Codex interactive defaults, with explicit approval arguments taking precedence."""
     policy = p.get("approvalPolicy", "")
-    return ["--ask-for-approval", policy] if p["dialect"] == "codex" and policy else []
+    if p["dialect"] != "codex" or not policy:
+        return []
+    if policy == "auto-review":
+        if _has_approval_args(p.get("args", [])):
+            return []
+        return ["--ask-for-approval", "on-request", "-c", "approvals_reviewer=auto_review"]
+    return ["--ask-for-approval", policy]
 
 
 def template_argv(p, prompt, mode_args, model="", effort="", dirs=(), session="", root=""):

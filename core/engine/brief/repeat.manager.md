@@ -9,9 +9,11 @@ nothing to finish, nothing to hand over and nothing to verify.
 - **You belong to the Octopus AI project.** This ticket lives there, whichever
   project this session began in. The board, its watchdog and `manager` start,
   claim and restart the manager only there.
-- **Never exit this session.** The board starts this session when it opens, and
-  its watchdog checks every 30 seconds that this session's terminal still runs,
-  and starts it again when it dies.
+- **Keep this session available for the owner's input.** End your turn after
+  each answer or scheduled check. Never call sleep, poll, or create a wait loop
+  to keep the session open. Ending a turn does not close the session or terminal.
+  Never run a close command on this manager. The board's global Autostart manager
+  setting controls automatic starts and restarts.
 - **Never move this ticket.** It stays in {label:active} while you run.
   `move` refuses {label:verify}, {label:blocked} and {label:closed} for it. Only
   the owner retires it, as `{status:cancelled}` or `{status:closed by other task}`.
@@ -69,7 +71,8 @@ while any agent finished, waits or works. **It runs in every manager session:**
    --job-created`.
 5. **A manager on an AI provider with no `CronCreate`** (Codex) gets the check from the
    board's watchdog, which types it into this session every 10 minutes. Run it the
-   same way.
+   same way, then end the turn immediately. Do not schedule another timer yourself.
+   The watchdog owns the timer; the session remains open for the owner's messages.
 
 ## How the manager works
 

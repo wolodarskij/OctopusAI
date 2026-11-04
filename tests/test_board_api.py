@@ -311,6 +311,94 @@ class BoardApi(FixtureCase):
         self.assertEqual(groups["Fresh"], [self.tid])
         self.assertEqual(groups["Old"], [other])
 
+    def test_group_assignment_uses_project_defaults_and_only_ungrouped_tickets(self):
+        root = self.make("Assignments", config={
+            "provider": "codex", "providers": {
+                "codex": {"defaultModel": "gpt-6-astra", "defaultEffort": "medium"}}})
+        grouped = self.new_ticket(root, "grouped ticket")
+        loose = self.new_ticket(root, "loose ticket")
+        self.call("group", {"op": "create", "name": "Existing"}, "Assignments")
+        self.call("group", {"op": "assign", "name": "Existing", "ids": [grouped]},
+                  "Assignments")
+        gfile = root / "TODO" / ".groups.json"
+        before = gfile.read_bytes()
+        answer = json.dumps({"groups": [
+            {"name": "Unrequested", "ids": [loose]},
+            {"name": "Existing", "ids": [grouped, loose, "T9999"]}]})
+        with mock.patch.object(todo_server.providers, "answer", return_value=answer) as ask:
+            st, r = self.call("groupDraft", {
+                "mode": "assign", "scope": "ungrouped", "provider": "claude",
+                "model": "sonnet", "effort": "low"}, "Assignments")
+        self.assertEqual(st, 200, r)
+        self.assertEqual([(p["name"], p["new"], p["ids"]) for p in r["proposals"]],
+                         [("Existing", False, [loose])])
+        provider, prompt, model, effort, timeout = ask.call_args.args
+        self.assertEqual((provider["id"], model, effort, timeout),
+                         ("codex", "gpt-6-astra", "medium", 600))
+        tickets = prompt.split("THE OPEN TICKETS", 1)[1].split("Evaluate every ticket", 1)[0]
+        self.assertIn(loose, tickets)
+        self.assertNotIn(grouped, tickets)
+        self.assertEqual(gfile.read_bytes(), before)
+
+    def test_group_assignment_can_reassign_tickets_in_both_stores(self):
+        for store in ("map", "files"):
+            with self.subTest(store=store):
+                name = "Assign-" + store
+                root = self.make(name, config={"groups": {"store": store}})
+                grouped = self.new_ticket(root, "grouped ticket")
+                loose = self.new_ticket(root, "loose ticket")
+                for group in ("source", "target"):
+                    self.call("group", {"op": "create", "name": group}, name)
+                self.call("group", {"op": "assign", "name": "source", "ids": [grouped]}, name)
+                answer = json.dumps({"groups": [{"name": "target", "ids": [grouped, loose]}]})
+                with mock.patch.object(todo_server, "_ask_provider", return_value=answer):
+                    st, r = self.call("groupDraft", {"mode": "assign", "scope": "all"}, name)
+                self.assertEqual(st, 200, r)
+                self.assertEqual(r["proposals"][0]["ids"], [grouped, loose])
+                st, r = self.call("groupApply", {"proposals": r["proposals"]}, name)
+                self.assertEqual(st, 200, r)
+                self.assertEqual(r["created"], [])
+                self.assertEqual(r["placed"], {grouped: "target", loose: "target"})
+                self.assertEqual(r["snapshot"]["groups"]["source"], [])
+                self.assertCountEqual(r["snapshot"]["groups"]["target"], [grouped, loose])
+
+    def test_group_assignment_requires_a_group_valid_scope_and_candidate_tickets(self):
+        with mock.patch.object(todo_server, "_ask_provider") as ask:
+            st, r = self.call("groupDraft", {"mode": "assign"})
+            self.assertEqual(st, 400, r)
+            self.assertIn("create a group", r["error"])
+            self.call("group", {"op": "create", "name": "Existing"})
+            st, r = self.call("groupDraft", {"mode": "assign", "scope": "unknown"})
+            self.assertEqual(st, 400, r)
+            self.assertIn("unknown ticket scope", r["error"])
+            self.call("group", {"op": "assign", "name": "Existing", "ids": [self.tid]})
+            st, r = self.call("groupDraft", {"mode": "assign"})
+            self.assertEqual(st, 400, r)
+            self.assertIn("already in a group", r["error"])
+            ask.assert_not_called()
+
+    def test_group_assignment_excludes_repeatable_and_closed_tickets(self):
+        self.call("group", {"op": "create", "name": "Existing"})
+        repeat = self.new_ticket(self.root, "repeatable ticket", "--repeat", "test")
+        closed = self.new_ticket(self.root, "closed ticket")
+        rc, _out, err = self.todo(self.root, "move", closed, "Done", "--status", "cancelled")
+        self.assertEqual(rc, 0, err)
+        answer = json.dumps({"groups": [{"name": "Existing", "ids": [repeat, closed, self.tid]}]})
+        with mock.patch.object(todo_server, "_ask_provider", return_value=answer):
+            st, r = self.call("groupDraft", {"mode": "assign", "scope": "all"})
+        self.assertEqual(st, 200, r)
+        self.assertEqual(r["proposals"][0]["ids"], [self.tid])
+
+    def test_group_assignment_rejects_an_answer_with_only_new_groups(self):
+        self.call("group", {"op": "create", "name": "Existing"})
+        answer = json.dumps({"name": "Unrequested", "ids": [self.tid]})
+        with mock.patch.object(todo_server, "_ask_provider", return_value=answer):
+            st, r = self.call("groupDraft", {"mode": "assign"})
+        self.assertEqual(st, 400, r)
+        self.assertIn("no group with a known ticket", r["error"])
+        _st, snap = self.snapshot()
+        self.assertEqual(list(snap["groups"]), ["Existing"])
+
     def test_group_apply_in_the_files_store(self):
         root = self.make("Files", config={"groups": {"store": "files"}})
         tid = self.new_ticket(root, "loose one")

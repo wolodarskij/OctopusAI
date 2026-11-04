@@ -56,8 +56,27 @@ def wake_text():
     """What the watchdog types into a manager whose agent has no scheduler."""
     return ('Run the 10-minute check: python "%s" check. Print its output as it is; when it '
             'prints nothing, write nothing. Decide each notice it lists with the command it '
-            'names, and write nothing about the notices.'
+            'names, and write nothing about the notices. Then end this turn immediately. '
+            'Keep the session open for the owner. Do not call sleep, poll, close the '
+            'session, or schedule another check; the board owns the timer.'
             % (project.OCTOPUS / "octopus.py").as_posix())
+
+
+def claim_wake(key, now, interval=INTERVAL):
+    """Reserve at most one wake per interval across board processes and restarts."""
+    import sqlite3
+    path = project.home() / "manager-wakes.sqlite3"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with contextlib.closing(sqlite3.connect(str(path), timeout=1)) as db:
+        db.execute("CREATE TABLE IF NOT EXISTS wakes "
+                   "(root TEXT, session TEXT, at REAL, PRIMARY KEY(root, session))")
+        with db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT at FROM wakes WHERE root=? AND session=?", key).fetchone()
+            if row is not None and 0 <= now - row[0] < interval:
+                return False
+            db.execute("INSERT OR REPLACE INTO wakes VALUES (?, ?, ?)", (*key, now))
+            return row is not None and now >= row[0]
 
 
 # ── the follow-ups ─────────────────────────────────────────────────────────

@@ -459,7 +459,10 @@ the owner. It grants `projects`, so the session reaches every registered project
   and `watchdog` act on the manager of that project, from any project. `manager` files the
   ticket from the template when that project has none; `manager --start` also launches it
   unless it runs. A manager ticket in any other project is never started.
-- **The board starts it when it opens,** whichever project is open. One manager serves every
+- **Global settings controls Autostart manager,** enabled by default. When off, the board
+  neither starts nor restarts the manager automatically. The Manager button still starts it
+  manually, and an already-open manager remains available for input.
+- **The board starts it when it opens when autostart is enabled,** whichever project is open. One manager serves every
   project. Each manager of the Octopus AI project in InProgress whose session is not running
   starts again. With none in InProgress, the board starts the manager of the Octopus AI
   project, filed from the template when that project has none. A retired manager is never
@@ -509,6 +512,8 @@ the owner. It grants `projects`, so the session reaches every registered project
   ticket and answers no agent. A manager on an AI provider
   with no scheduler of its own (Codex) gets the check from the board's watchdog,
   which types it into the manager session every 10 minutes.
+  The manager ends each turn after its work and stays open for input. It never uses sleep
+  or a polling loop to stay available. The board shares wake timing across its processes.
 
     python .octopus/todo.py manager                    the Octopus AI project's manager ticket, from the template when there is none
     python .octopus/todo.py manager --start            start it unless it runs

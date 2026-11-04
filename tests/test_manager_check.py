@@ -214,7 +214,6 @@ class Wake(FixtureCase):
         rc, _out, err = self.todo(self.root, "move", self.mid, "InProgress",
                                   "--status", "implementing")
         self.assertEqual(rc, 0, err)
-        todo_server._WAKES.clear()
         self.tok = project.use(self.root)
         t = T.find(T.load_all(), self.mid)
         t.meta["provider"] = "codex"
@@ -230,7 +229,6 @@ class Wake(FixtureCase):
     def tearDown(self):
         for p in self.patches:
             p.stop()
-        todo_server._WAKES.clear()
         project.reset(self.tok)
         super().tearDown()
 
