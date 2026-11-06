@@ -1489,6 +1489,28 @@ async function api(path, body, proj) {
   if (!r.ok) throw new Error(j.error || r.status);
   return j;
 }
+/* A headless AI request in progress. The request carries `id` as `progress`; while it runs,
+   `show` gets the latest response the server received from the AI provider, as
+   "<provider>: <response> · <seconds> s". `stop` ends the polling before the caller writes
+   its result. */
+function watchAI(show) {
+  const id = Math.random().toString(36).slice(2) + Date.now().toString(36), t0 = Date.now();
+  let by = "", say = "", stopped = false, asking = false;
+  const draw = () => { if (!stopped) show(`${by ? by + ": " : ""}${say || "sending the request"}`
+    + ` · ${Math.round((Date.now() - t0) / 1000)} s`); };
+  const timer = setInterval(async () => {
+    if (asking) return;
+    asking = true;
+    try {
+      const r = await api("/api/progress?id=" + encodeURIComponent(id), null, null);
+      if (r.say) { say = r.say; by = r.by || by; }
+    } catch (e) { /* a server older than this page has no progress; the clock still runs */ }
+    finally { asking = false; }
+    draw();
+  }, 700);
+  draw();
+  return {id, stop: () => { stopped = true; clearInterval(timer); }};
+}
 let tt = null;
 const toast = (m, bad) => { const t = $("#toast"); t.textContent = m;
   t.className = "on" + (bad ? " bad" : ""); clearTimeout(tt);
@@ -2821,11 +2843,11 @@ async function draftTask() {
   if (drafting) return;
   drafting = true;
   $("#ndlg").classList.add("busy");
-  $("#nSay").textContent = rewrite ? "the AI is reading the ticket…" : "the AI is reading the note…";
+  const watch = watchAI(line => { $("#nSay").textContent = line; });
   try {
     const req = {text: keep.description, split: $("#nSplit").checked,
                  provider: $("#nProvider").value, model: $("#nModel").value,
-                 effort: $("#nEffort").value};
+                 effort: $("#nEffort").value, progress: watch.id};
     const instruction = rewrite ? $("#nAsk").value.trim() : "";
     if (rewrite) Object.assign(req, {ticket: keep, prior: FORM.prior || ""}, instruction ? {instruction} : {});
     const r = await api("/api/draft", req);
@@ -2859,6 +2881,7 @@ async function draftTask() {
     const say = String(e.message || e);
     $("#nSay").textContent = say + (DATA.serverStale && !say.includes(STALE) ? " · " + STALE : "");
   } finally {
+    watch.stop();
     drafting = false;
     $("#ndlg").classList.remove("busy");
   }
@@ -3356,7 +3379,8 @@ function drawNewGroup() {
   const valid = $("#ngName").value.trim() && $("#ngDescription").value.trim();
   $("#ngName").disabled = $("#ngDescription").disabled = !!busy;
   $("#ngImprove").disabled = $("#ngSave").disabled = !!busy || !valid;
-  $("#ngImprove").textContent = busy === "ai" ? "AI is improving…" : "Improve with AI";
+  $("#ngImprove").textContent = busy === "ai" ? NEWGROUP.say || "sending the request"
+    : "Improve with AI";
   $("#ngSave").textContent = busy === "save" ? "Creating…" : "Create group";
 }
 async function submitNewGroup(improve = false) {
@@ -3368,10 +3392,16 @@ async function submitNewGroup(improve = false) {
     return;
   }
   form.busy = improve ? "ai" : "save";
+  form.say = "";
   $("#ngErr").textContent = ""; drawNewGroup();
+  const watch = improve ? watchAI(line => {
+    form.say = line;
+    if (NEWGROUP === form) drawNewGroup();
+  }) : null;
   try {
     const r = await api(improve ? "/api/groupDescription" : "/api/group",
-      improve ? {name, description} : {op: "create", name, description, fromTitle: true}, form.proj);
+      improve ? {name, description, progress: watch.id}
+        : {op: "create", name, description, fromTitle: true}, form.proj);
     if (NEWGROUP !== form || PROJECT !== form.proj) return;
     if (improve) {
       $("#ngDescription").value = r.description;
@@ -3381,6 +3411,7 @@ async function submitNewGroup(improve = false) {
   } catch (e) {
     if (NEWGROUP === form && PROJECT === form.proj) $("#ngErr").textContent = String(e.message || e);
   } finally {
+    if (watch) watch.stop();
     if (NEWGROUP === form) { form.busy = ""; drawNewGroup(); }
   }
 }
@@ -3418,10 +3449,10 @@ function drawGroupSel() {
 
 /* AI groups: a headless CLI with no window proposes; the owner ticks
    what to keep; only Apply writes. One request at a time. */
-let AIBUSY = false, PROPS = null;
+let AIBUSY = false, AISAY = "", PROPS = null;
 function drawAIBusy() {
   for (const id of ["#aigroup", "#aigroups", "#evaltickets", "#egOK"]) $(id).disabled = AIBUSY;
-  $("#aigroups").textContent = AIBUSY ? "AI is grouping…" : "Generate groups with AI";
+  $("#aigroups").textContent = AIBUSY ? AISAY || "sending the request" : "Generate groups with AI";
 }
 function askTicketGroups() {
   if (AIBUSY) return toast("AI is already grouping", true);
@@ -3454,11 +3485,11 @@ function generateGroups() {
 }
 async function draftGroups(mode, text, choices) {
   if (AIBUSY) return;
-  AIBUSY = true; drawAIBusy();
+  AIBUSY = true; AISAY = ""; drawAIBusy();
   const proj = PROJECT;
-  toast(mode === "one" ? "AI is drafting the group…" : "AI is grouping… this can take minutes");
+  const watch = watchAI(line => { AISAY = line; drawAIBusy(); toast(line); });
   try {
-    const r = await api("/api/groupDraft", {mode, text, ...choices});
+    const r = await api("/api/groupDraft", {mode, text, ...choices, progress: watch.id});
     if (proj !== PROJECT)
       return toast(`the AI groups of ${proj} are dropped: the board shows another project`, true);
     // A dialog the owner has open keeps the screen; the proposal waits until it closes.
@@ -3466,7 +3497,7 @@ async function draftGroups(mode, text, choices) {
       ? setTimeout(show, 500) : showProposals(r.proposals, mode, proj);
     show();
   } catch (e) { toast(String(e.message || e), true); }
-  finally { AIBUSY = false; drawAIBusy(); }
+  finally { watch.stop(); AIBUSY = false; drawAIBusy(); }
 }
 function showProposals(props, mode, proj) {
   if (proj !== PROJECT) return;

@@ -1239,12 +1239,33 @@ def parse_drafts(text):
     return drafts
 
 
+# The latest response of each headless request that the page watches, by the id that the
+# page gave in the request's `progress`: `{"by": <provider label>, "say": <line>}`.
+PROGRESS = {}
+_PROGRESS_LOCK = threading.Lock()
+
+
 def _ask_provider(prompt, body, timeout):
-    """Use the selected provider and this project's model, effort and executable settings."""
+    """Use the selected provider and this project's model, effort and executable settings.
+    With `progress` in `body`, `PROGRESS` holds the latest response under that id until the
+    answer comes (`GET /api/progress`)."""
     pid = body.get("provider") or P.provider
     model, effort = P.choose(pid, body.get("model"), body.get("effort"))
     p = dict(providers.get(pid), command=P.providers[pid]["command"])
-    return providers.answer(p, prompt, model, effort, timeout)
+    key = body.get("progress")
+    if not (isinstance(key, str) and 0 < len(key) <= 64):
+        return providers.answer(p, prompt, model, effort, timeout)
+
+    def say(line):
+        with _PROGRESS_LOCK:
+            PROGRESS[key] = {"by": p["label"], "say": line}
+
+    say("starting")
+    try:
+        return providers.answer(p, prompt, model, effort, timeout, progress=say)
+    finally:
+        with _PROGRESS_LOCK:
+            PROGRESS.pop(key, None)
 
 
 def _group_form(body):
@@ -1272,7 +1293,7 @@ Answer with ONE JSON object and no other text: {"description": "..."}
 GROUP NAME: %s
 DESCRIPTION: %s
 """ % (P.name, name, description)
-    answer = _json_in(_ask_provider(prompt, {}, 240))
+    answer = _json_in(_ask_provider(prompt, {"progress": body.get("progress")}, 240))
     improved = answer.get("description") if isinstance(answer, dict) else None
     if not isinstance(improved, str) or not improved.strip() or len(improved.strip()) > 1000:
         raise ValueError("the AI returned no valid short description; the form is unchanged")
@@ -1485,7 +1506,8 @@ def act_groupDraft(body):
     names = (" as lowercase slugs: letters, digits and dashes" if P.groups_store == "files"
              else " as short plain words")
     prompt = GROUP_PROMPT % (P.name, "\n".join(glines), "\n".join(tlines), ask, names)
-    text = _ask_provider(prompt, {} if mode == "assign" else body, 240 if mode == "one" else 600)
+    text = _ask_provider(prompt, {"progress": body.get("progress")} if mode == "assign" else body,
+                         240 if mode == "one" else 600)
     proposals = parse_group_drafts(text, [t.id for t in candidates], set(members),
                                    existing_only=mode == "assign")
     return {"proposals": proposals[:1] if mode == "one" else proposals, "noSnapshot": True}
@@ -2366,6 +2388,10 @@ class Handler(BaseHTTPRequestHandler):
                                     "defaultSetup": providers.default_state()})
         if path == "/api/providers":
             return self._send(200, providers.view())
+        if path == "/api/progress":
+            with _PROGRESS_LOCK:
+                seen = dict(PROGRESS.get((self._query().get("id") or [""])[0]) or {})
+            return self._send(200, seen)
         try:
             tok = self._enter(name)
         except KeyError as exc:

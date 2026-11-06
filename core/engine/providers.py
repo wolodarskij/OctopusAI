@@ -66,6 +66,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -617,8 +618,13 @@ def check_argv(p, prompt=CHECK_PROMPT, model_key=None):
     return argv + fill(p["check"], prompt=prompt, model=model, effort=effort)
 
 
-def answer_argv(p, model="", effort="", output=""):
-    """A bounded stdin-to-answer call. Codex drafting uses an isolated read-only workspace."""
+# Claude Code's arguments for an answer that reports each response while it runs.
+STREAM_ARGS = ["--output-format", "stream-json", "--verbose", "--include-partial-messages"]
+
+
+def answer_argv(p, model="", effort="", output="", stream=False):
+    """A bounded stdin-to-answer call. Codex drafting uses an isolated read-only workspace.
+    With `stream`, Claude Code writes its responses as JSON lines (`STREAM_ARGS`)."""
     argv = [launch_command(p["command"])] + fill(p["args"], model=model, effort=effort)
     if p["dialect"] == "codex":
         argv += ["exec", "--sandbox", "read-only", "--skip-git-repo-check", "--ephemeral",
@@ -638,13 +644,110 @@ def answer_argv(p, model="", effort="", output=""):
             argv += ["--model", model]
         if effort:
             argv += ["--effort", effort]
-        return argv
+        return argv + (STREAM_ARGS if stream else [])
     raise ValueError("%s does not support headless answers; choose Claude Code or Codex"
                      % p["label"])
 
 
-def answer(p, prompt, model="", effort="", timeout=240):
-    """Return only a successful final answer; neither provider receives the project tree."""
+def describe_event(e, seen):
+    """The line that one event of Claude Code's `stream-json` output shows, or None for an
+    event that says nothing to the owner (a hook, a block end). `seen` holds the characters
+    of thinking and of answer text received so far, across the events of one answer."""
+    kind = e.get("type")
+    if kind == "system":
+        sub = str(e.get("subtype") or "")
+        if sub == "init":
+            return "started on %s" % (e.get("model") or "its default model")
+        if sub == "status":
+            status = e.get("status")
+            return "sent the request" if status == "requesting" else (
+                str(status).replace("_", " ") if status else None)
+        if not sub or sub.startswith("hook_"):
+            return None
+        attempt = e.get("attempt")
+        return sub.replace("_", " ") + (" · attempt %s" % attempt if attempt else "")
+    if kind == "stream_event":
+        ev = e.get("event") or {}
+        if ev.get("type") == "content_block_start":
+            block = (ev.get("content_block") or {}).get("type")
+            return {"thinking": "thinking", "redacted_thinking": "thinking",
+                    "text": "writing the answer"}.get(block)
+        if ev.get("type") == "content_block_delta":
+            d = ev.get("delta") or {}
+            part = {"text_delta": "text", "thinking_delta": "thinking"}.get(d.get("type"))
+            if not part:
+                return None
+            seen[part] = seen.get(part, 0) + len(d.get(part) or "")
+            return "%s · %d characters" % (
+                "writing the answer" if part == "text" else "thinking", seen[part])
+        return None
+    if kind == "rate_limit_event":
+        info = e.get("rate_limit_info") or {}
+        status = info.get("status")
+        if not status or status == "allowed":
+            return None
+        at = info.get("resetsAt")
+        return "rate limit: %s" % str(status).replace("_", " ") + (
+            ", resets at %s" % time.strftime("%H:%M", time.localtime(at))
+            if isinstance(at, (int, float)) else "")
+    if kind == "result":
+        return "failed" if e.get("is_error") else "answer received"
+    return None
+
+
+def _streamed(p, argv, prompt, work, env, timeout, progress):
+    """Run a `stream` answer call; give `progress` the line of each event that has one
+    (`describe_event`). Returns `(the result event or None, the exit code, stderr)`."""
+    proc = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, cwd=work, env=env, text=True,
+                            encoding="utf-8", errors="replace",
+                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    err, late = [], []
+
+    def feed():
+        try:
+            proc.stdin.write(prompt)
+            proc.stdin.close()
+        except OSError:
+            pass
+
+    def drain():
+        err.append(proc.stderr.read())
+
+    def kill():
+        late.append(True)
+        proc.kill()
+
+    readers = [threading.Thread(target=job, daemon=True) for job in (feed, drain)]
+    for r in readers:
+        r.start()
+    timer = threading.Timer(timeout, kill)
+    timer.start()
+    result, seen = None, {}
+    with proc:
+        for line in proc.stdout:
+            try:
+                e = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(e, dict):
+                continue
+            if e.get("type") == "result":
+                result = e
+            say = describe_event(e, seen)
+            if say:
+                progress(say)
+        readers[1].join(timeout)
+    timer.cancel()
+    if late:
+        raise ValueError("%s did not answer in %d seconds" % (p["label"], timeout))
+    return result, proc.returncode, "".join(err)
+
+
+def answer(p, prompt, model="", effort="", timeout=240, progress=None):
+    """Return only a successful final answer; neither provider receives the project tree.
+    `progress`, a function of one line, gets each response of a Claude Code answer while it
+    runs, and one line for a provider that reports none before its answer."""
     env = dict(os.environ, **p["env"])
     env.pop("CLAUDECODE", None)
     key = p.get("keyEnv")
@@ -652,6 +755,28 @@ def answer(p, prompt, model="", effort="", timeout=240):
         raise ValueError("%s is unset" % key)
     with tempfile.TemporaryDirectory(prefix="octopus-answer-") as work:
         output = Path(work) / "answer.txt"
+        if progress and p["dialect"] == "claude":
+            try:
+                result, code, err = _streamed(p, answer_argv(p, model, effort, stream=True),
+                                              prompt, work, env, timeout, progress)
+            except OSError as exc:
+                raise ValueError("%s did not start: %s. Set its executable path in Global "
+                                 "settings." % (p["label"], exc))
+            if result is not None and result.get("is_error"):
+                raise ValueError("%s failed: %s" % (p["label"], _tail(str(
+                    result.get("result") or result.get("subtype") or "no diagnostic"))))
+            if result is not None and not code:
+                text = str(result.get("result") or "").strip()
+                if not text:
+                    raise ValueError("%s returned no answer" % p["label"])
+                return text
+            if "unknown option" not in err:
+                raise ValueError("%s failed (exit %s): %s" % (
+                    p["label"], code, _tail(err or "no diagnostic")))
+            # A Claude Code without STREAM_ARGS answers once, with no responses before it.
+            progress("waiting for the answer")
+        elif progress:
+            progress("waiting for the answer; %s reports nothing before it" % p["label"])
         argv = answer_argv(p, model, effort, str(output))
         try:
             r = subprocess.run(argv, input=prompt, cwd=work, env=env, capture_output=True,
