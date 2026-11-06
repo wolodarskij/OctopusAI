@@ -1958,7 +1958,10 @@ def act_vcs(body):
                     raise _vcs.NeedsConfirm("%s already holds a %s repository"
                                             % (root, found), ["git", "init"])
                 _enable_git(root, body, log)
-                steps = _vcs.Git(root).init(project.load(root).RULES["gitignore"],
+                import admin
+                # The files that name a directory of this machine stay out of the first commit.
+                machine = ["/" + p for p in admin.machine_files(root)]
+                steps = _vcs.Git(root).init(list(project.load(root).RULES["gitignore"]) + machine,
                                             confirm=True)
             elif found != "git":
                 raise ValueError("%s is not a git repository: create one first" % root)

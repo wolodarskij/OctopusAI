@@ -14,7 +14,7 @@ from support import admin, project, quiet
 
 
 def hook_lines(root):
-    d = json.loads((root / ".claude" / "settings.json").read_text(encoding="utf-8"))
+    d = json.loads((root / ".claude" / "settings.local.json").read_text(encoding="utf-8"))
     return [h["command"] for groups in d["hooks"].values() for g in groups for h in g["hooks"]]
 
 
@@ -70,7 +70,7 @@ class RelocateProject(support.FixtureCase):
         (self.root / "CLAUDE.md").write_text("run %s/octopus.py todo\n" % admin.OCTOPUS.as_posix(),
                                              encoding="utf-8")
         changed = admin.relocate_project(self.root, admin.OCTOPUS, self.away, out=quiet)
-        self.assertIn(".claude/settings.json", changed)
+        self.assertIn(".claude/settings.local.json", changed)
         self.assertIn(".octopus/todo.py", changed)
         self.assertIn("CLAUDE.md", changed)
         self.assertEqual(names(self.root, admin.OCTOPUS), [])
@@ -89,7 +89,7 @@ class RelocateProject(support.FixtureCase):
 
     def test_uninstall_after_a_move_takes_the_moved_line(self):
         admin.relocate_project(self.root, admin.OCTOPUS, self.away, out=quiet)
-        sp = self.root / ".claude" / "settings.json"
+        sp = self.root / ".claude" / "settings.local.json"
         d = json.loads(sp.read_text(encoding="utf-8"))
         d["model"] = "x"                     # an edit, so uninstall cannot restore the bytes
         sp.write_text(json.dumps(d), encoding="utf-8")

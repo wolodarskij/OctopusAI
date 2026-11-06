@@ -4,6 +4,8 @@
     backend(root, kind)  `Git` for "git", else `NoVcs`. Without a kind, `detect` picks it
     commit_of(root, kind, tid)
                          the newest commit of ticket `tid`, and whether it reached the server
+    ignore(root, kind, paths)
+                         put root-relative paths on the ignore list of the VCS `kind`
 
 EVERY METHOD RETURNS A LIST OF `Step(argv, rc, out)`, one per command it ran, in order. A
 method that runs several commands stops at the first that fails, so the last step says why.
@@ -198,9 +200,9 @@ def commit_of(root, kind, tid):
     return "%s %s" % (found[0], "pushed" if found[1] else "not pushed")
 
 
-def merge_gitignore(path, lines):
-    """Append to the `.gitignore` at `path` every line of `lines` it lacks. True when it
-    wrote."""
+def merge_gitignore(path, lines, header=GITIGNORE_HEADER):
+    """Append to the `.gitignore` at `path` every line of `lines` it lacks, under `header`
+    when the file lacks it and `header` is not empty. True when it wrote."""
     path = Path(path)
     try:
         with io.open(path, "r", encoding="utf-8") as fh:
@@ -215,12 +217,117 @@ def merge_gitignore(path, lines):
         text += "\n"
     if text:
         text += "\n"
-    if GITIGNORE_HEADER not in have:
-        text += GITIGNORE_HEADER + "\n"
+    if header and header not in have:
+        text += header + "\n"
     text += "\n".join(new) + "\n"
     with io.open(path, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(text)
     return True
+
+
+# The ignore file each kind reads at the root, and how a root-relative path is written in it.
+# Diversion reads `.dvignore` with the rules of `.gitignore`; a leading `/` anchors a rule to
+# the file's directory in `.p4ignore` and Plastic's `ignore.conf`.
+IGNORE_FILES = {"git": ".gitignore", "diversion": ".dvignore", "plastic": "ignore.conf",
+                "mercurial": ".hgignore"}
+P4IGNORE_NAMES = (".p4ignore", "p4ignore.txt")
+P4CONFIG_NAMES = (".p4config", "p4config.txt")
+
+
+def _anchored(path):
+    return "/" + path
+
+
+def _hg_rule(path):
+    return "re:^%s$" % re.escape(path)
+
+
+def _write_step(path, lines, header=GITIGNORE_HEADER):
+    """Merge `lines` into the ignore file at `path`. One `Step`."""
+    try:
+        merge_gitignore(path, lines, header)
+    except OSError as exc:
+        return Step(["write", str(path)], 1, str(exc))
+    return Step(["write", str(path)], 0, "")
+
+
+def _ignore_git(root, paths):
+    st = _git(root, "check-ignore", "--no-index", "--", *paths)
+    done = {ln.strip() for ln in st.out.splitlines()} if st.rc == 0 else set()
+    rest = [p for p in paths if p not in done]
+    return [_write_step(root / ".gitignore", [_anchored(p) for p in rest])] if rest else []
+
+
+def _ignore_perforce(root, paths):
+    """Write the rules into the P4IGNORE file. When p4 names none, a P4CONFIG file at the root
+    gets `P4IGNORE=.p4ignore`, so the workspace reads the file."""
+    st = _run("p4", root, "set", "-q", "P4IGNORE")
+    named = ""
+    for ln in _lines(st):
+        if ln.startswith("P4IGNORE="):
+            named = ln.split("=", 1)[1].split(" (", 1)[0].strip()
+    steps = []
+    if named:
+        name = re.split(r"[;,]", named)[0].strip()
+    else:
+        name = next((n for n in P4IGNORE_NAMES if (root / n).is_file()), P4IGNORE_NAMES[0])
+        cfg = next((root / n for n in P4CONFIG_NAMES if (root / n).is_file()), None)
+        if cfg is None:
+            return [Step(["p4", "set", "-q", "P4IGNORE"], 1,
+                         "P4IGNORE is not set and the root holds no P4CONFIG file, so p4 "
+                         "reads no ignore file")]
+        steps.append(_write_step(cfg, ["P4IGNORE=%s" % name], header=""))
+        if steps[-1].rc != 0:
+            return steps
+    target = Path(name) if Path(name).is_absolute() else root / name
+    steps.append(_write_step(target, [_anchored(p) for p in paths]))
+    return steps
+
+
+def _svn_ignore(root, paths):
+    """Add each file's name to the `svn:ignore` property of its directory, and put an
+    unversioned directory under version control first, with no content."""
+    steps = []
+    by_dir = {}
+    for p in paths:
+        d, _, name = p.rpartition("/")
+        by_dir.setdefault(d or ".", []).append(name)
+    for d, names in sorted(by_dir.items()):
+        if d != "." and _run("svn", root, "info", "--show-item", "kind", d).rc != 0:
+            steps.append(_run("svn", root, "add", "--depth=empty", "--parents", d))
+            if steps[-1].rc != 0:
+                return steps
+        st = _run("svn", root, "propget", "svn:ignore", d)
+        have = [ln.strip() for ln in st.out.splitlines() if ln.strip()] if st.rc == 0 else []
+        new = [n for n in names if n not in have]
+        if not new:
+            continue
+        steps.append(_run("svn", root, "propset", "svn:ignore", "\n".join(have + new), d))
+        if steps[-1].rc != 0:
+            return steps
+    return steps
+
+
+def ignore(root, kind, paths):
+    """Put the root-relative `paths` on the ignore list of the VCS `kind`: git `.gitignore`
+    (a path git already ignores is left out), Diversion `.dvignore`, Plastic `ignore.conf`,
+    Mercurial `.hgignore`, Perforce the P4IGNORE file, svn the `svn:ignore` property of each
+    file's directory. A list of `Step`; empty for no kind, for `none` and for no paths. An
+    ignore list does not remove a file that the VCS tracks already."""
+    root = Path(root)
+    paths = [str(p).replace("\\", "/").strip("/") for p in paths if str(p).strip("/")]
+    if not paths or kind in (None, "none"):
+        return []
+    if kind == "git":
+        return _ignore_git(root, paths)
+    if kind == "perforce":
+        return _ignore_perforce(root, paths)
+    if kind == "svn":
+        return _svn_ignore(root, paths)
+    if kind in IGNORE_FILES:
+        rule = _hg_rule if kind == "mercurial" else _anchored
+        return [_write_step(root / IGNORE_FILES[kind], [rule(p) for p in paths])]
+    return [Step(["ignore", kind], 1, "%s is not a VCS Octopus AI knows" % kind)]
 
 
 class NoVcs:

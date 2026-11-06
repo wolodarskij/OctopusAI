@@ -154,6 +154,28 @@ whose `vcs` names one of these packs while the pack is absent. Turn one on with
 | `mercurial` | `.hg` | `hg-commit`, `hg-sync`, `hg-branch` | work: `hg-commit`; verify: `hg-commit`, `hg-sync` | `hg commit <file>... -m "<id>: <title>"` | `hg pull`, a merge of a new head, then `hg push` |
 | `plastic` | `.plastic` | `cm-checkin`, `cm-sync`, `cm-branch` | verify: `cm-checkin` | checks out its files and writes them under `## Files` on the ticket | `cm checkin <file>... -c="<id>: <title>"` |
 
+## The files that name a directory of this machine
+
+No VCS tracks the files of a project that name a directory of this machine for Octopus AI
+(`machine_files` in `core/engine/admin.py`): `.octopus/todo.py`, `.octopus/installed.json`,
+`.claude/settings.local.json` (the hook lines of every project but the checkout),
+`.codex/hooks.json`, `.aitools/todo.py`, `.aitools/installed.json`, and every installed file
+whose text names the checkout. `install` and `refresh` put them on the ignore list of the VCS
+that `vcs` names, else of the VCS whose marker is in the root (`ignore` in
+`core/engine/vcs.py`):
+
+| VCS | Ignore list |
+|---|---|
+| git | `.gitignore`, `/<path>`, unless git ignores the path already |
+| Diversion | `.dvignore`, `/<path>` |
+| Perforce | the file P4IGNORE names, else `.p4ignore` or `p4ignore.txt`, `/<path>`; a P4CONFIG file at the root gets `P4IGNORE=<file>` when P4IGNORE is not set |
+| svn | the `svn:ignore` property of each file's directory |
+| Mercurial | `.hgignore`, `re:^<path>$` |
+| Plastic | `ignore.conf`, `/<path>` |
+
+The install record keeps the kind and the list in `ignored`. An ignore list does not remove a
+file that the VCS tracks already.
+
 The manager's update finds the commit of a ticket by the message that starts with `<id>:`
 (`commit_of` in `core/engine/vcs.py`). A pending Perforce or svn changelist is `not pushed`; a
 Mercurial commit is `pushed` when its phase is public.

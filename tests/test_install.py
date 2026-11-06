@@ -51,8 +51,11 @@ class Install(FixtureCase):
         admin.install(root, "unreal-angelscript", "Keep", out=quiet)
         self.assertNotEqual(tree_hash(root), before)
         settings = json.loads((root / ".claude" / "settings.json").read_text(encoding="utf-8"))
-        self.assertIn("SessionStart", settings["hooks"])
-        hooks = {ev: g[0] for ev, g in settings["hooks"].items()}
+        # The hook lines name the checkout, so they stay out of the shared settings.
+        self.assertNotIn("hooks", settings)
+        local = json.loads((root / ".claude" / "settings.local.json").read_text(encoding="utf-8"))
+        self.assertIn("SessionStart", local["hooks"])
+        hooks = {ev: g[0] for ev, g in local["hooks"].items()}
         self.assertEqual(hooks["PreToolUse"]["matcher"], "AskUserQuestion|ExitPlanMode")
         self.assertIn("permission_prompt", hooks["Notification"]["matcher"])
         self.assertNotIn("matcher", hooks["PostToolUse"])
