@@ -794,6 +794,11 @@ class Project:
             self.problems.append("%s/%s: `vcs` is %r; one of %s"
                                  % (self.config_dir, PROJECT_FILE, self.vcs, ", ".join(_vcs.KINDS)))
             self.vcs = "none"
+        pack = _vcs.PACKS.get(self.vcs)
+        if self.vcs != "git" and pack and pack not in rules["rulesets"]:
+            self.problems.append("%s/%s: `vcs` is %s, but the %s pack is not installed: "
+                                 "octopus packs <project> add %s"
+                                 % (self.config_dir, PROJECT_FILE, self.vcs, pack, pack))
         self.vcs_pull = cfg.get("vcsPull") or _vcs.DEFAULT_PULL
         if self.vcs_pull not in _vcs.PULL_ARGS:
             self.problems.append("%s/%s: `vcsPull` is %r; one of %s"

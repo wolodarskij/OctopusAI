@@ -142,17 +142,10 @@ def _last_result(T, sid):
 
 
 def commit_of(root, tid, kind):
-    """`<hash> pushed`, `<hash> not pushed` or `no commit` for the newest commit of ticket
-    `tid` in a git project; "" in a project without git."""
-    if kind != "git" or not tid:
-        return ""
+    """`<ref> pushed`, `<ref> not pushed` or `no commit` for the newest commit of ticket
+    `tid`; "" in a project without a VCS."""
     import vcs
-    st = vcs._git(root, "log", "-1", "--format=%h", "--grep", "^%s:" % tid, timeout=30)
-    h = st.out.strip().splitlines()[0].strip() if st.rc == 0 and st.out.strip() else ""
-    if not h:
-        return "no commit"
-    st = vcs._git(root, "branch", "-r", "--contains", h, timeout=30)
-    return "%s %s" % (h, "pushed" if st.rc == 0 and st.out.strip() else "not pushed")
+    return vcs.commit_of(root, kind, tid)
 
 
 def _words(text, n):

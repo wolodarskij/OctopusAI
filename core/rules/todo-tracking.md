@@ -391,10 +391,14 @@ holds.** The brief sections `vcs.work` and `vcs.verify` give the exact steps.
   pushes nothing.
 - **No session commits a change of another ticket or of the owner,** and never a change of a
   ticket the owner keeps in Blocked.
-- **A project with `vcs: none`, or with no `vcs`, commits nothing.** A Diversion project has no
-  backend yet, so it commits nothing.
+- **A project with `vcs: none`, or with no `vcs`, commits nothing.**
 - **With the `git` pack,** a `work` launch holds `git-commit`, and a `verify` launch holds
   `git-commit` and `git-sync`, whatever the ticket says (`modePermits`).
+- **Another VCS has its own pack:** `perforce`, `diversion`, `svn`, `mercurial` or `plastic`.
+  The project lists the pack and sets `vcs` to the same name. The pack's brief sections
+  `vcs.<kind>.<mode>` give the steps of each mode. A work session never sends work to the
+  server. A verify session sends it when the measurement holds. `check` fails a `vcs` whose
+  pack is absent.
 
 ## A repeatable ticket returns to Pipeline
 

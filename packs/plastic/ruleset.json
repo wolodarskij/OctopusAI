@@ -1,0 +1,81 @@
+{
+  "title": "Unity Version Control (Plastic SCM): the cm-checkin, cm-sync and cm-branch permits, the cm commands no session runs, and the checkin policy of each launch mode",
+  "detect": [".plastic"],
+  "modePermits": {
+    "verify": ["cm-checkin"]
+  },
+  "permits": {
+    "cm-checkin": {
+      "grants": "send work to the repository: checkin and label",
+      "deny": [
+        "Bash(cm checkin:*)",
+        "Bash(cm ci:*)",
+        "Bash(cm partial checkin:*)",
+        "Bash(cm partial ci:*)",
+        "Bash(cm label:*)"
+      ]
+    },
+    "cm-sync": {
+      "grants": "get the changes of others, and exchange branches with another repository: update, push, pull and replicate",
+      "deny": [
+        "Bash(cm update:*)",
+        "Bash(cm partial update:*)",
+        "Bash(cm push:*)",
+        "Bash(cm pull:*)",
+        "Bash(cm replicate:*)"
+      ]
+    },
+    "cm-branch": {
+      "grants": "change branches: switch, branch and merge",
+      "deny": [
+        "Bash(cm switch:*)",
+        "Bash(cm partial switch:*)",
+        "Bash(cm branch:*)",
+        "Bash(cm br:*)",
+        "Bash(cm merge:*)"
+      ]
+    }
+  },
+  "deny": [
+    {
+      "tools": [
+        "Bash(cm undo:*)",
+        "Bash(cm partial undo:*)",
+        "Bash(cm undocheckout:*)",
+        "Bash(cm unco:*)",
+        "Bash(cm checkin)",
+        "Bash(cm ci)",
+        "Bash(cm checkin -c*)",
+        "Bash(cm ci -c*)",
+        "Bash(cm checkin --all*)",
+        "Bash(cm ci --all*)",
+        "Bash(cm checkin -a:*)",
+        "Bash(cm ci -a:*)",
+        "Bash(cm checkin * --all*)",
+        "Bash(cm ci * --all*)",
+        "Bash(cm update --override*)",
+        "Bash(cm update * --override*)",
+        "Bash(cm update --forced*)",
+        "Bash(cm update * --forced*)",
+        "Bash(cm branch delete:*)",
+        "Bash(cm branch rm:*)",
+        "Bash(cm br delete:*)",
+        "Bash(cm br rm:*)"
+      ],
+      "unless": []
+    }
+  ],
+  "brief": [
+    "vcs.plastic.work",
+    "vcs.plastic.verify",
+    "vcs.plastic.plan",
+    "vcs.plastic.review",
+    "vcs.plastic.manager"
+  ],
+  "payload": [
+    {
+      "from": "rules/",
+      "to": ".agents/rules/octopus/plastic/"
+    }
+  ]
+}

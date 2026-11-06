@@ -1,0 +1,72 @@
+{
+  "title": "Subversion: the svn-commit, svn-sync and svn-branch permits, the svn commands no session runs, and the changelist policy of each launch mode",
+  "detect": [".svn"],
+  "modePermits": {
+    "verify": ["svn-commit", "svn-sync"]
+  },
+  "permits": {
+    "svn-commit": {
+      "grants": "send work to the server: commit, import, lock and unlock",
+      "deny": [
+        "Bash(svn commit:*)",
+        "Bash(svn ci:*)",
+        "Bash(svn import:*)",
+        "Bash(svn lock:*)",
+        "Bash(svn unlock:*)"
+      ]
+    },
+    "svn-sync": {
+      "grants": "get the changes of others from the server: update and resolve",
+      "deny": [
+        "Bash(svn update:*)",
+        "Bash(svn up:*)",
+        "Bash(svn resolve:*)",
+        "Bash(svn relocate:*)"
+      ]
+    },
+    "svn-branch": {
+      "grants": "change branches: switch and merge",
+      "deny": [
+        "Bash(svn switch:*)",
+        "Bash(svn sw:*)",
+        "Bash(svn merge:*)"
+      ]
+    }
+  },
+  "deny": [
+    {
+      "tools": [
+        "Bash(svn revert:*)",
+        "Bash(svn cleanup --remove-unversioned*)",
+        "Bash(svn cleanup --remove-ignored*)",
+        "Bash(svn cleanup * --remove-*)",
+        "Bash(svn delete --force:*)",
+        "Bash(svn delete * --force*)",
+        "Bash(svn rm --force:*)",
+        "Bash(svn rm * --force*)",
+        "Bash(svn commit)",
+        "Bash(svn ci)",
+        "Bash(svn commit -m*)",
+        "Bash(svn ci -m*)",
+        "Bash(svn commit .*)",
+        "Bash(svn ci .*)",
+        "Bash(svn update --force*)",
+        "Bash(svn up --force*)"
+      ],
+      "unless": []
+    }
+  ],
+  "brief": [
+    "vcs.svn.work",
+    "vcs.svn.verify",
+    "vcs.svn.plan",
+    "vcs.svn.review",
+    "vcs.svn.manager"
+  ],
+  "payload": [
+    {
+      "from": "rules/",
+      "to": ".agents/rules/octopus/svn/"
+    }
+  ]
+}

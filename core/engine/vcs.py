@@ -1,8 +1,9 @@
 """vcs.py - the version control of a project: one interface, a git backend, and nothing else.
 
-    detect(root)         "git" when the root holds `.git`, "diversion" when it holds
-                         `.diversion`, else None
+    detect(root)         the kind whose marker sits in the root (`MARKERS`), else None
     backend(root, kind)  `Git` for "git", else `NoVcs`. Without a kind, `detect` picks it
+    commit_of(root, kind, tid)
+                         the newest commit of ticket `tid`, and whether it reached the server
 
 EVERY METHOD RETURNS A LIST OF `Step(argv, rc, out)`, one per command it ran, in order. A
 method that runs several commands stops at the first that fails, so the last step says why.
@@ -15,20 +16,27 @@ deleting a branch that is not merged, and `init` on a project that already has a
 CREDENTIALS stay in git's own credential manager. Octopus AI stores none, and git never prompts on
 a terminal: `GIT_TERMINAL_PROMPT=0`, and stdin is empty.
 
-The project chooses its VCS in `.octopus/project.json`: `vcs` is `git` or `none` (absent means
+The project chooses its VCS in `.octopus/project.json`: `vcs` is one of `KINDS` (absent means
 none), and `vcsPull` is how `sync` pulls (`PULL_ARGS`). A project with no VCS works as before.
+Each kind but `none` has a pack (`PACKS`). The pack of git, perforce, diversion, svn, mercurial
+or plastic supplies the rule, the permits and the brief sections of that kind.
 """
 
 from __future__ import annotations
 
 import io
 import os
+import re
 import subprocess
 from collections import namedtuple
 from pathlib import Path
 
-KINDS = ("git", "none")
-MARKERS = (("git", ".git"), ("diversion", ".diversion"))
+KINDS = ("git", "perforce", "diversion", "svn", "mercurial", "plastic", "none")
+PACKS = {"git": "git", "perforce": "perforce", "diversion": "diversion", "svn": "svn",
+         "mercurial": "mercurial", "plastic": "plastic"}
+MARKERS = (("git", ".git"), ("diversion", ".diversion"), ("svn", ".svn"), ("mercurial", ".hg"),
+           ("plastic", ".plastic"), ("perforce", ".p4config"), ("perforce", "p4config.txt"))
+COMMIT_TIMEOUT = 30
 PULL_ARGS = {
     "rebase": ["--rebase", "--autostash"],
     "merge": ["--no-rebase"],
@@ -73,21 +81,121 @@ def backend(root, kind=None):
     return Git(root) if kind == "git" else NoVcs(root)
 
 
-def _git(root, *args, timeout=TIMEOUT):
-    """Run `git <args>` in the root with no console window and no prompt. One `Step`."""
-    argv = ["git"] + [str(a) for a in args]
-    env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
+def _run(tool, root, *args, timeout=TIMEOUT):
+    """Run `<tool> <args>` in the root with no console window and no prompt. One `Step`."""
+    argv = [tool] + [str(a) for a in args]
+    env = dict(os.environ, GIT_TERMINAL_PROMPT="0", HGPLAIN="1")
     try:
         r = subprocess.run(argv, capture_output=True, text=True, timeout=timeout,
                            cwd=str(root), encoding="utf-8", errors="replace", env=env,
                            stdin=subprocess.DEVNULL,
                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     except FileNotFoundError:
-        return Step(argv, 127, "git is not on the PATH")
+        return Step(argv, 127, "%s is not on the PATH" % tool)
     except subprocess.TimeoutExpired:
-        return Step(argv, 124, "git did not finish in %d seconds" % timeout)
+        return Step(argv, 124, "%s did not finish in %d seconds" % (tool, timeout))
     out = "\n".join(s.strip() for s in (r.stdout, r.stderr) if s and s.strip())
     return Step(argv, r.returncode, out)
+
+
+def _git(root, *args, timeout=TIMEOUT):
+    """Run `git <args>` in the root. One `Step`."""
+    return _run("git", root, *args, timeout=timeout)
+
+
+def _lines(step):
+    return step.out.splitlines() if step.rc == 0 and step.out else []
+
+
+def _commit_git(root, tid):
+    st = _git(root, "log", "-1", "--format=%h", "--grep", "^%s:" % tid, timeout=COMMIT_TIMEOUT)
+    h = (_lines(st) or [""])[0].strip()
+    if not h:
+        return None
+    st = _git(root, "branch", "-r", "--contains", h, timeout=COMMIT_TIMEOUT)
+    return h, bool(st.rc == 0 and st.out.strip())
+
+
+def _commit_mercurial(root, tid):
+    st = _run("hg", root, "log", "-r", "last(grep(r'^%s:'))" % re.escape(tid),
+              "-T", "{node|short} {phase}\n", timeout=COMMIT_TIMEOUT)
+    for ln in _lines(st):
+        parts = ln.split()
+        if len(parts) == 2:
+            return parts[0], parts[1] == "public"
+    return None
+
+
+def _commit_svn(root, tid):
+    st = _run("svn", root, "log", "-l", "1", "-q", "--search", "%s:" % tid,
+              timeout=COMMIT_TIMEOUT)
+    for ln in _lines(st):
+        m = re.match(r"(r\d+) \|", ln)
+        if m:
+            return m.group(1), True
+    st = _run("svn", root, "status", "-q", "--changelist", tid, timeout=COMMIT_TIMEOUT)
+    if any(ln.strip() and not ln.startswith("---") for ln in _lines(st)):
+        return "changelist %s" % tid, False
+    return None
+
+
+def _commit_perforce(root, tid):
+    st = _run("p4", root, "-F", "%clientName%", "info", timeout=COMMIT_TIMEOUT)
+    client = (_lines(st) or [""])[0].strip()
+    if not client:
+        return None
+    st = _run("p4", root, "-ztag", "changes", "-l", "-m", "200", "-c", client,
+              timeout=COMMIT_TIMEOUT)
+    rec = {}
+    for ln in _lines(st) + ["... change "]:
+        if ln.startswith("... change "):
+            if rec.get("desc", "").startswith("%s:" % tid):
+                return "change %s" % rec.get("change", "?"), rec.get("status") == "submitted"
+            rec = {"change": ln[len("... change "):].strip()}
+        elif ln.startswith("... status "):
+            rec["status"] = ln[len("... status "):].strip()
+        elif ln.startswith("... desc "):
+            rec["desc"] = ln[len("... desc "):].strip()
+    return None
+
+
+def _commit_diversion(root, tid):
+    st = _run("dv", root, "log", "-n", "200", "--oneline", timeout=COMMIT_TIMEOUT)
+    for ln in _lines(st):
+        if "%s:" % tid in ln:
+            m = re.search(r"dv\.commit\.\d+", ln)
+            return (m.group(0) if m else "a commit"), True
+    return None
+
+
+def _commit_plastic(root, tid):
+    st = _run("cm", root, "find", "changeset",
+              "where comment like '%s:%%' order by date desc limit 1" % tid,
+              "--format={changesetid}", "--nototal", timeout=COMMIT_TIMEOUT)
+    for ln in _lines(st):
+        if ln.strip().isdigit():
+            return "cs:%s" % ln.strip(), True
+    return None
+
+
+_COMMIT_OF = {"git": _commit_git, "mercurial": _commit_mercurial, "svn": _commit_svn,
+              "perforce": _commit_perforce, "diversion": _commit_diversion,
+              "plastic": _commit_plastic}
+
+
+def commit_of(root, kind, tid):
+    """`<ref> pushed`, `<ref> not pushed` or `no commit` for the newest commit of ticket `tid`,
+    the one whose message starts with `<tid>:`; "" in a project with no VCS. A pending
+    Perforce or svn changelist is `not pushed`. A commit of svn, Perforce, Diversion or
+    Plastic is on the server, so it is `pushed`. A Mercurial commit is pushed when its phase
+    is public."""
+    fn = _COMMIT_OF.get(kind)
+    if fn is None or not tid:
+        return ""
+    found = fn(root, tid)
+    if not found:
+        return "no commit"
+    return "%s %s" % (found[0], "pushed" if found[1] else "not pushed")
 
 
 def merge_gitignore(path, lines):

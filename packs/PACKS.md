@@ -137,6 +137,27 @@ The commands denied to every session and the commit policy of each mode are in
 The core supplies `vcs.work` and `vcs.verify`; the pack supplies `vcs.plan`, `vcs.review` and
 `vcs.manager`.
 
+## The other version control packs
+
+Each pack below does for its VCS what the `git` pack does for git: its permits, the commands it
+denies to every session, its rule `<pack>/rules/<pack>.md`, and the brief sections
+`vcs.<pack>.<mode>` for `work`, `verify`, `plan`, `review` and `manager`. A section reaches a
+brief only when `.octopus/project.json` sets `vcs` to the pack's name. `check` fails a project
+whose `vcs` names one of these packs while the pack is absent. Turn one on with
+`octopus packs <project> add <pack>`, then set `vcs` to the same name.
+
+| Pack, `vcs` | Detected by | Permits | `modePermits` | A work session | A verify session, when it holds |
+|---|---|---|---|---|---|
+| `perforce` | `.p4config`, `p4config.txt`, `.p4ignore`, `p4ignore.txt` | `p4-submit`, `p4-sync`, `p4-branch` | verify: `p4-submit`, `p4-sync` | opens its files in a numbered changelist `<id>: <title>` | syncs and resolves the changelist's files, then `p4 submit -c <change>` |
+| `diversion` | `.diversion` | `dv-commit`, `dv-sync`, `dv-branch` | verify: `dv-commit` | writes its files under `## Files` on the ticket | `dv commit <file>... -m "<id>: <title>"` |
+| `svn` | `.svn` | `svn-commit`, `svn-sync`, `svn-branch` | verify: `svn-commit`, `svn-sync` | puts its files into the changelist `<id>` | `svn update --changelist <id>`, then `svn commit --changelist <id>` |
+| `mercurial` | `.hg` | `hg-commit`, `hg-sync`, `hg-branch` | work: `hg-commit`; verify: `hg-commit`, `hg-sync` | `hg commit <file>... -m "<id>: <title>"` | `hg pull`, a merge of a new head, then `hg push` |
+| `plastic` | `.plastic` | `cm-checkin`, `cm-sync`, `cm-branch` | verify: `cm-checkin` | checks out its files and writes them under `## Files` on the ticket | `cm checkin <file>... -c="<id>: <title>"` |
+
+The manager's update finds the commit of a ticket by the message that starts with `<id>:`
+(`commit_of` in `core/engine/vcs.py`). A pending Perforce or svn changelist is `not pushed`; a
+Mercurial commit is `pushed` when its phase is public.
+
 ## Another engine
 
 A pack for another engine is a new directory under `packs/` with a `ruleset.json`. Give it

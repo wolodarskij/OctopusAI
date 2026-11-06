@@ -158,10 +158,10 @@ class Settings(FixtureCase):
         self.assertEqual(rc, 0, out + err)
 
     def test_a_bad_vcs_value_fails_check(self):
-        root = self.make("Bad", config={"vcs": "svn"})
+        root = self.make("Bad", config={"vcs": "cvs"})
         rc, out, err = self.todo(root, "check")
         self.assertEqual(rc, 1)
-        self.assertIn("`vcs` is 'svn'", out + err)
+        self.assertIn("`vcs` is 'cvs'", out + err)
 
     def test_a_bad_vcs_pull_value_fails_check(self):
         root = self.make("BadPull", config={"vcs": "git", "vcsPull": "squash"})
