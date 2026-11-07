@@ -37,9 +37,6 @@ Do the steps for each project that exists. `<p>` is its path, `<name>` its name.
    - Each file that misnames the toolkit: change each old spelling to `Octopus AI`, or to the
      current command or path. Keep every other word. A project-wide README file changes only
      after the owner approved its exact new text (`readme-needs-owner-approval.md`).
-     Skip this bullet for the Octopus AI checkout, the project whose path holds
-     `{{OCTOPUS}}/octopus.py`: its engine, rulesets, packs and tests keep the old spellings
-     on purpose.
 4. **The ticket tree.**
 
        octopus todo --project "<name>" migrate
