@@ -215,12 +215,15 @@ class StatusHook(support.FixtureCase):
         (root / ".codex" / "hooks.json").write_text(json.dumps(own), encoding="utf-8")
         admin.update(root, out=quiet)
         d = json.loads(read(root / ".codex" / "hooks.json"))
-        self.assertEqual(d["hooks"]["PostToolUse"][0], own["hooks"]["PostToolUse"][0])
+        # The project's own line stays, with the tail that keeps it from stopping a session.
+        safe = {"hooks": {"PostToolUse": [{"matcher": "Bash", "hooks": [
+            {"type": "command", "command": "lint" + agents.HOOK_TAIL}]}]}}
+        self.assertEqual(d["hooks"]["PostToolUse"][0], safe["hooks"]["PostToolUse"][0])
         self.assertEqual(len(d["hooks"]["PostToolUse"]), 2)
         before = read(root / ".codex" / "hooks.json")
         admin.update(root, out=quiet)
         self.assertEqual(read(root / ".codex" / "hooks.json"), before)
-        self.assertEqual(json.loads(agents.strip_status_hooks(before, "codex")), own)
+        self.assertEqual(json.loads(agents.strip_status_hooks(before, "codex")), safe)
 
     def test_check_names_a_missing_hook(self):
         root = self.make("Missing")

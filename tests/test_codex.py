@@ -356,6 +356,8 @@ print("progress which is not the final answer")
         path = self.root / ".codex" / "hooks.json"
         legacy = 'python "D:/Old tools/octopus.py" status-hook codex'
         own = {"hooks": [{"type": "command", "command": "echo project hook"}]}
+        # The project's own line stays, with the tail that keeps it from stopping a session.
+        safe = {"hooks": [{"type": "command", "command": "echo project hook; exit 0"}]}
         path.write_text(json.dumps({"hooks": {ev: [own, {"hooks": [
             {"type": "command", "command": legacy}]}] for ev in agents.STATUS_HOOKS["codex"][1]}}),
             encoding="utf-8")
@@ -365,13 +367,13 @@ print("progress which is not the final answer")
             hooks = json.loads(path.read_text(encoding="utf-8"))["hooks"]
             self.assertIn("PreToolUse", hooks)
             for event, groups in hooks.items():
-                existing = [own] if event in agents.STATUS_HOOKS["codex"][1] else []
+                existing = [safe] if event in agents.STATUS_HOOKS["codex"][1] else []
                 self.assertEqual(groups[:-1], existing)
                 command = groups[-1]["hooks"][0]["command"]
                 self.assertNotEqual(command, legacy)
                 self.assertTrue(agents.is_status_hook(command, "codex"))
         remaining = json.loads(agents.strip_status_hooks(path.read_text(encoding="utf-8")))
-        self.assertTrue(all(groups == [own] for groups in remaining["hooks"].values()))
+        self.assertTrue(all(groups == [safe] for groups in remaining["hooks"].values()))
 
     def test_all_generated_hooks_run_without_python_on_path(self):
         # A path with shell metacharacters must arrive literally, including on Windows.

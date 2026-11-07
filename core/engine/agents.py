@@ -100,6 +100,36 @@ STATUS_HOOKS = {
 GUARD_EVENTS = {"codex": ("PreToolUse",)}
 STATUS_HOOK_TIMEOUT = 10
 
+# The tail of every hook line Octopus AI writes or remakes. Whatever the command before it did
+# (a missing script, a wrong directory, a crash, any exit code), the line exits 0, so no hook
+# stops a session. Git Bash, sh and PowerShell all read it. A hook that refuses an action
+# answers with JSON on stdout, which the tail keeps.
+HOOK_TAIL = "; exit 0"
+_ENDS_EXIT_0 = re.compile(r"(?:^|[;\n])\s*exit\s+0\s*;?\s*$")
+
+
+def exits_0(cmd):
+    """Whether the hook line `cmd` ends with an unconditional `exit 0`."""
+    return bool(_ENDS_EXIT_0.search(cmd.rstrip()))
+
+
+def never_blocks(cmd):
+    """The hook line `cmd` with `HOOK_TAIL`, so its exit code is always 0. A line that ends with
+    an unconditional `exit 0` already stays as it is."""
+    body = cmd.rstrip()
+    if not body or exits_0(body):
+        return body
+    body = body.rstrip(";").rstrip()
+    if body.endswith("&") and not body.endswith("&&"):
+        return body + " exit 0"
+    return body + HOOK_TAIL
+
+
+def status_hook_line(hook, provider):
+    """The status hook line of `provider`: `hook`, the command without its provider, then the
+    provider and `HOOK_TAIL`."""
+    return never_blocks("%s %s" % (hook, provider))
+
 
 def new_path(rel):
     """The `.agents/` path of a payload file recorded under its old Claude path, or None."""
@@ -183,6 +213,8 @@ def is_status_hook(cmd, provider=None):
     """Whether `cmd` is the status hook line of `provider` that some install wrote."""
     if not isinstance(cmd, str):
         return False
+    if cmd.rstrip().endswith(HOOK_TAIL):
+        cmd = cmd.rstrip()[:-len(HOOK_TAIL)]
     try:
         words = shlex.split(cmd)
     except ValueError:
@@ -408,7 +440,7 @@ def write_entries(root, rec, rulesets=(), cli="python .octopus/todo.py", out=pri
     for provider, (rel, _events) in STATUS_HOOKS.items() if hook else ():
         p = root / rel
         old = _read(p) if p.is_file() else None
-        new = set_status_hooks(old, provider, "%s %s" % (hook, provider))
+        new = set_status_hooks(old, provider, status_hook_line(hook, provider))
         if new is None:
             continue                                    # the project's own file, not a hook file
         if rel not in rec.entries:

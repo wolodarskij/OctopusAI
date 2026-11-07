@@ -155,10 +155,12 @@ def packs_of_profile(name):
 
 def hook_command(root=None):
     """The Claude hook line of the project at `root`. The checkout's own line finds
-    `octopus.py` at run time, so the tracked `.claude/settings.json` names no machine path."""
+    `octopus.py` at run time, so the tracked `.claude/settings.json` names no machine path.
+    The line ends with `HOOK_TAIL`: a missing checkout, a crash or any exit code never stops
+    the session."""
     if root is not None and is_checkout(root):
-        return 'python "$CLAUDE_PROJECT_DIR/octopus.py" hook'
-    return 'python "%s" hook' % (OCTOPUS / "octopus.py").as_posix()
+        return 'python "$CLAUDE_PROJECT_DIR/octopus.py" hook' + _agents.HOOK_TAIL
+    return 'python "%s" hook%s' % ((OCTOPUS / "octopus.py").as_posix(), _agents.HOOK_TAIL)
 
 
 def is_checkout(root):
@@ -180,8 +182,9 @@ def status_hook_command():
 
 
 # The hook line of any checkout, under either script name. A checkout that moved recognises
-# the line an install wrote at its old path.
-_HOOK_LINE = re.compile(r'^python "[^"]+/(?:octopus|aitools)\.py" hook$')
+# the line an install wrote at its old path, and the line without `HOOK_TAIL`.
+_HOOK_LINE = re.compile(r'^python "[^"]+/(?:octopus|aitools)\.py" hook(?:%s)?$'
+                        % re.escape(_agents.HOOK_TAIL))
 
 
 def is_hook_command(cmd):
@@ -344,6 +347,7 @@ def install(root, packs=None, name=None, slug=None, register=True, out=print, ma
     for rs in pj["rulesets"]:
         _install_payload(root, rs, rec, values, out)
     write_entries(root, rec, pj, out)
+    secure_hooks(root, rec, out)
     _install_tree(root, rec, out, manager=manager and existing is None)
     ignore_machine_files(root, rec, pj, out)
     rec.save()
@@ -854,7 +858,8 @@ def refresh(root, out=print):
     renamed pack its new name with its whole payload (`migrate_pack_names`). Returns the
     number of files written or removed. The `SessionStart` hook runs it, so a pack change
     reaches every project the next time a session starts in it. In the checkout itself it
-    brings its whole payload up to date."""
+    brings its whole payload up to date. It also remakes every hook line that could stop a
+    session (`secure_hooks`)."""
     root = Path(root).resolve()
     cd = root / _cd(root)
     pj = _read_json(cd / PROJECT_FILE, None)
@@ -891,6 +896,8 @@ def refresh(root, out=print):
         # that `update` has not moved to `.agents/` yet keeps what it has.
         if (root / _agents.AGENTS_DIR).is_dir():
             n += len(write_entries(root, rec, pj, out))
+        # A hook line that could stop a session is remade at the next session start.
+        n += len(secure_hooks(root, rec, out))
         # A VCS made after the install, or a new file that names the checkout, reaches the
         # ignore list at the next session start.
         ignored = ignore_machine_files(root, rec, pj, out)
@@ -900,6 +907,100 @@ def refresh(root, out=print):
     finally:
         os.close(fd)
         lock.unlink(missing_ok=True)
+
+
+# The hook files `secure_hooks` remakes, and whether Claude Code reads each one.
+HOOK_FILES = ((SETTINGS, True), (SETTINGS_LOCAL, True), (".codex/hooks.json", False))
+_ABSOLUTE = re.compile(r"^(?:[/\\~$%]|[A-Za-z]:)")
+
+
+def _anchored(cmd, root, powershell):
+    """The Claude hook line `cmd` with each script path relative to the project root written
+    from `$CLAUDE_PROJECT_DIR`, so a session that changed its directory still finds it."""
+    try:
+        lex = shlex.shlex(cmd, posix=True, punctuation_chars=";&|()<>")
+        lex.whitespace_split = True
+        words = list(lex)
+    except ValueError:
+        return cmd
+    var ="$env:CLAUDE_PROJECT_DIR" if powershell else "$CLAUDE_PROJECT_DIR"
+    for w in dict.fromkeys(words):
+        if not w or w.startswith("-") or _ABSOLUTE.match(w) or "$" in w or "%" in w:
+            continue
+        rel = w.replace("\\", "/")
+        while rel.startswith("./"):
+            rel = rel[2:]
+        if not rel or ("/" not in rel and "." not in rel) or not (Path(root) / rel).is_file():
+            continue
+        cmd = re.sub(r"(?<![^\s;&|(])([\"']?)%s\1(?=$|[\s;&|)])" % re.escape(w),
+                     lambda _m: '"%s/%s"' % (var, rel), cmd)
+    return cmd
+
+
+def _remade(cmd, root, claude, powershell):
+    """The project's own hook line `cmd`, remade so that nothing it does stops the session."""
+    if claude:
+        cmd = _anchored(cmd, root, powershell)
+    if claude and not powershell and re.search(r"\bexit\b", cmd) and not _agents.exits_0(cmd):
+        # An `exit` inside the line leaves the shell before the tail; a subshell keeps it.
+        cmd = "(%s)" % cmd.strip().rstrip(";")
+    return _agents.never_blocks(cmd)
+
+
+def secure_hooks(root, rec=None, out=print):
+    """Remake every hook line of the project at `root` that could stop a session: the hook
+    lines of `.claude/settings.json`, `.claude/settings.local.json` and `.codex/hooks.json`.
+    The engine's own lines become the current ones (`hook_command`, `status_hook_line`); every
+    other line gets its relative script paths from `$CLAUDE_PROJECT_DIR` (Claude) and ends with
+    `HOOK_TAIL`. A file is written only when a line changed, and the install record `rec`
+    keeps the hash of a settings file it wrote in step. Returns the files changed."""
+    root = Path(root)
+    mine = hook_command(root)
+    changed = []
+    for rel, claude in HOOK_FILES:
+        p = root / rel
+        if not p.is_file():
+            continue
+        before = p.read_bytes()
+        d = _read_json(p, None)
+        hooks = d.get("hooks") if isinstance(d, dict) else None
+        if not isinstance(hooks, dict):
+            continue
+        dirty = False
+        for groups in hooks.values():
+            for g in groups if isinstance(groups, list) else []:
+                entries = g.get("hooks") if isinstance(g, dict) else None
+                entries = entries if isinstance(entries, list) else [g]
+                for h in entries:
+                    cmd = h.get("command") if isinstance(h, dict) else None
+                    if not isinstance(cmd, str) or h.get("type", "command") != "command":
+                        continue
+                    if claude and is_hook_command(cmd):
+                        new = mine
+                    elif not claude and _agents.is_status_hook(cmd):
+                        new = _agents.never_blocks(cmd)
+                    else:
+                        new = _remade(cmd, root, claude,
+                                      str(h.get("shell", "")).lower() == "powershell")
+                    if new != cmd:
+                        h["command"] = new
+                        dirty = True
+        if not dirty:
+            continue
+        data = _json_bytes(d)
+        _write_bytes(p, data)
+        changed.append(rel)
+        out("  %s: hook lines remade, so no hook stops a session" % rel)
+        if rec is not None:
+            s = rec.settings or {}
+            loc = s.get("local") or {}
+            for r, rs in ((SETTINGS, s), (SETTINGS_LOCAL, loc)):
+                if rel == r and rs:
+                    if rs.get("written") == _sha(before):
+                        rs["written"] = _sha(data)
+                    if is_hook_command(rs.get("command")):
+                        rs["command"] = mine
+    return changed
 
 
 def _add_hooks(d, cmd):
