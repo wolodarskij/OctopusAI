@@ -2875,7 +2875,7 @@ def launch_new(tid, args):
 
 # ── notices to Octopus AI ───────────────────────────────────────────────────
 # A defect of an Octopus AI tool is no ticket of the project that found it. `notify` writes a
-# notice into the Octopus AI project, `TODO/.notices/N####.md`; its manager's 10-minute check
+# notice into the Octopus AI project, `TODO/.notices/N####.md`; its manager's check
 # lists every open notice, and `notice` records the manager's decision on it.
 
 NOTICES_DIR = ".notices"

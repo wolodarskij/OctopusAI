@@ -547,13 +547,14 @@ def _watch_project(root, now):
                                                 (" - rc %d %s" % (rc, error)) if rc else ""))
 
 
-# ── the 10-minute check of a manager with no scheduler ─────────────────────
+# ── the manager's check ────────────────────────────────────────────────────
 #
-# A Claude manager schedules its own 10-minute check (`managercheck.py`). A provider with no
-# scheduler of its own (`scheduler` in its features) gets it from here: every
-# `managercheck.INTERVAL` seconds the watchdog types `managercheck.wake_text()` into its live
-# manager session, never into one that waits for the owner's answer. The first wake comes
-# one interval after the watchdog first sees the session.
+# The board runs the manager's check in Python (`managercheck.evaluate`) for each live
+# manager session of the home project, of every AI provider: every `managercheck.INTERVAL`
+# seconds, never for a session that waits for the owner's answer. It types
+# `managercheck.wake_text()` into the session only on news. The first check comes one
+# interval after the watchdog first sees the session. Every tick writes the board's
+# heartbeat, which keeps the manager's fallback watcher (`check --watch`) idle.
 
 def wake_due(key, now, interval=None):
     """Reserve a due wake in the shared schedule before sending the prompt."""
@@ -563,33 +564,33 @@ def wake_due(key, now, interval=None):
 
 
 def _wake_project(root, now):
-    """Type the check into the manager sessions of one project, the current one, whose provider
-    has no scheduler. Returns the keys of the sessions woken."""
+    """Check the manager sessions of one project, the current one, and type the check into
+    each one on news. Returns the keys of the sessions woken."""
     import managercheck
-    def scheduler(provider):
-        return bool(project.PROVIDER_FEATURES.get(provider or "claude", {}).get("scheduler"))
-
-    # Only a manager launched on a provider with no scheduler costs a scan of the processes.
     if not T.at_manager_home():
         return []
     managers = {t.id for t in T.load_all()
-                if t.repeat == T.MANAGER and t.state == T.lane("active")
-                and not scheduler(T.ticket_provider(t) or P.provider)}
+                if t.repeat == T.MANAGER and t.state == T.lane("active")}
     if not managers:
         return []
+    managercheck.mark_board(now)
     woken = []
     for s in T.live_sessions():
         if s.get("id") not in managers or s.get("mode") != "work" or not s.get("claude"):
             continue
-        if scheduler(s.get("provider")) or s.get("wait") == "input":
+        if s.get("wait") == "input":
             continue
         if not wake_due((os.path.normcase(str(root.resolve())), s["session"]), now):
+            continue
+        news, seen = managercheck.evaluate(now=now)
+        if not news:
             continue
         try:
             T.send_session(s, managercheck.wake_text(), ["Enter"])
         except (OSError, ValueError) as exc:
             print("watchdog: %s %s: the check could not be typed: %s" % (root.name, s["id"], exc))
             continue
+        managercheck.remember(seen)
         woken.append(s["key"])
     return woken
 

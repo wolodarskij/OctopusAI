@@ -40,7 +40,7 @@ and no snapshot is read or written.
 ONLY WHEN AN AGENT IS THERE. `--if-any` is `--since-last` that prints nothing only when the
 update has no row: no agent finished since that call, none waits for the owner, none works and
 none waits for anything else. Otherwise it prints all four sections, every run, and a waiting
-question again on every run until it is answered. The manager's 10-minute check runs it
+question again on every run until it is answered. The manager's check runs it
 (`managercheck.py`). No output ever says that nothing changed.
 """
 

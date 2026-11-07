@@ -6,10 +6,11 @@
     python octopus.py sessions [--since-last] [--if-any] [--json]
                                                   the manager's update: every agent of every
                                                   registered project, in four sections
-    python octopus.py check [--job-created] [--dry-run]
-                                                  the manager's 10-minute check: launch the
-                                                  unlaunched follow-ups, then the update while
-                                                  any agent finished, waits or works
+    python octopus.py check [--watch] [--dry-run]
+                                                  the manager's check: launch the unlaunched
+                                                  follow-ups, then the update while any agent
+                                                  finished, waits or works; --watch: the
+                                                  fallback while the board does not run
     python octopus.py ai-filed [--dry-run]        move the open tickets that an AI filed without
                                                   an owner's request to AI-Pipeline, in every
                                                   registered project

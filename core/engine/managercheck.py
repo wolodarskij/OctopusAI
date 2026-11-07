@@ -1,29 +1,40 @@
-"""managercheck.py - the manager's 10-minute check, permanently on.
+"""managercheck.py - the manager's check, permanently on.
 
-    python octopus.py check [--job-created] [--dry-run]
+    python octopus.py check [--watch] [--dry-run]
 
-Every manager session runs it every 10 minutes: a recurring job it schedules itself (Claude
-Code's `CronCreate`), or the board's watchdog, which types `WAKE_TEXT` into a manager whose
-agent has no scheduler of its own. One run does five things:
+The manager's model runs only when the manager has something to say. Two timers run the check
+in Python and wake the manager only on news (`evaluate`):
+
+- THE BOARD. Every `INTERVAL` seconds the board's watchdog runs `evaluate` for each live
+  manager session of every AI provider, and types `wake_text()` into the session on news. Its
+  heartbeat (`mark_board`) says that the board runs.
+- THE FALLBACK. `check --watch`, which a Claude manager runs in the background, wakes no model
+  while it waits. While the board's heartbeat is older than `BOARD_STALE`, it runs `evaluate`
+  `BUSY_INTERVAL` after the last check when that check found an agent, else `IDLE_INTERVAL`
+  after it. On news it runs the check, prints it, and exits, which calls the manager back. A
+  new watcher replaces the one before it, which exits with no output.
+
+News is an agent that finished since the last update, a question that waits for the owner and
+was not reported yet, or a notice that was not reported yet. A working agent and a question
+that was reported already are no news. `manager-watch.json` beside the registry holds the
+state.
+
+One check, `check` alone, does four things:
 
 1. FOLLOW-UPS. A ticket that holds `projects` and sits in the verify or the closed lane names
    its follow-ups under `## Follow-ups`, one line each: project, id and title. A follow-up
    in its project's start lane that was never launched gets its session now, `plan` when its
    difficulty is `unknown`, else `work`. No other ticket is started.
-2. THE UPDATE. `sessions --if-any`: the four sections, every run, while any agent finished
-   since the last update, waits for the owner, works or waits for anything else; nothing at
-   all only when none does. Never a line that says nothing changed.
+2. THE UPDATE. `sessions --if-any`: the four sections while any agent finished since the last
+   update, waits for the owner, works or waits for anything else; nothing at all only when
+   none does. Never a line that says nothing changed.
 3. THE NOTICES. Each notice that a session of another project sent about a defect of an
-   Octopus AI tool (`todo notify`) and the manager did not decide yet stands on stderr, every
-   run, with the commands that decide it: a new Octopus AI ticket, its evidence on an existing
-   ticket, or no ticket.
+   Octopus AI tool (`todo notify`) and the manager did not decide yet stands on stderr, with
+   the commands that decide it: a new Octopus AI ticket, its evidence on an existing ticket,
+   or no ticket.
 4. THE AI TICKETS. Each open ticket of a registered project that an AI filed without an
    owner's request and that sits outside AI-Pipeline with no `filed-by: ai` moves there
    (`aifiled.sweep`). It writes nothing to the update.
-5. THE JOB'S AGE. `--job-created` records, after `CronCreate`, when the calling session made
-   its check job (`check-jobs.json` beside the registry). Claude Code deletes a recurring job
-   after 7 days; a check whose job is older than `RENEW_SECONDS` exits 3 and says on stderr
-   to make the job again.
 """
 
 from __future__ import annotations
@@ -32,6 +43,7 @@ import argparse
 import contextlib
 import io
 import json
+import os
 import re
 import sys
 import time
@@ -45,16 +57,18 @@ for _d in (HERE, HERE.parent / "win", HERE.parent / "hooks"):
 import project  # noqa: E402
 
 INTERVAL = 600
-RENEW_SECONDS = 6 * 24 * 3600
-JOBS_FILE = "check-jobs.json"
-RENEW = 3
+BUSY_INTERVAL = 3600
+IDLE_INTERVAL = 3 * 3600
+BOARD_STALE = 2 * INTERVAL
+WATCH_POLL = 60
+STATE_FILE = "manager-watch.json"
 FOLLOWUPS = "Follow-ups"
 _TICKET = re.compile(r"\bT\d{4,}\b")
 
 
 def wake_text():
-    """What the watchdog types into a manager whose agent has no scheduler."""
-    return ('Run the 10-minute check: python "%s" check. Print its output as it is; when it '
+    """What the board types into a manager session on news."""
+    return ('Manager check: run python "%s" check. Print its output as it is; when it '
             'prints nothing, write nothing. Decide each notice it lists with the command it '
             'names, and write nothing about the notices. Then end this turn immediately. '
             'Keep the session open for the owner. Do not call sleep, poll, close the '
@@ -225,106 +239,156 @@ def sort_ai_tickets(registry=None, dry_run=False, err=None):
         err.write("check: the AI ticket sweep failed: %s: %s\n" % (type(exc).__name__, exc))
 
 
-# ── the age of the check job ───────────────────────────────────────────────
+# ── the news ───────────────────────────────────────────────────────────────
 
-def jobs_file():
-    return project.home() / JOBS_FILE
+def state_file():
+    return project.home() / STATE_FILE
 
 
-def load_jobs():
+def load_state():
+    """`{"board", "checked", "busy", "questions", "notices", "watcher"}`, each part absent
+    until something wrote it."""
     try:
-        data = json.loads(jobs_file().read_text(encoding="utf-8"))
+        data = json.loads(state_file().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
     return data if isinstance(data, dict) else {}
 
 
-def record_job(sid, now=None):
-    """Record that session `sid` made its check job now. Forgets marks older than a job
-    lives."""
-    now = time.time() if now is None else now
-    data = {k: v for k, v in load_jobs().items()
-            if isinstance(v, (int, float)) and now - v < 2 * RENEW_SECONDS}
-    data[sid] = now
-    f = jobs_file()
+def update_state(**parts):
+    """Write `parts` into the state. Returns the new state."""
+    data = load_state()
+    data.update(parts)
+    f = state_file()
     f.parent.mkdir(parents=True, exist_ok=True)
-    f.write_text(json.dumps(data, indent=1), encoding="utf-8")
+    tmp = f.with_name("%s.%d.tmp" % (f.name, os.getpid()))
+    tmp.write_text(json.dumps(data, indent=1), encoding="utf-8")
+    os.replace(str(tmp), str(f))
+    return data
 
 
-def job_too_old(sid, now=None):
-    """Whether the check job of session `sid` is older than `RENEW_SECONDS`."""
-    made = load_jobs().get(sid)
+def _within(now, then, span):
+    """Whether `then` lies at most `span` seconds before `now`."""
+    try:
+        return 0 <= now - float(then or 0) < span
+    except (TypeError, ValueError):
+        return False
+
+
+def mark_board(now=None):
+    """The board's heartbeat: the board runs and checks the manager."""
     now = time.time() if now is None else now
-    return isinstance(made, (int, float)) and now - made > RENEW_SECONDS
+    if not _within(now, load_state().get("board"), WATCH_POLL):
+        update_state(board=now)
 
 
-def own_session(registry=None):
-    """The session id of the Claude this process runs under: looked up in the project of
-    the working directory first, then in every registered project. "" when none names it."""
+def board_runs(now=None):
+    """Whether the board's heartbeat is younger than `BOARD_STALE`."""
+    now = time.time() if now is None else now
+    return _within(now, load_state().get("board"), BOARD_STALE)
+
+
+def notice_ids():
+    """The ids of the notices that wait for the manager's decision."""
     import todo as T
-    roots = []
-    here = project.find_root()
-    if here:
-        roots.append(here)
-    roots += [Path(r["path"]) for r in (project.load_registry() if registry is None
-                                       else registry)]
-    for root in roots:
-        tok = _use(root)
-        if tok is None:
-            continue
-        try:
-            sid = T.own_session_id()
-        except Exception:                               # noqa: BLE001
-            sid = ""
-        finally:
-            project.reset(tok)
-        if sid:
-            return sid
-    return ""
+    try:
+        with T.in_manager_home():
+            return sorted(str(meta.get("id") or f) for f, meta, _b in T.open_notices())
+    except Exception:                                   # noqa: BLE001 - the check goes on
+        return []
+
+
+def evaluate(registry=None, dry_run=False, now=None, err=None):
+    """One check with no model: the AI ticket sweep, the follow-ups, and the update's rows,
+    with no write of the update's snapshot. Records when it ran and whether any agent was
+    there. Returns `(news, seen)`; call `remember(seen)` once the news reached the manager."""
+    import sessionreport
+    err = sys.stderr if err is None else err
+    now = time.time() if now is None else now
+    sort_ai_tickets(registry, dry_run, err)
+    launch_followups(registry, dry_run, err)
+    rows, _live = sessionreport.collect(True, registry)
+    questions = sorted({"%s %s" % (r.get("key") or "", r.get("text") or "")
+                        for r in rows if r.get("section") == "input"})
+    seen = {"questions": questions, "notices": notice_ids()}
+    st = load_state()
+    news = (any(r.get("section") == "finished" for r in rows)
+            or bool(set(questions) - set(st.get("questions") or ()))
+            or bool(set(seen["notices"]) - set(st.get("notices") or ())))
+    update_state(checked=now, busy=bool(rows), **({} if news else seen))
+    return news, seen
+
+
+def remember(seen):
+    """Record the questions and the notices that reached the manager."""
+    update_state(**seen)
 
 
 # ── the run ────────────────────────────────────────────────────────────────
 
-def run(job_created=False, dry_run=False, registry=None, sid=None, out=None, err=None,
-        now=None):
-    """One check. Returns 0, or `RENEW` when the caller's check job must be made again."""
+def _report(registry, dry_run, out, err):
     import sessionreport
-    out = sys.stdout if out is None else out
-    err = sys.stderr if err is None else err
-    if job_created:
-        sid = sid if sid is not None else own_session(registry)
-        if not sid:
-            err.write("check: no hook names the session this runs in\n")
-            return 2
-        record_job(sid, now)
-    sort_ai_tickets(registry, dry_run, err)
-    launch_followups(registry, dry_run, err)
     sessionreport.report(since_last=True, if_any=True, registry=registry, out=out,
                          save=not dry_run)
     list_notices(err)
-    if job_created:
-        return 0
-    sid = sid if sid is not None else own_session(registry)
-    if sid and job_too_old(sid, now):
-        err.write("check: the check job is older than %d days: make it again with "
-                  "CronCreate, delete the old one with CronDelete, then run check "
-                  "--job-created\n" % (RENEW_SECONDS // 86400))
-        return RENEW
+
+
+def run(dry_run=False, registry=None, out=None, err=None):
+    """One check, with the update. Returns 0."""
+    out = sys.stdout if out is None else out
+    err = sys.stderr if err is None else err
+    sort_ai_tickets(registry, dry_run, err)
+    launch_followups(registry, dry_run, err)
+    _report(registry, dry_run, out, err)
+    return 0
+
+
+def watch(registry=None, out=None, now_fn=None, sleep=None, token=None, loops=None):
+    """The fallback while the board does not run. Waits with no output, and returns after it
+    printed the update and the notices on `out` on news. Returns 0 with no output when a newer
+    watcher replaced it."""
+    import uuid
+    out = sys.stdout if out is None else out
+    now_fn = time.time if now_fn is None else now_fn
+    sleep = time.sleep if sleep is None else sleep
+    token = token or uuid.uuid4().hex
+    update_state(watcher=token)
+    n = 0
+    while loops is None or n < loops:
+        n += 1
+        sleep(WATCH_POLL)
+        st = load_state()
+        if st.get("watcher") != token:
+            return 0
+        now = now_fn()
+        if board_runs(now):
+            continue
+        if _within(now, st.get("checked"), BUSY_INTERVAL if st.get("busy") else IDLE_INTERVAL):
+            continue
+        news, seen = evaluate(registry, now=now, err=out)
+        if news:
+            _report(registry, False, out, out)
+            remember(seen)
+            return 0
     return 0
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="octopus check",
-                                 description="the manager's 10-minute check: launch the "
-                                             "unlaunched follow-ups, then print the update "
-                                             "while any agent finished, waits or works")
-    ap.add_argument("--job-created", action="store_true",
-                    help="this session just made its check job: record when")
+                                 description="the manager's check: launch the unlaunched "
+                                             "follow-ups, then print the update while any "
+                                             "agent finished, waits or works")
+    ap.add_argument("--watch", action="store_true",
+                    help="the fallback while the board does not run: check every hour while "
+                         "an agent was there, else every three hours, and exit with the "
+                         "update on news")
     ap.add_argument("--dry-run", action="store_true",
                     help="launch no follow-up, print what each launch would run, and "
                          "leave the snapshot of the last update as it was")
     a = ap.parse_args(argv)
-    return run(job_created=a.job_created, dry_run=a.dry_run)
+    if a.watch:
+        return watch()
+    return run(dry_run=a.dry_run)
 
 
 if __name__ == "__main__":

@@ -10,7 +10,7 @@ nothing to finish, nothing to hand over and nothing to verify.
   project this session began in. The board, its watchdog and `manager` start,
   claim and restart the manager only there.
 - **Keep this session available for the owner's input.** End your turn after
-  each answer or scheduled check. Never call sleep, poll, or create a wait loop
+  each answer or check. Never call sleep, poll, or create a wait loop
   to keep the session open. Ending a turn does not close the session or terminal.
   Never run a close command on this manager. The board's global Autostart manager
   setting controls automatic starts and restarts.
@@ -29,33 +29,38 @@ nothing to finish, nothing to hand over and nothing to verify.
 - The rules of each project hold for its tickets. A ticket you file in another
   project follows that project's rules.
 
-## Your 10-minute check runs all the time
+## Your check runs all the time
 
-The check is your regular routine, permanently on, not a night routine. Every 10
-minutes it launches the follow-ups that nobody launched and posts the full update
-while any agent finished, waits or works. **It runs in every manager session:**
+The check is permanently on, and it wakes you only on news. The board runs it in
+Python every 10 minutes. It launches the follow-ups that nobody launched, and it
+types the check into this session only when an agent finished, a new question
+waits for the owner, or a new notice arrived. A working agent and a question that
+was reported already wake nothing. While the board does not run, your fallback
+watcher runs the check every hour when the last check found an agent, and every
+three hours when it found none.
 
 1. **At the start of this session, and every time it starts again** (the
-   watchdog resumes it with this same brief): list your jobs with `CronList`.
-   When none runs `{octopus} check`, make it with `CronCreate`: `cron`
-   `1,11,21,31,41,51 * * * *`, `recurring` true, and this prompt:
-   `Manager check: run {octopus} check. Print its output as it is and nothing
-   else. When it prints nothing, write nothing at all. When it lists notices,
-   decide each one with the command it names and write nothing about them. When
-   it exits 3, do what its last line says and write nothing about it.`
-   Then run `{octopus} check --job-created` once, which records when the job was
-   made, and print its output the same way.
-2. **Each run** launches every follow-up that a finished cross-project ticket
+   watchdog resumes it with this same brief): make no `CronCreate` job for the
+   check. When `CronList` shows a job that runs `{octopus} check`, delete it with
+   `CronDelete`. When your AI provider calls you back after a background command
+   exits (Claude Code: Bash with `run_in_background`), start the fallback watcher
+   in the background: `{octopus} check --watch`. Write nothing about it.
+2. **When the board types the check into this session** (`Manager check: run
+   {octopus} check`), run it. Print its output as it is and nothing else. When it
+   prints nothing, write nothing at all. Then end the turn.
+3. **When the fallback watcher exits,** read its output. When it printed nothing,
+   a newer watcher replaced it: write nothing, and do not start it again.
+   Otherwise print its output as it is and nothing else, decide the notices it
+   lists, and start `{octopus} check --watch` again in the background.
+4. **Each check** launches every follow-up that a finished cross-project ticket
    named under `## Follow-ups` and nobody launched, then prints the full update in
-   the format below whenever any agent finished since the last run, waits for your
-   input, works, or waits for something else. Every waiting question stands in it
-   word for word, on every run, until it is answered. It prints nothing at all only
+   the format below whenever any agent finished since the last update, waits for
+   your input, works, or waits for something else. It prints nothing at all only
    when no agent finished, none waits and none works; then you write nothing. It
    never starts any other ticket, and you never answer an agent for the owner.
-3. **Each run also lists the notices** that sessions of other projects sent
-   about a defect of an Octopus AI tool (`notify`), on every run until you decide
-   each one. Decide it yourself, with no question to the owner, and write nothing
-   about it:
+5. **Each check also lists the notices** that sessions of other projects sent
+   about a defect of an Octopus AI tool (`notify`), until you decide each one.
+   Decide it yourself, with no question to the owner, and write nothing about it:
    - a new Octopus AI ticket: `notice <id> ticket --title "..." --severity ...
      --difficulty ...`, when no open Octopus AI ticket names the defect;
    - its evidence on an existing ticket: `notice <id> evidence <ticket id>`, when
@@ -65,14 +70,9 @@ while any agent finished, waits or works. **It runs in every manager session:**
 
    Read the open Octopus AI tickets with `query` before you decide. `notices`
    lists the open notices, and `notices <id>` prints one in full.
-4. **Before the job expires** (Claude Code deletes a recurring job after 7 days)
-   the check exits 3 and says so: make the job again with the same `cron` and
-   prompt, delete the old one with `CronDelete`, and run `{octopus} check
-   --job-created`.
-5. **A manager on an AI provider with no `CronCreate`** (Codex) gets the check from the
-   board's watchdog, which types it into this session every 10 minutes. Run it the
-   same way, then end the turn immediately. Do not schedule another timer yourself.
-   The watchdog owns the timer; the session remains open for the owner's messages.
+6. **Never call sleep, poll, or make a wait loop** to keep this session open.
+   The board and the fallback watcher own the timer; the session remains open for
+   the owner's messages.
 
 ## How the manager works
 
@@ -97,7 +97,7 @@ These are the standing orders to every manager, in every project.
   the owner naming them: file the ticket in each project with `new --title "..."
   --requested "<the order, in neutral words>" --launch`, which launches `work`, or `plan` when its difficulty is `unknown`.
   When a ticket that changed several projects filed follow-ups there and launched
-  none, launch each of them at once, the same way; your 10-minute check does it
+  none, launch each of them at once, the same way; your check does it
   for every follow-up named under `## Follow-ups`.
 - **Never wait passively on a blocker that nobody works.** When a ticket waits
   for a blocker that sits in {label:start} or {label:ai} with no `session:`, launch it at once:
@@ -145,7 +145,7 @@ These are the standing orders to every manager, in every project.
 
 ## Every update you give
 
-Every status update, a scheduled one and one the owner asks for, lists
+Every status update, one from a check and one the owner asks for, lists
 **agents** (sessions), not tickets, in exactly this structure: all four sections,
 in this order, an empty one written as `none`, and nothing else unless the owner
 asks for it. Build it with:

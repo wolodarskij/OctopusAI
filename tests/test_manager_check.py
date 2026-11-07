@@ -1,7 +1,6 @@
-"""The manager's 10-minute check (`octopus check`): the full update while any agent finished,
-waits or works, nothing only when none does,
-the follow-ups a finished cross-project ticket left unlaunched, the age of the check job,
-and the watchdog's wake of a manager whose agent has no scheduler.
+"""The manager's check (`octopus check`): the full update while any agent finished, waits or
+works, nothing only when none does, the follow-ups a finished cross-project ticket left
+unlaunched, the news that wakes the manager, the fallback watcher, and the board's wake.
 python -m unittest discover tests"""
 
 import io
@@ -13,7 +12,6 @@ from support import FixtureCase, project
 
 import admin  # noqa: E402
 import managercheck as C  # noqa: E402
-import providers  # noqa: E402
 import session_state  # noqa: E402
 import sessionreport as R  # noqa: E402
 import todo as T  # noqa: E402
@@ -21,7 +19,6 @@ import todo_server  # noqa: E402
 
 SID_A = str(uuid.UUID(int=11))
 SID_B = str(uuid.UUID(int=12))
-DAY = 24 * 3600
 
 
 def sess(sid, tid, wait=None, mode="work", **kw):
@@ -171,39 +168,127 @@ class FollowUps(FixtureCase):
         self.assertIn("the launch failed: boom", err.getvalue())
 
 
-class JobAge(FixtureCase):
+class News(FixtureCase):
     def setUp(self):
         super().setUp()
         self.make("Sample Game")
+        self.rows = []
+        self.patches = [mock.patch.object(C, "launch_followups", return_value=[]),
+                        mock.patch.object(C, "sort_ai_tickets"),
+                        mock.patch.object(C, "notice_ids", return_value=[]),
+                        mock.patch.object(R, "collect",
+                                          side_effect=lambda *a, **k: (self.rows, []))]
+        for p in self.patches:
+            p.start()
 
-    def run_check(self, **kw):
-        out, err = io.StringIO(), io.StringIO()
-        with mock.patch.object(C, "launch_followups", return_value=[]), \
-                mock.patch.object(R, "report", return_value=0):
-            rc = C.run(out=out, err=err, **kw)
-        return rc, err.getvalue()
+    def tearDown(self):
+        for p in self.patches:
+            p.stop()
+        super().tearDown()
 
-    def test_job_created_records_the_session(self):
-        rc, _e = self.run_check(job_created=True, sid=SID_A, now=1000)
-        self.assertEqual(rc, 0)
-        self.assertEqual(C.load_jobs()[SID_A], 1000)
+    def news(self, now=1000):
+        news, seen = C.evaluate(now=now)
+        if news:
+            C.remember(seen)
+        return news
 
-    def test_a_fresh_job_needs_nothing(self):
-        C.record_job(SID_A, now=0)
-        self.assertEqual(self.run_check(sid=SID_A, now=5 * DAY)[0], 0)
+    def test_a_working_agent_is_no_news(self):
+        self.rows = [{"key": "a", "section": "working", "text": "Bash"}]
+        self.assertFalse(self.news())
+        self.assertTrue(C.load_state()["busy"])
 
-    def test_an_old_job_exits_three_and_says_to_make_it_again(self):
-        C.record_job(SID_A, now=0)
-        rc, err = self.run_check(sid=SID_A, now=6 * DAY + 1)
-        self.assertEqual(rc, C.RENEW)
-        self.assertIn("CronCreate", err)
+    def test_a_finished_agent_is_news(self):
+        self.rows = [{"key": "a", "section": "finished", "text": "done"}]
+        self.assertTrue(self.news())
 
-    def test_a_session_with_no_record_needs_nothing(self):
-        C.record_job(SID_A, now=0)
-        self.assertEqual(self.run_check(sid=SID_B, now=30 * DAY)[0], 0)
+    def test_a_question_is_news_once(self):
+        self.rows = [{"key": "a", "section": "input", "text": "Which one?"}]
+        self.assertTrue(self.news())
+        self.assertFalse(self.news())
+        self.rows = [{"key": "a", "section": "input", "text": "Another?"}]
+        self.assertTrue(self.news())
 
-    def test_job_created_without_a_session_refuses(self):
-        self.assertEqual(self.run_check(job_created=True, sid="")[0], 2)
+    def test_an_answered_question_asked_again_is_news(self):
+        self.rows = [{"key": "a", "section": "input", "text": "Which one?"}]
+        self.assertTrue(self.news())
+        self.rows = []
+        self.assertFalse(self.news())
+        self.assertFalse(C.load_state()["busy"])
+        self.rows = [{"key": "a", "section": "input", "text": "Which one?"}]
+        self.assertTrue(self.news())
+
+    def test_a_new_notice_is_news_once(self):
+        with mock.patch.object(C, "notice_ids", return_value=["N0001"]):
+            self.assertTrue(self.news())
+            self.assertFalse(self.news())
+
+    def test_news_not_remembered_stays_news(self):
+        self.rows = [{"key": "a", "section": "input", "text": "Which one?"}]
+        self.assertTrue(C.evaluate(now=1)[0])
+        self.assertTrue(C.evaluate(now=2)[0])
+
+
+class Watch(FixtureCase):
+    def setUp(self):
+        super().setUp()
+        self.make("Sample Game")
+        self.clock = [100000.0]
+        self.evaluate = mock.Mock(return_value=(False, {"questions": [], "notices": []}))
+        self.patches = [mock.patch.object(C, "evaluate", self.evaluate),
+                        mock.patch.object(C, "_report",
+                                          lambda reg, dry, out, err: out.write("update\n"))]
+        for p in self.patches:
+            p.start()
+
+    def tearDown(self):
+        for p in self.patches:
+            p.stop()
+        super().tearDown()
+
+    def sleep(self, seconds):
+        self.clock[0] += seconds
+
+    def watch(self, loops, token="w1"):
+        out = io.StringIO()
+        rc = C.watch(out=out, now_fn=lambda: self.clock[0], sleep=self.sleep, token=token,
+                     loops=loops)
+        return rc, out.getvalue()
+
+    def test_a_running_board_keeps_it_idle(self):
+        C.mark_board(self.clock[0])
+        self.watch(5)
+        self.assertFalse(self.evaluate.called)
+
+    def test_it_checks_hourly_while_an_agent_was_there(self):
+        C.update_state(checked=self.clock[0], busy=True)
+        self.watch(C.BUSY_INTERVAL // C.WATCH_POLL - 1)
+        self.assertFalse(self.evaluate.called)
+        self.watch(1)
+        self.assertEqual(self.evaluate.call_count, 1)
+
+    def test_it_checks_every_three_hours_when_nothing_was_there(self):
+        C.update_state(checked=self.clock[0], busy=False)
+        self.watch(C.BUSY_INTERVAL // C.WATCH_POLL)
+        self.assertFalse(self.evaluate.called)
+        self.watch(C.IDLE_INTERVAL // C.WATCH_POLL - C.BUSY_INTERVAL // C.WATCH_POLL)
+        self.assertEqual(self.evaluate.call_count, 1)
+
+    def test_it_exits_with_the_update_on_news(self):
+        self.evaluate.return_value = (True, {"questions": ["a Which one?"], "notices": []})
+        rc, out = self.watch(None)
+        self.assertEqual((rc, out), (0, "update\n"))
+        self.assertEqual(C.load_state()["questions"], ["a Which one?"])
+
+    def test_a_newer_watcher_replaces_it_silently(self):
+        C.update_state(checked=self.clock[0], busy=True)
+        orig = self.sleep
+
+        def sleep(seconds):
+            orig(seconds)
+            C.update_state(watcher="w2")
+        self.sleep = sleep
+        self.assertEqual(self.watch(None), (0, ""))
+        self.assertFalse(self.evaluate.called)
 
 
 class Wake(FixtureCase):
@@ -215,14 +300,13 @@ class Wake(FixtureCase):
                                   "--status", "implementing")
         self.assertEqual(rc, 0, err)
         self.tok = project.use(self.root)
-        t = T.find(T.load_all(), self.mid)
-        t.meta["provider"] = "codex"
-        T._write(t.path, T.render(t.meta, t.body))
-        self.live = [sess(SID_A, self.mid, None, provider="codex")]
+        self.live = [sess(SID_A, self.mid, None)]
         self.send = mock.Mock()
+        self.news = (True, {"questions": [], "notices": []})
         self.patches = [mock.patch.object(T, "live_sessions",
                                           lambda tickets=None: self.live),
-                        mock.patch.object(T, "send_session", self.send)]
+                        mock.patch.object(T, "send_session", self.send),
+                        mock.patch.object(C, "evaluate", lambda **kw: self.news)]
         for p in self.patches:
             p.start()
 
@@ -232,7 +316,7 @@ class Wake(FixtureCase):
         project.reset(self.tok)
         super().tearDown()
 
-    def test_a_manager_without_a_scheduler_is_woken_every_ten_minutes(self):
+    def test_a_manager_is_woken_on_news_at_most_every_ten_minutes(self):
         now = 1e9
         self.assertEqual(todo_server._wake_project(self.root, now), [])
         self.assertEqual(todo_server._wake_project(self.root, now + C.INTERVAL - 1), [])
@@ -242,29 +326,31 @@ class Wake(FixtureCase):
         self.assertEqual(keys, ["Enter"])
         self.assertEqual(todo_server._wake_project(self.root, now + C.INTERVAL + 30), [])
 
+    def test_no_news_types_nothing(self):
+        self.news = (False, {"questions": [], "notices": []})
+        todo_server._wake_project(self.root, 1e9)
+        self.assertEqual(todo_server._wake_project(self.root, 1e9 + C.INTERVAL), [])
+        self.assertFalse(self.send.called)
+
+    def test_every_provider_is_woken(self):
+        self.live = [sess(SID_A, self.mid, None, provider="codex")]
+        todo_server._wake_project(self.root, 1e9)
+        self.assertEqual(len(todo_server._wake_project(self.root, 1e9 + C.INTERVAL)), 1)
+
     def test_a_manager_waiting_for_the_owner_is_not_typed_into(self):
-        self.live = [sess(SID_A, self.mid, "input", provider="codex")]
+        self.live = [sess(SID_A, self.mid, "input")]
         todo_server._wake_project(self.root, 1e9)
         self.assertEqual(todo_server._wake_project(self.root, 1e9 + C.INTERVAL), [])
         self.assertFalse(self.send.called)
 
-    def test_a_claude_manager_schedules_its_own_check(self):
-        t = T.find(T.load_all(), self.mid)
-        t.meta.pop("provider")
-        T._write(t.path, T.render(t.meta, t.body))
-        self.live = [sess(SID_A, self.mid, None)]
+    def test_the_board_writes_its_heartbeat(self):
         todo_server._wake_project(self.root, 1e9)
-        self.assertEqual(todo_server._wake_project(self.root, 1e9 + C.INTERVAL), [])
-        self.assertFalse(self.send.called)
-
-    def test_only_claude_has_a_scheduler(self):
-        p = providers.load()
-        self.assertTrue(p["claude"]["features"]["scheduler"])
-        self.assertFalse(p["codex"]["features"]["scheduler"])
+        self.assertTrue(C.board_runs(1e9 + C.INTERVAL))
+        self.assertFalse(C.board_runs(1e9 + C.BOARD_STALE))
 
 
 class Brief(FixtureCase):
-    def test_the_manager_brief_starts_the_check(self):
+    def test_the_manager_brief_starts_the_watcher_and_no_cron_job(self):
         root = self.make("Sample Game")
         mid = self.new_ticket(root, "the manager", "--repeat", "manager", "--permits",
                               "projects")
@@ -273,9 +359,9 @@ class Brief(FixtureCase):
             text = T.build_brief(T.find(T.load_all(), mid), "work")
         finally:
             project.reset(tok)
-        self.assertIn("CronCreate", text)
-        self.assertIn("1,11,21,31,41,51 * * * *", text)
-        self.assertIn('octopus.py" check --job-created', text)
+        self.assertIn('octopus.py" check --watch', text)
+        self.assertIn("make no `CronCreate` job", text)
+        self.assertNotIn("--job-created", text)
         self.assertNotIn("{octopus}", text)
 
 
