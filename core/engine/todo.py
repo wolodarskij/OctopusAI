@@ -278,8 +278,60 @@ _MEASURE = re.compile(r"\b\d+(?:[.,]\d+)?\s*(?:%|ms|s|sec|secs|seconds?|min|minu
                       r"problems?)\b|\b\d+\s*/\s*\d+\b|\b\d+(?:[.,]\d+)?\s*[-–]\s*\d+", re.I)
 
 
-def outcome_problem(text, own_id=""):
-    """Why `text` is no outcome line, or "" when it is one."""
+# WHAT MAY BE CALLED WRONG. A ticket is done, or wrong, or it asks the owner; never two of them.
+# A finished ticket (in the verify or the closed lane, not `cancelled`) whose outcome, `## Result`
+# or `## Verified` says that something is still wrong contradicts itself, so `move`, `outcome`
+# and `check` refuse it. The pattern holds only the phrases that state a defect that remains.
+_STILL_WRONG = re.compile(
+    r"\bstill\s+(?:(?:is|are)\s+)?(?:wrong|broken|buggy|fails?|failing|missing|open|unfixed|"
+    r"unsolved|incomplete|undone|absent|lacks?|needs?|requires?|cannot|can['’]t)\b"
+    r"|\bstill\s+(?:does|do|is|are|can|will|has|have)\s*(?:n['’]t\b|\s(?:not|no|never)\b)"
+    r"|\b(?:does|do|is|are)\s*(?:n['’]t|\snot)\s+(?:yet\s+)?work(?:ing)?\b"
+    r"|\bnot\s+(?:yet\s+)?(?:fixed|done|implemented|solved|resolved|finished|completed?|"
+    r"working|handled|addressed)\b|\bnot\s+yet\b"
+    r"|\bknown\s+(?:issues?|limits?|limitations?|defects?|bugs?|problems?)\b"
+    r"|\b(?:remains?|left)\s+(?:wrong|broken|open|unfixed|missing|undone|as\s+is)\b"
+    r"|\b(?:works?|fixed|done|implemented)\s+(?:only\s+)?(?:partly|partially|in\s+part)\b"
+    r"|\b(?:partly|partially)\s+(?:works?|fixed|done|implemented)\b"
+    r"|\bstill\s+to\s+(?:do|fix)\b", re.I)
+FINISHED_SECTIONS = re.compile(r"^(?:Result|Verified)\s*$", re.I)
+
+
+def still_wrong(text):
+    """The phrase of `text` (str) that says something is still wrong, or ""."""
+    m = _STILL_WRONG.search(str(text or ""))
+    return m.group(0) if m else ""
+
+
+def is_finished(state, status=""):
+    """Whether a ticket in `state` with `status` is finished work: the verify or the closed
+    lane, and not `cancelled`."""
+    if state == lane("verify"):
+        return True
+    return state == lane("closed") and (status or default_status(state)) != S("cancelled")
+
+
+def finished_problem(t, said=None):
+    """Why ticket `t` cannot be finished work, or "": its outcome (`said`, else its own
+    `outcome:`), its `## Result` or its `## Verified` says that something is still wrong. Of a
+    repeatable ticket only the current run's `## Result (run <n>)` counts."""
+    said = t.meta.get(OUTCOME_FIELD, "") if said is None else said
+    phrase = still_wrong(said)
+    if phrase:
+        return "its outcome says that something is still wrong (%r)" % phrase
+    own = re.compile(r"^Result \(run %d\)$" % t.run) if t.repeat else FINISHED_SECTIONS
+    for m in re.finditer(r"^##\s+([^\n]*)\n(.*?)(?=^##\s|\Z)", t.body or "", re.M | re.S):
+        if own.match(m.group(1).strip()):
+            phrase = still_wrong(m.group(2))
+            if phrase:
+                return "its `## %s` says that something is still wrong (%r)" \
+                    % (m.group(1).strip(), phrase)
+    return ""
+
+
+def outcome_problem(text, own_id="", finished=False):
+    """Why `text` is no outcome line, or "" when it is one. A `finished` ticket's outcome also
+    says nothing that is still wrong."""
     text = str(text or "")
     if "\n" in text.strip() or "\r" in text.strip():
         return "the outcome is one line"
@@ -299,6 +351,10 @@ def outcome_problem(text, own_id=""):
     if m:
         return "the outcome carries a measurement (%r); the measurement goes on the ticket" \
             % m.group(0)
+    phrase = still_wrong(text) if finished else ""
+    if phrase:
+        return ("the outcome says that something is still wrong (%r); a finished ticket says "
+                "only what works or what was found" % phrase)
     return ""
 
 
@@ -319,7 +375,7 @@ def outcome_due(t):
 
 def set_outcome(t, text):
     """Write `outcome:` on the ticket. Returns the problem of the text, or ""."""
-    why = outcome_problem(text, t.id)
+    why = outcome_problem(text, t.id, is_finished(t.state, t.status))
     if why:
         return why
     meta, body = parse(_read(t.path))
@@ -1649,7 +1705,7 @@ def cmd_check(args):
             problems.append("%s is not named after its id %s" % (rel, t.id))
         said = t.meta.get(OUTCOME_FIELD, "")
         if said:
-            why = outcome_problem(said, t.id)
+            why = outcome_problem(said, t.id, is_finished(t.state, t.status))
             if why:
                 problems.append("%s: %s - run: %s outcome %s \"<what now works or what was "
                                 "found>\"" % (rel, why, P.cli, t.id))
@@ -1870,15 +1926,35 @@ def cmd_move(args):
             return 2
         for ident in args.ids:
             t = find(tickets, ident)
-            why = outcome_problem(said, t.id) if t is not None else ""
+            why = outcome_problem(said, t.id, is_finished(state, args.status)) \
+                if t is not None else ""
             if why:
                 print("Error: %s: %s." % (t.id, why), file=sys.stderr)
                 return 2
-        if not args.dry_run:
-            for ident in args.ids:
-                t = find(tickets, ident)
-                if t is not None:
-                    set_outcome(t, said)
+    if is_finished(state, args.status):
+        for t in ([t for t in tickets if t.epic == args.epic] if args.epic else
+                  [find(tickets, i) for i in args.ids]):
+            if t is None or t.repeat == MANAGER:
+                continue
+            why = finished_problem(t, said)
+            if why:
+                for line in (
+                    "Error: %s cannot go to %s: %s." % (t.id, P.STATE_LABEL[state], why),
+                    "  A ticket is done, or wrong, or it asks the owner; never two of them.",
+                    "  Done: write the text again, so that it says only what works or what was "
+                    "found.",
+                    "  Wrong: keep the ticket and fix it, or send it back to %s from a verify "
+                    "session." % lane("start"),
+                    "  Not sure what to call wrong: ask the owner, and keep the ticket where "
+                    "it is.",
+                ):
+                    print(line, file=sys.stderr)
+                return 2
+    if said is not None and not args.dry_run:
+        for ident in args.ids:
+            t = find(tickets, ident)
+            if t is not None:
+                set_outcome(t, said)
     moved = []
     targets = ([t for t in tickets if t.epic == args.epic] if args.epic else
                [t for t in (find(tickets, i) for i in args.ids) if t is not None])

@@ -337,6 +337,34 @@ message still ends with `WORK IS FINISHED`.
     python .octopus/todo.py move T0001 Verification --outcome "The board shows the outcome line"
     python .octopus/todo.py outcome T0001 "The board shows the outcome line"
 
+### What may be called wrong
+
+**A thing is wrong only when it breaks a written reference.** The references are:
+
+1. the ticket's order: its first section and its `## Owner's orders`;
+2. an order of the owner, or a rule of the project;
+3. the documented behavior: a doc, a comment, a test, a type or a schema;
+4. an observed failure: a crash, an error, lost data, or a result that differs from what the
+   program states.
+
+Nothing else is wrong. When no reference shows the intent of a thing, it is a question to the
+owner, never a defect. A defect outside the ticket's order is not wrong with this ticket: it
+goes to its own ticket, and this ticket does not describe it.
+
+**A ticket is done, or wrong, or it asks the owner. It is never two of them.**
+
+| The ticket | Where it stays |
+|---|---|
+| done: the tree meets every part of its order | Verification or Done. Its outcome, `## Result` and `## Verified` say only what works or what was found |
+| wrong: a part of its order is not met | In Progress while its session works, or Pipeline when a verify session sends it back and says what is still wrong under `## Verification failed` |
+| a question: its session cannot tell if a thing is wrong | its board, while its session asks the owner what to call wrong |
+
+**A finished ticket that says something is still wrong contradicts itself, and is prohibited.**
+`move` to Verification or Done refuses a ticket whose outcome, `## Result` or `## Verified` says
+so: "still fails", "does not work", "not fixed", "known limit", "works partly". `outcome` and
+`check` refuse such an outcome on a ticket in Verification or Done. A `cancelled` ticket is
+not finished work, and the test does not apply to it.
+
 ### Only a verification session closes a ticket
 
 **A session that did the work never closes its own ticket.** It lands the work, moves the ticket
