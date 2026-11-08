@@ -315,6 +315,9 @@ def install(root, packs=None, name=None, slug=None, register=True, out=print, ma
     root = Path(root).resolve()
     if not root.is_dir():
         raise ValueError("%s is not a directory" % root)
+    # What the toolkits before Octopus AI left goes first, so the rest sees the project clean.
+    import leftovers
+    leftovers.clean(root, out)
     rec = Record(root)
     cfg_path = root / CONFIG_DIR / PROJECT_FILE
     existing = _read_json(cfg_path, None) if cfg_path.exists() else None
@@ -551,6 +554,11 @@ def adopt(root, dry_run=False, out=print):
     rec = Record(root)
     if not rec.path.exists():
         raise ValueError("%s has no %s/%s: install Octopus AI first" % (root, _cd(root), INSTALLED))
+    import leftovers
+    if dry_run:
+        leftovers.report(leftovers.find(root), out)
+    else:
+        leftovers.clean(root, out)
     res = _agents.adopt(root, recorded=rec.files, dry_run=dry_run, out=out)
     for k in ("moved", "dropped", "kept", "rewritten"):
         for x in res[k]:
@@ -879,9 +887,12 @@ def refresh(root, out=print):
         return 0
     try:
         rec = Record(root)
+        # A hook line of the toolkits before Octopus AI goes at the next session start.
+        import leftovers
+        n = len(leftovers.clean_hooks(root, rec, out))
         renamed = migrate_pack_names(root, rec, pj, out)
         keys = migrate_provider_keys(root, rec, pj, out)
-        n = len(keys)
+        n += len(keys)
         if renamed or keys:
             _write_bytes(cd / PROJECT_FILE, _json_bytes(pj))
             names = [r for r in pj.get("rulesets", []) if own or _owns_payload(r)]
@@ -1648,6 +1659,10 @@ def status(root, out=print):
     counts["reporting"] = _agents.reporting_problems(root)
     for p in counts["reporting"]:
         out("warning  %s" % p)
+    import leftovers
+    counts["leftovers"] = leftovers.find(root)
+    for it in counts["leftovers"]:
+        out("leftover %s %s  (%s)" % (it["action"], it["path"], it["why"]))
     return counts
 
 

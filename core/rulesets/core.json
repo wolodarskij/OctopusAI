@@ -21,9 +21,13 @@
     ".claude/coordination/**",
     "core/engine/admin.py",
     "core/engine/agents.py",
+    "core/engine/leftovers.py",
     "core/engine/oldnames.py",
     "core/rulesets/core.json",
+    "core/skills/update-projects/SKILL.md",
+    ".agents/skills/update-projects/SKILL.md",
     "packs/PACKS.md",
+    "tests/test_leftovers.py",
     "tests/test_oldnames.py",
     "tests/test_relocate.py",
     ".gitignore"

@@ -47,7 +47,9 @@ def _env(name):
 #   img    an image file as it is;  audio  a sound file as it is
 #   html   a sheet in a sandboxed iframe;  json  a key summary, then the pretty text
 #   none   open only
+# A project adds its own previews in `previewScripts` (`scripts`): the page loads each script.
 PREVIEWS = ("svg", "grid", "img", "audio", "html", "json", "none")
+SCRIPT_NAME = re.compile(r"^[A-Za-z][\w-]*$")
 
 PLACEHOLDER = re.compile(r"\{\{(\w+)\}\}")
 SIZE_SUFFIX = re.compile(r"\.(\d+)x(\d+)\.[^.]+$")
@@ -147,14 +149,26 @@ def has_config():
     return config_path().is_file()
 
 
+def scripts():
+    """{preview name: project path} of the project's own previews, `previewScripts` in
+    `assets.json`. A name that is a built-in preview, or no plain word, is left out."""
+    raw = config().get("previewScripts") or {}
+    if not isinstance(raw, dict):
+        return {}
+    return {n: v for n, v in raw.items()
+            if isinstance(v, str) and SCRIPT_NAME.match(n) and n not in PREVIEWS}
+
+
 def table():
     """The rows of kinds: (kind, group, root, globs, preview). The first row a file matches is
     its kind."""
     rows = []
+    own = scripts()
     for r in config().get("kinds") or []:
         preview = r.get("preview") or "none"
         rows.append((r["kind"], r.get("group") or "", r.get("root") or ".",
-                     tuple(r.get("globs") or ()), preview if preview in PREVIEWS else "none"))
+                     tuple(r.get("globs") or ()),
+                     preview if preview in PREVIEWS or preview in own else "none"))
     return tuple(rows)
 
 
@@ -378,7 +392,7 @@ def inventory():
             badges.append(p.name)
         elif preview == "json":                     # layouts/a, not a second "a"
             name = p.relative_to(base / sub).with_suffix("").as_posix()
-        elif preview in ("svg", "grid"):
+        elif preview in ("svg", "grid") or preview not in PREVIEWS:
             name = p.stem
         placeholders = []
         if preview == "svg":
@@ -395,8 +409,11 @@ def inventory():
 
 
 def kinds():
-    """The table for the page: kind, group, preview, in table order."""
-    return [{"kind": k, "group": g, "preview": pv} for k, g, _r, _gl, pv in table()]
+    """The table for the page: kind, group, preview, and the ticket group a task on it
+    defaults to (`taskGroups`, by the row's group), in table order."""
+    groups = config().get("taskGroups") or {}
+    return [{"kind": k, "group": g, "preview": pv, "task": groups.get(g, "")}
+            for k, g, _r, _gl, pv in table()]
 
 
 # ── previews ────────────────────────────────────────────────────────────────
@@ -453,9 +470,22 @@ def serve(aid):
         return p.read_bytes(), "text/html; charset=utf-8"
     if preview == "json":
         return p.read_bytes(), "application/json; charset=utf-8"
-    if preview in ("img", "audio"):
+    if preview in ("img", "audio") or preview not in PREVIEWS:
         return p.read_bytes(), mimetypes.guess_type(p.name)[0] or "application/octet-stream"
     return None
+
+
+def serve_script(name):
+    """(bytes, content type) of the project's own preview script `name`, or None for a name
+    `previewScripts` does not hold or a path outside the project."""
+    rel = scripts().get(name)
+    if rel is None:
+        return None
+    base = root()
+    p = (base / rel).resolve()
+    if base not in p.parents or not p.is_file():
+        return None
+    return p.read_bytes(), "text/javascript; charset=utf-8"
 
 
 # ── actions ─────────────────────────────────────────────────────────────────
@@ -492,7 +522,23 @@ def act_open(body):
     raise ValueError("unknown way to open %r" % how)
 
 
-ACTIONS = {"asset-open": act_open}
+def act_asset_task(body):
+    """File a ticket on one asset through the board's own `new` action: its source is the
+    asset's id, its tag `assets`. Severity defaults to Low, difficulty to unknown, the group to
+    the row's `taskGroups` entry."""
+    import todo_server
+    aid = body.get("id") or ""
+    row = index().get(aid)
+    if row is None:
+        raise KeyError(aid)
+    group = (body.get("group") or "").strip() or (config().get("taskGroups") or {}).get(row[1], "")
+    return todo_server.act_new(dict(
+        title=body.get("title") or "", severity=body.get("severity") or "Low",
+        difficulty=body.get("difficulty") or "unknown", group=group, source=aid, tags="assets",
+        description=body.get("description") or "", evidence="Filed from the asset board"))
+
+
+ACTIONS = {"asset-open": act_open, "asset-task": act_asset_task}
 
 
 # ── check and CLI ───────────────────────────────────────────────────────────

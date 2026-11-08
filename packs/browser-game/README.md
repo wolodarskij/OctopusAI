@@ -95,6 +95,8 @@ is empty, and the tool writes a note to stderr. Every key is optional.
 | `placeholders` | object | the value that fills each `{{name}}` in an SVG on the page. A placeholder with no value becomes empty |
 | `gridFill` | kind -> glob | an SVG of that kind is filled with the first one-bit grid the glob finds, as `width`, `height` and `cells` |
 | `ink` | colour | the colour of a one-bit grid on the page. Default `#000000` |
+| `taskGroups` | group -> ticket group | the ticket group that "File a task" picks for an asset of a row with that `group` |
+| `previewScripts` | preview -> path | the project's own previews. A row whose `preview` names one gets it. The page loads each script, relative to the project, once. The script sets `window.ASSET_PREVIEWS[<preview>] = {thumb(a, kit), detail(a, kit), badges(a, kit)}`: `thumb` and `detail` return an element, and `badges` returns the badge texts, or a promise of them. `kit` holds `el(tag, class, text)`, `src(a)` (the URL of the file), `toast(text, bad)`, `size(bytes)` and `jsonPreview(a, box)` |
 
 **A row of `kinds`:**
 
@@ -104,7 +106,7 @@ is empty, and the tool writes a note to stderr. Every key is optional.
 | `group` | the heading on the page rail |
 | `root` | the directory, relative to the project |
 | `globs` | the file names under `root` that match, for example `*.svg` or `**/*.png` |
-| `preview` | `svg` (placeholders filled), `grid` (a one-bit text grid: `#` is ink), `img`, `audio`, `html` (a sheet in a sandboxed frame), `json` (a key summary and the text), or `none` (open only) |
+| `preview` | `svg` (placeholders filled), `grid` (a one-bit text grid: `#` is ink), `img`, `audio`, `html` (a sheet in a sandboxed frame), `json` (a key summary and the text), `none` (open only), or a name of `previewScripts` |
 
 **A lookup of `usedBy`:**
 
@@ -154,8 +156,12 @@ assets.set_root(path)       # point the module at one project; call it before ea
 assets.inventory()          # -> list of records: {id, kind, group, name, path, bytes, mtime,
                             #    placeholders, usedBy, preview, badges, board}
 assets.kinds()              # -> list of {kind, group, preview}, in table order
+assets.scripts()            # -> {preview: project path} of the project's own previews
+assets.serve_script(name)   # -> (bytes, content type) of one preview script, or None
 assets.serve(id)            # -> (bytes, content type), or None for an unknown id or an open-only kind
-assets.ACTIONS              # {"asset-open": act_open}; act_open(body) takes {id, how}, how is open | edit | reveal
+assets.ACTIONS              # {"asset-open": act_open, "asset-task": act_asset_task}; act_open(body) takes
+                            # {id, how}, how is open | edit | reveal; act_asset_task(body) takes {id, title,
+                            # severity, difficulty, group, description} and files a ticket on the asset
 ```
 
 `GET /api/assets` answers `{"assets": inventory(), "kinds": kinds()}`, and `GET /asset/<id>`

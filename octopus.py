@@ -26,11 +26,16 @@
                                                   every pack is optional, and `packs` adds
                                                   or removes one later
     python octopus.py install <path> [--packs <pack,pack>]
-    python octopus.py update <path> | --all       write again every payload file a pack changed
+    python octopus.py update <path> | --all       write again every payload file a pack changed,
+                                                  after it removed every leftover of the old
+                                                  toolkit (leftovers.py)
+    python octopus.py leftovers <path> [--clean]  every leftover of the old toolkit; --clean
+                                                  removes or replaces each one
     python octopus.py uninstall <path> [--pack <name>]
     python octopus.py status <path>               each installed file; each open ticket or file
                                                   that misnames the toolkit; each entry file or
-                                                  setting that lets an agent narrate its work
+                                                  setting that lets an agent narrate its work;
+                                                  each leftover of the old toolkit
     python octopus.py adopt <path> | --all [--dry-run]
                                                   move a project's own rules and skills from
                                                   .claude/ into .agents/, and write each
@@ -277,7 +282,18 @@ def main(argv=None):
             import oldnames
             old = oldnames.report(oldnames.scan_project(project.resolve(a.path)))
             print("%d file(s) misname the toolkit" % old)
-            return 1 if c["missing"] or c["edited"] or c["reporting"] or old else 0
+            return 1 if (c["missing"] or c["edited"] or c["reporting"] or old
+                         or c["leftovers"]) else 0
+        if cmd == "leftovers":
+            ap.add_argument("path")
+            ap.add_argument("--clean", action="store_true",
+                            help="remove or replace each leftover")
+            a = ap.parse_args(rest)
+            import leftovers
+            root = project.resolve(a.path)
+            if a.clean:
+                leftovers.clean(root)
+            return 1 if leftovers.report(leftovers.find(root)) else 0
         if cmd == "packs":
             ap.add_argument("path")
             ap.add_argument("action", nargs="?", default="list",

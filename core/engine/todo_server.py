@@ -2404,14 +2404,18 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, project_view())
             if path == "/api/artifacts":
                 return self._send(200, _artifacts.listing(P.ROOT, P.cfg))
-            if path == "/api/assets" or path.startswith("/asset/"):
+            if path == "/api/assets" or path.startswith(("/asset/", "/asset-script/")):
                 assets = _assets()
                 if assets is None:
                     return self._send(404, {"error": "the browser-game pack is not installed"})
                 if path == "/api/assets":
                     return self._send(200, {"assets": assets.inventory(),
-                                            "kinds": assets.kinds()})
-                found = assets.serve(unquote(path[len("/asset/"):]))
+                                            "kinds": assets.kinds(),
+                                            "scripts": sorted(assets.scripts())})
+                if path.startswith("/asset-script/"):
+                    found = assets.serve_script(unquote(path[len("/asset-script/"):]))
+                else:
+                    found = assets.serve(unquote(path[len("/asset/"):]))
                 if found is None:
                     return self._send(404, {"error": "no such asset"})
                 data, ctype = found
