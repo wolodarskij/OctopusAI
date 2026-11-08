@@ -1612,7 +1612,10 @@ function visible(t) {
 /* ── render ─────────────────────────────────────────────────────────── */
 function render() {
   if (!DATA || GROUP_MOVING) return;
+  STALE = DATA.serverRestarts ? STALE_RESTART : STALE_TEXT;
+  if (!DATA.serverStale) STALE_SAID = false;
   if (DATA.serverStale && !STALE_SAID) { STALE_SAID = true; toast(STALE, true); }
+  drawManagerCheck(DATA.managerCheck);
   const b = $("#board"), sx = b.scrollLeft, sb = b.scrollTop, sy = {};
   b.querySelectorAll(".stack").forEach(s => sy[s.dataset.s] = s.scrollTop);
   b.innerHTML = "";
@@ -2685,8 +2688,21 @@ $("#pdlgC").addEventListener("click", () => copy($("#pdlgB").textContent));
    the Results stay, and Save rewrites it. Every further tab is a new ticket split off it,
    filed by the same Save. */
 let FORM = {mode: "new", drafts: [], cur: 0};
-const STALE = "the board server runs older code than this page · restart the board";
+const STALE_TEXT = "the board server runs older code than this page · restart the board";
+const STALE_RESTART = "the engine code changed · the board server starts again with it";
+let STALE = STALE_TEXT;
 let STALE_SAID = false;
+/* The Manager button turns amber while the board's check of the manager did not run within
+   its interval; its tooltip says since when, and why when the server knows. */
+const MANAGER_TIP = $("#manager").title;
+function drawManagerCheck(c) {
+  const b = $("#manager");
+  b.classList.toggle("warn", !!(c && c.late));
+  if (!(c && c.late)) { b.title = MANAGER_TIP; return; }
+  const last = c.checked ? new Date(c.checked * 1000).toLocaleTimeString() : "never";
+  b.title = `the manager's check did not run within ${Math.round(c.interval / 60)} min ` +
+    `(last: ${last})` + (c.why ? ` · ${c.why}` : "") + "\n" + MANAGER_TIP;
+}
 function fillSelect(id, values, chosen, blank, labelFn) {
   const s = $(id);
   s.innerHTML = "";

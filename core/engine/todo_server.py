@@ -60,10 +60,16 @@ import vcs as _vcs  # noqa: E402
 from project import P  # noqa: E402
 
 PAGE = HERE / "todo_board.html"
-TOKEN = secrets.token_urlsafe(24)
+# What the supervisor hands the server it starts (`supervise`). The server takes them out of
+# its environment at once, so no session it launches inherits the keys of the page.
+CHILD_ENV, TOKEN_ENV, VIEW_TOKEN_ENV = ("OCTOPUS_BOARD_CHILD", "OCTOPUS_BOARD_TOKEN",
+                                        "OCTOPUS_BOARD_VIEW_TOKEN")
+_HANDED = {k: os.environ.pop(k, "") for k in (CHILD_ENV, TOKEN_ENV, VIEW_TOKEN_ENV)}
+SUPERVISED = bool(_HANDED[CHILD_ENV])
+TOKEN = _HANDED[TOKEN_ENV] or secrets.token_urlsafe(24)
 # The key of `/view/` only: a project file opened in the board. A page served there can read
 # its own URL, so this key opens no `/api/` call.
-VIEW_TOKEN = secrets.token_urlsafe(24)
+VIEW_TOKEN = _HANDED[VIEW_TOKEN_ENV] or secrets.token_urlsafe(24)
 # Every `/view/` answer runs in an opaque origin, in the board's frame and in a tab of its own.
 VIEW_CSP = "sandbox allow-scripts allow-popups allow-forms allow-popups-to-escape-sandbox"
 # The types the platform's own table can name wrongly; a script sent as text/plain does not run.
@@ -73,13 +79,24 @@ VIEW_TYPES = {".html": "text/html", ".htm": "text/html", ".js": "text/javascript
               ".txt": "text/plain"}
 
 
+CODE_DIRS = (HERE, HERE.parent / "win", HERE.parent / "hooks", HERE.parent / "posix")
+
+
 def _code_stamp():
     """The newest change time of the engine's Python files."""
-    return max((f.stat().st_mtime_ns for f in HERE.glob("*.py")), default=0)
+    stamps = []
+    for d in CODE_DIRS:
+        for f in d.glob("*.py"):
+            try:
+                stamps.append(f.stat().st_mtime_ns)
+            except OSError:
+                continue
+    return max(stamps, default=0)
 
 
 # The page is read from disk on every request, the Python only at start. A server whose code
-# changed after it started serves a new page over old calls; `snapshot` says so.
+# changed after it started serves a new page over old calls; `snapshot` says so, and a
+# supervised server starts again (`restart_due`).
 CODE_STAMP = _code_stamp()
 EXTRA = {}          # name -> root of a project served without being registered
 DEFAULT = [None]    # the project the page opens on
@@ -230,6 +247,8 @@ def snapshot():
         "watchdog": watchdog_view(P.ROOT),
         "root": str(P.ROOT),
         "serverStale": _code_stamp() != CODE_STAMP,
+        "serverRestarts": SUPERVISED,
+        "managerCheck": manager_check_view(),
     }
 
 
@@ -555,6 +574,11 @@ def _watch_project(root, now):
 # `managercheck.wake_text()` into the session only on news. The first check comes one
 # interval after the watchdog first sees the session. Every tick writes the board's
 # heartbeat, which keeps the manager's fallback watcher (`check --watch`) idle.
+#
+# A brief section file newer than the manager's brief means the session reads old orders:
+# the tick writes the brief again and types `T.manager_brief_text` into the session in place
+# of the check. The page marks the Manager button while no check ran within its interval
+# (`manager_check_view`), with the reason the last tick saw.
 
 def wake_due(key, now, interval=None):
     """Reserve a due wake in the shared schedule before sending the prompt."""
@@ -563,22 +587,59 @@ def wake_due(key, now, interval=None):
     return managercheck.claim_wake(key, now, interval)
 
 
+_CHECK = {"since": 0.0, "managers": False, "skip": ""}   # what the last tick of the check saw
+
+
+def manager_check_view(now=None):
+    """`{"checked", "interval", "late", "why"}` of the board's check of the manager, or None
+    while no manager ticket of the home project is active."""
+    import managercheck
+    with _WATCH_LOCK:
+        seen = dict(_CHECK)
+    if not seen["managers"]:
+        return None
+    view = managercheck.check_view(seen["since"], now)
+    view["why"] = seen["skip"] if view["late"] else ""
+    return view
+
+
+def _note_check(now, managers, skip=""):
+    with _WATCH_LOCK:
+        if managers and not _CHECK["managers"]:
+            _CHECK["since"] = now
+        _CHECK.update(managers=bool(managers), skip=skip)
+
+
 def _wake_project(root, now):
     """Check the manager sessions of one project, the current one, and type the check into
-    each one on news. Returns the keys of the sessions woken."""
+    each one on news. A session whose brief is older than the brief sections is told to read
+    the brief again first. Returns the keys of the sessions woken."""
     import managercheck
     if not T.at_manager_home():
         return []
-    managers = {t.id for t in T.load_all()
+    managers = {t.id: t for t in T.load_all()
                 if t.repeat == T.MANAGER and t.state == T.lane("active")}
     if not managers:
+        _note_check(now, managers)
         return []
     managercheck.mark_board(now)
     woken = []
-    for s in T.live_sessions():
-        if s.get("id") not in managers or s.get("mode") != "work" or not s.get("claude"):
-            continue
+    live = [s for s in T.live_sessions()
+            if s.get("id") in managers and s.get("mode") == "work" and s.get("claude")]
+    _note_check(now, managers, "" if live else "no manager session runs")
+    for s in live:
         if s.get("wait") == "input":
+            _note_check(now, managers, "the manager waits for your answer")
+            continue
+        t = managers[s["id"]]
+        if T.manager_brief_stale(t):
+            brief = T.rewrite_manager_brief(t)
+            try:
+                T.send_session(s, T.manager_brief_text(brief), ["Enter"])
+            except (OSError, ValueError) as exc:
+                os.utime(str(brief), ns=(0, 0))         # stale again: the next tick tries again
+                print("watchdog: %s %s: the new brief could not be typed: %s"
+                      % (root.name, s["id"], exc))
             continue
         if not wake_due((os.path.normcase(str(root.resolve())), s["session"]), now):
             continue
@@ -722,17 +783,34 @@ def watchdog_view(root):
                 for k, v in _WATCH.items() if k[0] == str(root)}
 
 
-def start_watchdog(interval=WATCHDOG_INTERVAL):
-    """The daemon thread that runs `watchdog_tick` every `interval` seconds."""
+def restart_due(pending, stamp, start=None):
+    """`(due, pending)`: whether the engine code `stamp` differs from the code at `start` and
+    equals `pending`, the stamp of the tick before, so an edit in progress restarts nothing."""
+    start = CODE_STAMP if start is None else start
+    if stamp == start:
+        return False, None
+    return stamp == pending, stamp
+
+
+def start_watchdog(interval=WATCHDOG_INTERVAL, on_code_change=None):
+    """The daemon thread that runs `watchdog_tick` every `interval` seconds. With
+    `on_code_change`, it calls it and stops once `restart_due` says so."""
     import time
 
     def loop():
+        pending = None
         while True:
             time.sleep(interval)
             try:
                 watchdog_tick()
             except Exception as exc:                    # noqa: BLE001 - the thread must live
                 print("watchdog: %s: %s" % (type(exc).__name__, exc))
+            if on_code_change is None:
+                continue
+            due, pending = restart_due(pending, _code_stamp())
+            if due:
+                on_code_change()
+                return
 
     th = threading.Thread(target=loop, name="octopus-watchdog", daemon=True)
     th.start()
@@ -2549,6 +2627,9 @@ def main(argv=None):
     ap.add_argument("--page", choices=("board", "assets"), default="board")
     ap.add_argument("--no-manager", action="store_true",
                     help="do not start the manager when the board opens")
+    ap.add_argument("--no-restart", action="store_true",
+                    help="run the server in this process; it does not start again when the "
+                         "engine code changes")
     args = ap.parse_args(argv)
     try:
         args.project = first_project(args.project)
@@ -2560,8 +2641,10 @@ def main(argv=None):
               "`octopus board --project <folder>` installs Octopus AI into that folder",
               file=sys.stderr)
         return 2
+    if not SUPERVISED and not args.no_restart:
+        return supervise(args)
     httpd = make_server(args.port, args.project)
-    start_watchdog()
+    start_watchdog(on_code_change=(lambda: _stop_for_restart(httpd)) if SUPERVISED else None)
     if not args.no_manager:
         threading.Thread(target=autostart_managers, name="octopus-manager", daemon=True).start()
     port = httpd.server_address[1]
@@ -2579,7 +2662,76 @@ def main(argv=None):
     except KeyboardInterrupt:
         print("")
     httpd.server_close()
-    return 0
+    return RESTART_EXIT if _RESTART else 0
+
+
+# ── the restart on a change of the engine code ─────────────────────────────
+#
+# `octopus board` runs as two processes. The supervisor serves nothing: it starts the server
+# as a child process with the port and the keys of the page, and starts it again when the
+# child exits with `RESTART_EXIT`. The child's watchdog stops the server with that code once
+# the engine code changed and stayed the same for one tick (`restart_due`). The open page
+# goes on with the new code, and no second browser tab opens. A child that fails starts again
+# on the next change of the engine code.
+
+RESTART_EXIT = 75
+RESTART_POLL = 5
+_RESTART = []
+
+
+def _stop_for_restart(httpd):
+    _RESTART.append(True)
+    print("board: the engine code changed: the server starts again")
+    httpd.shutdown()
+
+
+def _free_port():
+    import socket
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def child_argv(args, port, first):
+    """The command line of the server the supervisor starts."""
+    argv = [sys.executable, str(project.OCTOPUS / "octopus.py"), "board", "--port", str(port),
+            "--page", args.page]
+    if args.project:
+        argv += ["--project", str(args.project)]
+    if args.no_manager:
+        argv.append("--no-manager")
+    if args.no_open or not first:
+        argv.append("--no-open")
+    return argv
+
+
+def supervise(args, call=None, stamp=None, sleep=None):
+    """Run the server in a child process until it exits for any reason but a restart.
+    Returns its exit code."""
+    import subprocess
+    import time
+    call = subprocess.call if call is None else call
+    stamp = _code_stamp if stamp is None else stamp
+    sleep = time.sleep if sleep is None else sleep
+    port = args.port or _free_port()
+    env = dict(os.environ, **{CHILD_ENV: "1", TOKEN_ENV: TOKEN, VIEW_TOKEN_ENV: VIEW_TOKEN})
+    first = True
+    try:
+        while True:
+            began = stamp()
+            rc = call(child_argv(args, port, first), env=env)
+            if rc == RESTART_EXIT:
+                first = False
+                continue
+            if first or rc == 0:
+                return rc
+            print("board: the server stopped with exit code %s; it starts again when the "
+                  "engine code changes" % rc)
+            while stamp() == began:
+                sleep(RESTART_POLL)
+    except KeyboardInterrupt:
+        print("")
+        return 0
 
 
 if __name__ == "__main__":

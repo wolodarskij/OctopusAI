@@ -324,6 +324,22 @@ def remember(seen):
     update_state(**seen)
 
 
+LATE_MARGIN = 60
+
+
+def check_view(since, now=None, interval=INTERVAL):
+    """`{"checked", "interval", "late"}`: when the last check ran, and whether none ran within
+    `interval` plus `LATE_MARGIN` seconds. `since` is when the board began to check, so a
+    board that just started is not late."""
+    now = time.time() if now is None else now
+    try:
+        checked = float(load_state().get("checked") or 0)
+    except (TypeError, ValueError):
+        checked = 0.0
+    late = now - max(checked, float(since or 0)) > interval + LATE_MARGIN
+    return {"checked": checked, "interval": interval, "late": late}
+
+
 # ── the run ────────────────────────────────────────────────────────────────
 
 def _report(registry, dry_run, out, err):

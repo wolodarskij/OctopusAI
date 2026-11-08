@@ -5565,6 +5565,38 @@ def relaunch_args(t, terminal=None, dry_run=False):
                               provider=ticket_provider(t) or None)
 
 
+def manager_brief_stale(t):
+    """Whether a brief section file changed after the brief of manager `t` was written, so
+    its running session reads instructions older than the engine's. False with no brief."""
+    try:
+        written = (P.BRIEFS / ("%s.md" % t.id)).stat().st_mtime_ns
+    except OSError:
+        return False
+    for p in P.brief_layers().values():
+        try:
+            if p.stat().st_mtime_ns > written:
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def rewrite_manager_brief(t):
+    """Write the brief of manager `t` again, as its launch writes it. Returns its path."""
+    f = P.BRIEFS / ("%s.md" % t.id)
+    P.BRIEFS.mkdir(parents=True, exist_ok=True)
+    _write(f, build_brief(t, "work", "", launch_provider(t, ticket_provider(t) or None)))
+    return f
+
+
+def manager_brief_text(path):
+    """What the board types into a manager session whose brief changed."""
+    return ("Manager brief: the engine changed your instructions. Read %s again, first and "
+            "in full, and follow it from now on in place of the text you read before. Do "
+            "what it orders at the start of a session. Write nothing about it. Then end "
+            "this turn and keep the session open for the owner." % Path(path).as_posix())
+
+
 def cmd_remote_control(args):
     """Set Remote Control on tickets. `on` reaches a live session that waits at its prompt at
     once; everything else reaches the next launch."""

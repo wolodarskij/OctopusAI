@@ -3,7 +3,9 @@ works, nothing only when none does, the follow-ups a finished cross-project tick
 unlaunched, the news that wakes the manager, the fallback watcher, and the board's wake.
 python -m unittest discover tests"""
 
+import argparse
 import io
+import os
 import unittest
 import uuid
 from unittest import mock
@@ -306,7 +308,9 @@ class Wake(FixtureCase):
         self.patches = [mock.patch.object(T, "live_sessions",
                                           lambda tickets=None: self.live),
                         mock.patch.object(T, "send_session", self.send),
-                        mock.patch.object(C, "evaluate", lambda **kw: self.news)]
+                        mock.patch.object(C, "evaluate", lambda **kw: self.news),
+                        mock.patch.dict(todo_server._CHECK,
+                                        {"since": 0.0, "managers": False, "skip": ""})]
         for p in self.patches:
             p.start()
 
@@ -347,6 +351,89 @@ class Wake(FixtureCase):
         todo_server._wake_project(self.root, 1e9)
         self.assertTrue(C.board_runs(1e9 + C.INTERVAL))
         self.assertFalse(C.board_runs(1e9 + C.BOARD_STALE))
+
+    def stale_brief(self):
+        t = T.find(T.load_all(), self.mid)
+        brief = T.rewrite_manager_brief(t)
+        os.utime(str(brief), ns=(1, 1))
+        self.assertTrue(T.manager_brief_stale(t))
+        return t, brief
+
+    def test_a_manager_with_an_old_brief_is_told_to_read_the_new_one(self):
+        t, brief = self.stale_brief()
+        self.assertEqual(todo_server._wake_project(self.root, 1e9), [])
+        text = self.send.call_args[0][1]
+        self.assertIn(brief.as_posix(), text)
+        self.assertIn("Manager brief", text)
+        self.assertFalse(T.manager_brief_stale(t))
+        self.send.reset_mock()
+        todo_server._wake_project(self.root, 1e9 + 30)
+        self.assertFalse(self.send.called)
+
+    def test_a_manager_waiting_for_the_owner_gets_no_new_brief(self):
+        t, _brief = self.stale_brief()
+        self.live = [sess(SID_A, self.mid, "input")]
+        todo_server._wake_project(self.root, 1e9)
+        self.assertFalse(self.send.called)
+        self.assertTrue(T.manager_brief_stale(t))
+
+    def test_the_view_says_when_the_check_is_late_and_why(self):
+        self.live = [sess(SID_A, self.mid, "input")]
+        todo_server._wake_project(self.root, 1e9)
+        late = 1e9 + C.INTERVAL + C.LATE_MARGIN + 1
+        view = todo_server.manager_check_view(late)
+        self.assertTrue(view["late"])
+        self.assertEqual(view["why"], "the manager waits for your answer")
+        C.update_state(checked=late - 5)
+        self.assertFalse(todo_server.manager_check_view(late)["late"])
+
+
+class Restart(unittest.TestCase):
+    def test_a_code_change_restarts_only_once_it_holds_for_a_tick(self):
+        self.assertEqual(todo_server.restart_due(None, 5, start=5), (False, None))
+        self.assertEqual(todo_server.restart_due(None, 6, start=5), (False, 6))
+        self.assertEqual(todo_server.restart_due(6, 7, start=5), (False, 7))
+        self.assertEqual(todo_server.restart_due(7, 7, start=5), (True, 7))
+
+    def args(self, **kw):
+        a = dict(port=4321, project="Sample Game", page="board", no_manager=False,
+                 no_open=False)
+        a.update(kw)
+        return argparse.Namespace(**a)
+
+    def test_the_supervisor_starts_the_server_again_on_the_same_port_and_keys(self):
+        codes = [todo_server.RESTART_EXIT, 0]
+        calls = []
+
+        def call(argv, env):
+            calls.append((argv, env))
+            return codes.pop(0)
+        rc = todo_server.supervise(self.args(), call=call, stamp=lambda: 1, sleep=None)
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(calls), 2)
+        first, again = calls[0][0], calls[1][0]
+        self.assertNotIn("--no-open", first)
+        self.assertIn("--no-open", again)
+        self.assertEqual(first[first.index("--port") + 1], "4321")
+        self.assertEqual(again[again.index("--port") + 1], "4321")
+        env = calls[1][1]
+        self.assertEqual(env[todo_server.TOKEN_ENV], todo_server.TOKEN)
+        self.assertEqual(env[todo_server.CHILD_ENV], "1")
+
+    def test_a_failed_restart_waits_for_the_next_code_change(self):
+        codes = [todo_server.RESTART_EXIT, 1, 0]
+        stamps = [1, 2, 2, 2, 3, 3]
+        slept = []
+        rc = todo_server.supervise(self.args(), call=lambda argv, env: codes.pop(0),
+                                   stamp=lambda: stamps.pop(0), sleep=slept.append)
+        self.assertEqual(rc, 0)
+        self.assertEqual(codes, [])
+        self.assertEqual(len(slept), 2)
+
+    def test_a_server_that_fails_at_the_first_start_ends_the_board(self):
+        rc = todo_server.supervise(self.args(), call=lambda argv, env: 2, stamp=lambda: 1,
+                                   sleep=None)
+        self.assertEqual(rc, 2)
 
 
 class Brief(FixtureCase):
