@@ -1934,5 +1934,116 @@ class Reevaluate(FixtureCase):
                          "the last one left no verdict: started again")
 
 
+class LeftoverShells(FixtureCase):
+    """A background shell counts only while it runs a process; a shell that runs none, and
+    every shell of a finished session, is killed with its tree. No process is started: the
+    process table is built by hand and the kill is a mock."""
+
+    BASH = (r'"X:\Tools\Git\bin\bash.exe" -c "source '
+            r"/x/.claude/shell-snapshots/snapshot-bash-1-a.sh && eval 'npm test'\"")
+    PWSH = ('powershell.exe -NoProfile -Command "$__claudeCodeScript = '
+            '$env:CLAUDE_CODE_SHELL_LAUNCHER_SCRIPT; Invoke-Expression $__claudeCodeScript"')
+
+    def setUp(self):
+        super().setUp()
+        self.root = self.make("Wait")
+        self.tok = project.use(self.root)
+        self.killed = []
+        self.lines = {}
+        self.addCleanup(mock.patch.stopall)
+        mock.patch("winproc.taskkill", side_effect=lambda pid, force=False, tree=True:
+                   self.killed.append((pid, force, tree)) or 0).start()
+        mock.patch("winproc.command_lines",
+                   side_effect=lambda pids: {p: self.lines[p] for p in pids
+                                             if p in self.lines}).start()
+
+    def tearDown(self):
+        project.reset(self.tok)
+        super().tearDown()
+
+    def procs(self, busy=False, extra=None):
+        """Claude 100 under its shell 50; its tool shell 200 > 201 > conhost 202, and with
+        `busy` a node 203 under 201; an MCP server 300 started by cmd under Claude."""
+        procs = {50: (1, "cmd.exe"), 100: (50, "claude.exe"), 200: (100, "bash.exe"),
+                 201: (200, "bash.exe"), 202: (201, "conhost.exe"), 300: (100, "cmd.exe"),
+                 301: (300, "node.exe")}
+        if busy:
+            procs[203] = (201, "node.exe")
+        procs.update(extra or {})
+        self.lines = {200: self.BASH, 300: "cmd /c npx some-mcp-server"}
+        return procs
+
+    def sess(self, tasks=(SHELL,)):
+        session_state.mark_tasks(SID, 50, list(tasks))
+        return {"session": SID, "mark_shell": 50, "claude": 100, "id": "T0001",
+                "tasks": list(tasks)}
+
+    def test_only_claude_codes_tool_shells_count(self):
+        procs = self.procs()
+        self.lines[301] = self.BASH
+        self.assertEqual(session_state.tool_shells(procs, 100, self.lines), [200])
+
+    def test_a_shell_runs_a_process_only_with_a_program_below_it(self):
+        self.assertFalse(session_state.shell_runs_process(self.procs(), 200))
+        self.assertTrue(session_state.shell_runs_process(self.procs(busy=True), 200))
+
+    def test_powershell_always_runs_a_process(self):
+        procs = {100: (1, "claude.exe"), 400: (100, "powershell.exe")}
+        self.assertEqual(session_state.tool_shells(procs, 100, {400: self.PWSH}), [400])
+        self.assertTrue(session_state.shell_runs_process(procs, 400))
+
+    def test_an_idle_shell_is_killed_after_the_grace(self):
+        s, procs = self.sess(), self.procs()
+        self.assertEqual(todo.reap_shells(s, procs, now=1000.0), [])
+        self.assertEqual(todo.reap_shells(s, procs, now=1030.0), [])
+        self.assertEqual(self.killed, [])
+        self.assertEqual(todo.reap_shells(s, procs, now=1000.0
+                                          + session_state.IDLE_SHELL_SECONDS), [200])
+        self.assertEqual(self.killed, [(200, True, True)])
+        # No tool shell is left, so the recorded shell is no work any more.
+        self.assertEqual(session_state.background_tasks(SID, 50), [])
+        self.assertEqual(todo.wait_state(dict(session(tasks=s["tasks"]), judge="finished",
+                                              judge_why="x"), None)[0], "idle")
+
+    def test_a_shell_that_runs_a_process_is_never_killed(self):
+        s, procs = self.sess(), self.procs(busy=True)
+        for now in (1000.0, 1100.0, 5000.0):
+            self.assertEqual(todo.reap_shells(s, procs, now=now), [])
+        self.assertEqual(self.killed, [])
+        self.assertEqual(session_state.background_tasks(SID, 50), [SHELL])
+
+    def test_a_changed_tree_starts_the_grace_again(self):
+        s = self.sess()
+        todo.reap_shells(s, self.procs(), now=1000.0)
+        todo.reap_shells(s, self.procs(extra={204: (201, "bash.exe")}), now=1070.0)
+        self.assertEqual(self.killed, [])
+        todo.reap_shells(s, self.procs(extra={204: (201, "bash.exe")}), now=1130.0)
+        self.assertEqual([k[0] for k in self.killed], [200])
+
+    def test_a_finished_session_loses_every_tool_shell(self):
+        s = self.sess()
+        self.assertEqual(todo.reap_shells(s, self.procs(busy=True), finished=True), [200])
+        self.assertEqual(self.killed, [(200, True, True)])
+
+    def test_a_recorded_shell_with_no_shell_under_claude_is_no_work(self):
+        procs = {50: (1, "cmd.exe"), 100: (50, "claude.exe")}
+        s = self.sess(tasks=(AGENT, SHELL))
+        todo.reap_shells(s, procs, now=1000.0)
+        self.assertEqual(s["tasks"], [AGENT])
+        self.assertEqual(session_state.background_tasks(SID, 50), [AGENT])
+
+    def test_the_shell_this_process_runs_in_is_never_killed(self):
+        me = os.getpid()
+        procs = self.procs(extra={me: (201, "python.exe")})
+        procs[201] = (200, "bash.exe")
+        s = self.sess()
+        todo.reap_shells(s, procs, finished=True)
+        self.assertEqual(self.killed, [])
+
+    def test_the_finished_line_outranks_a_recorded_shell(self):
+        self.assertEqual(todo.wait_state(session(says_finished="WORK IS FINISHED",
+                                                 tasks=[SHELL]), None)[0], "finished")
+
+
 if __name__ == "__main__":
     unittest.main()

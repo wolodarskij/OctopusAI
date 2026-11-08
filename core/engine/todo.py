@@ -4604,6 +4604,11 @@ def live_sessions(tickets=None, recheck=False):
     the recurring jobs the session scheduled; the blockers and children of its ticket that
     are not yet in Verification or Done.
 
+    Each scan also kills leftover shells (`reap_shells`): a tool shell that runs no process
+    for `session_state.IDLE_SHELL_SECONDS`, and every tool shell of a `finished` session,
+    with their process trees. `killed_shells` lists them. A recorded background shell with
+    no tool shell left under the Claude is dropped, so it never makes the session working.
+
     Each entry also carries `signals` from `wait_signals`: every signal above with its
     value, and the rule that decided, so the owner can tell a wrong decision from a signal
     that never came.
@@ -4795,8 +4800,17 @@ def live_sessions(tickets=None, recheck=False):
         # The tickets this one waits for: its blockers and its children that are not yet
         # in Verification or Done.
         s["waits_for"] = [] if t is None else waits_for(t, tickets)
+        try:
+            reap_shells(s, procs)
+        except Exception:                               # noqa: BLE001 - the scan goes on
+            s.setdefault("killed_shells", [])
         read_turn(s, recheck)
         s["wait"], s["why"] = wait_state(s, t)
+        if s["wait"] == "finished" and s.get("claude"):
+            try:
+                reap_shells(s, procs, finished=True)
+            except Exception:                           # noqa: BLE001 - the scan goes on
+                pass
         s["running"] = s["wait"] is None
         s["signals"] = wait_signals(s, t)
     return found + hand
@@ -4836,6 +4850,48 @@ def _read_marks(s):
     s["reported_why"] = session_state.reported_why(sid, shell)
     s["jobs"] = session_state.all_jobs(sid, shell, session_transcript(sid))
     s["tasks"] = session_state.background_tasks(sid, shell)
+
+
+def _ancestors(procs):
+    """This process and every process above it."""
+    out, pid = set(), os.getpid()
+    while pid in procs and pid not in out and len(out) < 64:
+        out.add(pid)
+        pid = procs[pid][0]
+    return out
+
+
+def reap_shells(s, procs, finished=False, now=None):
+    """Kill by force, with its whole process tree, each tool shell of the session that runs
+    no process with the same tree for `session_state.IDLE_SHELL_SECONDS`, and with
+    `finished` every tool shell of the session. A shell that runs this process is never
+    killed. With no tool shell left under the session's Claude, the shells of its recorded
+    background tasks are dropped, so a shell that does not run never makes it `working`.
+    `s["killed_shells"]` collects the pids killed; returns those of this call."""
+    import time
+    import session_state
+    import winproc
+    now = time.time() if now is None else now
+    s.setdefault("killed_shells", [])
+    claude = s.get("claude")
+    if not claude or s.get("provider", "claude") != "claude" or claude not in procs:
+        return []
+    sid, shell = s["session"], s.get("mark_shell") or 0
+    cand = [p for p, (ppid, name) in procs.items()
+            if ppid == claude and name in session_state.SHELL_IMAGES]
+    roots = session_state.tool_shells(procs, claude, winproc.command_lines(cand) if cand
+                                      else {})
+    mine = _ancestors(procs)
+    free = [r for r in roots if r not in mine]
+    kill = free if finished else session_state.idle_shells(sid, shell, procs, free, now)
+    killed = [r for r in kill if winproc.taskkill(r, force=True, tree=True) in (0, 128)]
+    s["killed_shells"] += [r for r in killed if r not in s["killed_shells"]]
+    left = [r for r in roots if r not in killed]
+    tasks = session_state.background_tasks(sid, shell)
+    if not left and any(str(x.get("type") or "").lower() in session_state.SHELL_TASK_TYPES
+                        for x in tasks):
+        s["tasks"] = session_state.drop_shell_tasks(sid, shell)
+    return killed
 
 
 def _judge_needed(s):
@@ -5149,7 +5205,7 @@ def wait_state(s, t, now=None):
              tickets and it holds a recurring job          row 3
         2  the turn ended, and its last line asks          input
         3  it holds a recurring job, or its own subagent
-             or background shell runs                      blocker when its ticket waits for
+             runs, or its background shell runs a process  blocker when its ticket waits for
                                                            other tickets, else subagent
         4  the turn runs and wrote within `STALE_SECONDS`,
              or a tool call of the turn has no result yet  None
@@ -5337,6 +5393,9 @@ def wait_signals(s, t):
     else:
         out.append(["recap", "not needed"])
     out.append(["background work", _tasks_text(s["tasks"]) if s.get("tasks") else "none"])
+    if s.get("killed_shells"):
+        out.append(["shells killed", "pid %s: ran no process, or the session is finished"
+                    % ", ".join(str(p) for p in s["killed_shells"])])
     out.append(["jobs", ", ".join(s["jobs"]) if s.get("jobs") else "none"])
     if t is None:
         out.append(["ticket", "none"])

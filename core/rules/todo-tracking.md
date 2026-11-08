@@ -229,10 +229,15 @@ owner's answer, and only when it explicitly waits for it. `event`: it waits for 
 outside the project, such as an editor restart; it reported it with `report <id> event --why
 "<the event>" --mode <mode>`, and nobody has to answer it. `working` (the engine's word is
 `subagent`): it still works on what is not the owner's, its scheduled job, its own subagent or
-background shell, or the judge says it still does its own work; Claude Code calls it back when
+a background shell that runs a process, or the judge says it still does its own work; Claude Code calls it back when
 that work completes. `blocker`: the same, while its ticket waits for other tickets (`blocked by
 other task`, a ticket in its `blocked-by:`, an open child). `idle`: nothing says yet what it
 waits for. `finished`: it waits for nothing.
+
+**A background shell counts only while it runs a process.** Each scan kills by force, with
+its whole process tree, a background shell of a session that runs no process for 60 seconds,
+and every background shell of a `finished` session. A background shell that no longer runs
+never makes a session `working`.
 
 **The engine decides the state in this order, and the first step that matches wins:**
 
@@ -246,7 +251,7 @@ waits for. `finished`: it waits for nothing.
 | 0 | it reported `report <id> input --why "<the question>" --mode <mode>` in this turn | `input` |
 | 1 | its turn ended, and its last lines say its ticket is in Verification or Done, or it reported `finished` | `finished`; a manager `idle` |
 | 2 | its turn ended, and the last line of its last message is a question | `input` |
-| 3 | it holds a recurring job, or its own subagent or background shell runs | `blocker` when its ticket waits for other tickets, else `working` |
+| 3 | it holds a recurring job, its own subagent runs, or its background shell runs a process | `blocker` when its ticket waits for other tickets, else `working` |
 | 4 | its turn runs and wrote to its transcript within 5 minutes, or a tool call of its turn has no result yet | `running` |
 | 5 | its turn ended, or it wrote nothing for 5 minutes and no tool call runs: the judge reads its last message and its ticket | the verdict: `input`, `finished`, `working` or `blocker` |
 | 6 | the judge is unsure: the engine types `/recap` into the session once, and the judge reads the recap | the verdict on the recap; `idle` when it is unsure again or no recap comes within 2 minutes |

@@ -111,6 +111,15 @@ waits for neither the owner nor anything outside. The `Stop` payload lists that 
 `background_tasks`, a field the hook documentation does not name, and `<key>.tasks` keeps
 the ones that still run. The next turn's `Stop` rewrites it.
 
+A background shell counts only while it runs a process. Claude Code starts the shells of its
+Bash and PowerShell tools directly under its Claude, with its shell snapshot or its launcher
+variable on the command line (`tool_shells`). A POSIX shell runs a process when a process
+below it is no shell and no console host (`shell_runs_process`). `todo.py live_sessions`
+kills by force, with its whole process tree, a tool shell that runs no process with the same
+tree at two scans `IDLE_SHELL_SECONDS` apart (`idle_shells`, `<key>.shells`), and every tool
+shell of a `finished` session. With no tool shell left under the Claude, the shells of
+`<key>.tasks` are dropped (`drop_shell_tasks`): a shell that does not run is no work.
+
 A session that scheduled a recurring prompt with `CronCreate` waits for that job at its
 prompt, not for the owner: the blocked brief does it, and so does a manager's watcher. Two
 records find the jobs, and a session holds every job either of them names (`all_jobs`):
@@ -882,6 +891,108 @@ def background_tasks(session_id, shell=0):
     except ValueError:
         return []
     return [t for t in tasks if isinstance(t, dict)] if isinstance(tasks, list) else []
+
+
+# -- the tool shells -----------------------------------------------------------
+
+# The `type` of a background task that is a shell, not a subagent.
+SHELL_TASK_TYPES = ("shell", "bash", "local_bash", "powershell")
+# What the command line of a shell that Claude Code starts for its Bash or PowerShell tool
+# holds: the shell snapshot it sources, or the variable its PowerShell launcher reads.
+TOOL_SHELL_MARKS = ("shell-snapshots", "CLAUDE_CODE_SHELL_LAUNCHER_SCRIPT")
+# The shells that run their own commands in their own process: a cmdlet of PowerShell or a
+# builtin of cmd starts no process, so no process table shows whether they still work.
+OPAQUE_SHELLS = ("cmd.exe", "powershell.exe", "pwsh.exe", "nu.exe", "pwsh", "nu")
+# Seconds a tool shell must run no process, with the same process tree, before it is
+# killed: a loop of short commands changes its tree between two scans, a hung shell does not.
+IDLE_SHELL_SECONDS = 60
+
+
+def tool_shells(procs, claude, lines):
+    """The shells directly under the Claude process `claude` that Claude Code started for its
+    Bash or PowerShell tool, by their command lines `lines` (`pid -> line`). `procs` is
+    `pid -> (parent pid, image)`. Sorted by pid."""
+    return sorted(p for p, (ppid, name) in procs.items()
+                  if ppid == claude and name in SHELL_IMAGES
+                  and any(m in (lines.get(p) or "") for m in TOOL_SHELL_MARKS))
+
+
+def shell_tree(procs, root):
+    """`root` and every process below it, sorted by pid."""
+    out, todo = set(), [root]
+    while todo:
+        p = todo.pop()
+        if p in out:
+            continue
+        out.add(p)
+        todo += [c for c, (ppid, _n) in procs.items() if ppid == p]
+    return sorted(out)
+
+
+def shell_runs_process(procs, root):
+    """Whether the tool shell `root` runs a process: a process below it that is no POSIX
+    shell and no console host. A PowerShell or cmd shell always counts as one that does."""
+    if procs.get(root, (0, ""))[1] in OPAQUE_SHELLS:
+        return True
+    idle = tuple(x for x in SHELL_IMAGES if x not in OPAQUE_SHELLS) + TERMINAL_IMAGES
+    return any(procs[p][1] not in idle for p in shell_tree(procs, root) if p != root)
+
+
+def _shells_path(session_id, shell=0):
+    return _dir() / ("%s.shells" % key(session_id, shell))
+
+
+def idle_shells(session_id, shell, procs, roots, now):
+    """The tool shells of `roots` that ran no process, with the same process tree, at a scan
+    `IDLE_SHELL_SECONDS` or more before `now`. `<key>.shells` keeps, for each tool shell
+    that runs no process, its tree and the first scan that saw it so; a shell that runs a
+    process, or whose tree changed, starts again."""
+    path = _shells_path(session_id, shell)
+    try:
+        old = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        old = {}
+    old = old if isinstance(old, dict) else {}
+    new, due = {}, []
+    for r in roots:
+        if shell_runs_process(procs, r):
+            continue
+        tree = shell_tree(procs, r)
+        rec = old.get(str(r))
+        since = now
+        if isinstance(rec, dict) and rec.get("tree") == tree:
+            try:
+                since = float(rec.get("since"))
+            except (TypeError, ValueError):
+                since = now
+        new[str(r)] = {"tree": tree, "since": since}
+        if now - since >= IDLE_SHELL_SECONDS:
+            due.append(r)
+    try:
+        if new:
+            _dir().mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(new), encoding="utf-8")
+        else:
+            path.unlink()
+    except OSError:
+        pass
+    return due
+
+
+def drop_shell_tasks(session_id, shell=0):
+    """Remove the shells from the background tasks this terminal's session recorded, and
+    keep its subagents. Returns the tasks left."""
+    left = [t for t in background_tasks(session_id, shell)
+            if str(t.get("type") or "").lower() not in SHELL_TASK_TYPES]
+    for p in (_tasks_path(session_id, shell), _tasks_path(session_id, 0)):
+        try:
+            if left and p.exists():
+                p.write_text(json.dumps(left, ensure_ascii=False), encoding="utf-8")
+            elif not left:
+                p.unlink()
+        except OSError:
+            pass
+    return left
 
 
 def idle_finished(session_id, shell=0):
@@ -1832,7 +1943,7 @@ def prune(keep_seconds=KEEP_SECONDS):
             alive.add(rec["session"])
     for p in (list(_dir().glob("*.idle")) + list(_dir().glob("*.report"))
               + list(_dir().glob("*.cron")) + list(_dir().glob("*.tasks"))
-              + list(_dir().glob("*.judge")) + list(_dir().glob("*.last"))
+              + list(_dir().glob("*.shells")) + list(_dir().glob("*.judge")) + list(_dir().glob("*.last"))
               + list(_dir().glob("*.judging")) + list(_dir().glob("*.cronscan"))
               + list(_dir().glob("*.stale")) + list(_dir().glob("*.recap"))
               + list(_dir().glob("*.home"))):
