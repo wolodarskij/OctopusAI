@@ -3,21 +3,22 @@
     python octopus.py check [--watch] [--dry-run]
 
 The manager's model runs only when the manager has something to say. Two timers run the check
-in Python and wake the manager only on news (`evaluate`):
+in Python every `INTERVAL` seconds and wake the manager only on news (`evaluate`):
 
 - THE BOARD. Every `INTERVAL` seconds the board's watchdog runs `evaluate` for each live
   manager session of every AI provider, and types `wake_text()` into the session on news. Its
   heartbeat (`mark_board`) says that the board runs.
 - THE FALLBACK. `check --watch`, which a Claude manager runs in the background, wakes no model
   while it waits. While the board's heartbeat is older than `BOARD_STALE`, it runs `evaluate`
-  `BUSY_INTERVAL` after the last check when that check found an agent, else `IDLE_INTERVAL`
-  after it. On news it runs the check, prints it, and exits, which calls the manager back. A
-  new watcher replaces the one before it, which exits with no output.
+  `INTERVAL` after the last check. On news it runs the check, prints it, and exits, which
+  calls the manager back. A new watcher replaces the one before it, which exits with no
+  output.
 
-News is an agent that finished since the last update, a question that waits for the owner and
-was not reported yet, or a notice that was not reported yet. A working agent and a question
-that was reported already are no news. `manager-watch.json` beside the registry holds the
-state.
+News is every row of the update: an agent that finished since the last update, one that waits
+for the owner, one that works and one that waits for anything else. A notice that was not
+reported yet is news too. So while any agent runs, the manager gets the full update every
+interval, and a finished agent reaches it within one interval. `manager-watch.json` beside
+the registry holds the state.
 
 One check, `check` alone, does four things:
 
@@ -57,8 +58,6 @@ for _d in (HERE, HERE.parent / "win", HERE.parent / "hooks"):
 import project  # noqa: E402
 
 INTERVAL = 600
-BUSY_INTERVAL = 3600
-IDLE_INTERVAL = 3 * 3600
 BOARD_STALE = 2 * INTERVAL
 WATCH_POLL = 60
 STATE_FILE = "manager-watch.json"
@@ -246,7 +245,7 @@ def state_file():
 
 
 def load_state():
-    """`{"board", "checked", "busy", "questions", "notices", "watcher"}`, each part absent
+    """`{"board", "checked", "notices", "watcher"}`, each part absent
     until something wrote it."""
     try:
         data = json.loads(state_file().read_text(encoding="utf-8"))
@@ -300,27 +299,23 @@ def notice_ids():
 
 def evaluate(registry=None, dry_run=False, now=None, err=None):
     """One check with no model: the AI ticket sweep, the follow-ups, and the update's rows,
-    with no write of the update's snapshot. Records when it ran and whether any agent was
-    there. Returns `(news, seen)`; call `remember(seen)` once the news reached the manager."""
+    with no write of the update's snapshot. Records when it ran. News is any row of the
+    update, or a notice that was not reported yet. Returns `(news, seen)`; call
+    `remember(seen)` once the news reached the manager."""
     import sessionreport
     err = sys.stderr if err is None else err
     now = time.time() if now is None else now
     sort_ai_tickets(registry, dry_run, err)
     launch_followups(registry, dry_run, err)
     rows, _live = sessionreport.collect(True, registry)
-    questions = sorted({"%s %s" % (r.get("key") or "", r.get("text") or "")
-                        for r in rows if r.get("section") == "input"})
-    seen = {"questions": questions, "notices": notice_ids()}
-    st = load_state()
-    news = (any(r.get("section") == "finished" for r in rows)
-            or bool(set(questions) - set(st.get("questions") or ()))
-            or bool(set(seen["notices"]) - set(st.get("notices") or ())))
-    update_state(checked=now, busy=bool(rows), **({} if news else seen))
+    seen = {"notices": notice_ids()}
+    news = bool(rows) or bool(set(seen["notices"]) - set(load_state().get("notices") or ()))
+    update_state(checked=now, **({} if news else seen))
     return news, seen
 
 
 def remember(seen):
-    """Record the questions and the notices that reached the manager."""
+    """Record the notices that reached the manager."""
     update_state(**seen)
 
 
@@ -379,7 +374,7 @@ def watch(registry=None, out=None, now_fn=None, sleep=None, token=None, loops=No
         now = now_fn()
         if board_runs(now):
             continue
-        if _within(now, st.get("checked"), BUSY_INTERVAL if st.get("busy") else IDLE_INTERVAL):
+        if _within(now, st.get("checked"), INTERVAL):
             continue
         news, seen = evaluate(registry, now=now, err=out)
         if news:
@@ -395,9 +390,9 @@ def main(argv=None):
                                              "follow-ups, then print the update while any "
                                              "agent finished, waits or works")
     ap.add_argument("--watch", action="store_true",
-                    help="the fallback while the board does not run: check every hour while "
-                         "an agent was there, else every three hours, and exit with the "
-                         "update on news")
+                    help="the fallback while the board does not run: check every ten "
+                         "minutes, and exit with the update while any agent finished, "
+                         "waits or works, or a new notice waits")
     ap.add_argument("--dry-run", action="store_true",
                     help="launch no follow-up, print what each launch would run, and "
                          "leave the snapshot of the last update as it was")

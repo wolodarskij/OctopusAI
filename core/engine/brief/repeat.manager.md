@@ -31,13 +31,13 @@ nothing to finish, nothing to hand over and nothing to verify.
 
 ## Your check runs all the time
 
-The check is permanently on, and it wakes you only on news. The board runs it in
-Python every 10 minutes. It launches the follow-ups that nobody launched, and it
-types the check into this session only when an agent finished, a new question
-waits for the owner, or a new notice arrived. A working agent and a question that
-was reported already wake nothing. While the board does not run, your fallback
-watcher runs the check every hour when the last check found an agent, and every
-three hours when it found none.
+The check is permanently on. The board runs it in Python every 10 minutes. It
+launches the follow-ups that nobody launched, and it types the check into this
+session every 10 minutes while any agent finished, waits for the owner, works or
+waits for something else, and when a new notice arrived. So the owner gets the
+full update every 10 minutes while any ticket runs, and a finished ticket within
+10 minutes. While the board does not run, your fallback watcher runs the check
+every 10 minutes too.
 
 1. **At the start of this session, and every time it starts again** (the
    watchdog resumes it with this same brief): make no `CronCreate` job for the
@@ -158,6 +158,7 @@ since your last update, once. Print its output as it is. Each agent is one line:
 
     **Finished since the last update**
     - <project> <id> "<title>" — <outcome>; <lane> / <status>; <commit> pushed|not pushed
+      - <a line of its ## Result, when its order asks a question or an investigation>
     **Waiting for your input**
     - <project> <id> "<title>" — <the question, word for word>
     **Working**
@@ -169,7 +170,10 @@ since your last update, once. Print its output as it is. Each agent is one line:
   do: `<project> <id> "<title>"`, never by id alone. This holds in every message,
   report, note and ticket text, also outside the update.
 - **Copy the lines; never summarize a ticket.** The outcome of a finished agent is
-  the `outcome:` line its session wrote on the ticket. Add no measurement, no
+  the `outcome:` line its session wrote on the ticket. A finished agent whose
+  ticket's order asks a question or an investigation carries its answer: the
+  lines of the ticket's `## Result`, one sub-line each, under its line. Copy
+  them too. Add no measurement, no
   caveat, no side ticket and no result of your own to a line, and no sentence
   around the sections.
 - **The reply check reads every message you send.** After each turn a small

@@ -79,6 +79,31 @@ class IfAny(FixtureCase):
         self.assertIn(self.a, out)
         self.assertEqual(self.report([]), "")
 
+    def write_body(self, tid, order, result):
+        tok = project.use(self.root)
+        try:
+            t = T.find(T.load_all(), tid)
+            text = t.path.read_text(encoding="utf-8")
+            head = text[:text.index("\n## ")]
+            t.path.write_text(head + "\n## What it should do\n\n" + order
+                              + "\n\n## Result\n\n" + result + "\n", encoding="utf-8")
+        finally:
+            project.reset(tok)
+
+    def test_a_finished_investigation_gives_its_answer(self):
+        self.write_body(self.a, "Measure how long the board takes to load.",
+                        "- The board loads in 2.4 s.\n- The ticket list takes 1.9 s of it.")
+        self.write_body(self.b, "The board shows the outcome line.",
+                        "- `core/engine/todo_board.html`")
+        self.report([sess(SID_A, self.a, None), sess(SID_B, self.b, None)])
+        out = self.report([])
+        lines = out.splitlines()
+        first = lines.index(next(x for x in lines if self.a in x))
+        self.assertEqual(lines[first + 1:first + 3],
+                         ["  - The board loads in 2.4 s.",
+                          "  - The ticket list takes 1.9 s of it."])
+        self.assertNotIn("todo_board.html", out)
+
     def test_no_agent_at_all_prints_nothing(self):
         self.assertEqual(self.report([]), "")
         self.assertEqual(self.report([]), "")
@@ -194,30 +219,28 @@ class News(FixtureCase):
             C.remember(seen)
         return news
 
-    def test_a_working_agent_is_no_news(self):
+    def test_a_working_agent_is_news_on_every_check(self):
         self.rows = [{"key": "a", "section": "working", "text": "Bash"}]
-        self.assertFalse(self.news())
-        self.assertTrue(C.load_state()["busy"])
+        self.assertTrue(self.news(1000))
+        self.assertTrue(self.news(1000 + C.INTERVAL))
+
+    def test_an_agent_waiting_for_something_else_is_news(self):
+        self.rows = [{"key": "a", "section": "other", "text": "event: an editor restart"}]
+        self.assertTrue(self.news())
 
     def test_a_finished_agent_is_news(self):
         self.rows = [{"key": "a", "section": "finished", "text": "done"}]
         self.assertTrue(self.news())
 
-    def test_a_question_is_news_once(self):
+    def test_a_waiting_question_is_news_on_every_check(self):
         self.rows = [{"key": "a", "section": "input", "text": "Which one?"}]
         self.assertTrue(self.news())
-        self.assertFalse(self.news())
-        self.rows = [{"key": "a", "section": "input", "text": "Another?"}]
         self.assertTrue(self.news())
 
-    def test_an_answered_question_asked_again_is_news(self):
-        self.rows = [{"key": "a", "section": "input", "text": "Which one?"}]
-        self.assertTrue(self.news())
+    def test_no_agent_is_no_news(self):
         self.rows = []
         self.assertFalse(self.news())
-        self.assertFalse(C.load_state()["busy"])
-        self.rows = [{"key": "a", "section": "input", "text": "Which one?"}]
-        self.assertTrue(self.news())
+        self.assertEqual(C.load_state()["checked"], 1000)
 
     def test_a_new_notice_is_news_once(self):
         with mock.patch.object(C, "notice_ids", return_value=["N0001"]):
@@ -235,7 +258,7 @@ class Watch(FixtureCase):
         super().setUp()
         self.make("Sample Game")
         self.clock = [100000.0]
-        self.evaluate = mock.Mock(return_value=(False, {"questions": [], "notices": []}))
+        self.evaluate = mock.Mock(return_value=(False, {"notices": []}))
         self.patches = [mock.patch.object(C, "evaluate", self.evaluate),
                         mock.patch.object(C, "_report",
                                           lambda reg, dry, out, err: out.write("update\n"))]
@@ -261,28 +284,21 @@ class Watch(FixtureCase):
         self.watch(5)
         self.assertFalse(self.evaluate.called)
 
-    def test_it_checks_hourly_while_an_agent_was_there(self):
-        C.update_state(checked=self.clock[0], busy=True)
-        self.watch(C.BUSY_INTERVAL // C.WATCH_POLL - 1)
+    def test_it_checks_every_ten_minutes(self):
+        C.update_state(checked=self.clock[0])
+        self.watch(C.INTERVAL // C.WATCH_POLL - 1)
         self.assertFalse(self.evaluate.called)
         self.watch(1)
         self.assertEqual(self.evaluate.call_count, 1)
 
-    def test_it_checks_every_three_hours_when_nothing_was_there(self):
-        C.update_state(checked=self.clock[0], busy=False)
-        self.watch(C.BUSY_INTERVAL // C.WATCH_POLL)
-        self.assertFalse(self.evaluate.called)
-        self.watch(C.IDLE_INTERVAL // C.WATCH_POLL - C.BUSY_INTERVAL // C.WATCH_POLL)
-        self.assertEqual(self.evaluate.call_count, 1)
-
     def test_it_exits_with_the_update_on_news(self):
-        self.evaluate.return_value = (True, {"questions": ["a Which one?"], "notices": []})
+        self.evaluate.return_value = (True, {"notices": ["N0001"]})
         rc, out = self.watch(None)
         self.assertEqual((rc, out), (0, "update\n"))
-        self.assertEqual(C.load_state()["questions"], ["a Which one?"])
+        self.assertEqual(C.load_state()["notices"], ["N0001"])
 
     def test_a_newer_watcher_replaces_it_silently(self):
-        C.update_state(checked=self.clock[0], busy=True)
+        C.update_state(checked=self.clock[0])
         orig = self.sleep
 
         def sleep(seconds):
@@ -304,7 +320,7 @@ class Wake(FixtureCase):
         self.tok = project.use(self.root)
         self.live = [sess(SID_A, self.mid, None)]
         self.send = mock.Mock()
-        self.news = (True, {"questions": [], "notices": []})
+        self.news = (True, {"notices": []})
         self.patches = [mock.patch.object(T, "live_sessions",
                                           lambda tickets=None: self.live),
                         mock.patch.object(T, "send_session", self.send),
@@ -331,7 +347,7 @@ class Wake(FixtureCase):
         self.assertEqual(todo_server._wake_project(self.root, now + C.INTERVAL + 30), [])
 
     def test_no_news_types_nothing(self):
-        self.news = (False, {"questions": [], "notices": []})
+        self.news = (False, {"notices": []})
         todo_server._wake_project(self.root, 1e9)
         self.assertEqual(todo_server._wake_project(self.root, 1e9 + C.INTERVAL), [])
         self.assertFalse(self.send.called)

@@ -525,19 +525,21 @@ the owner. It grants `projects`, so the session reaches every registered project
   the manager copies it and never summarizes a ticket: a finished agent is `<project> <id>
   "<title>" — <outcome>; <lane> / <status>; <commit> pushed|not pushed`, a waiting one its
   question word for word, a working one `<project> <id> "<title>" — <what it does now, at most
-  10 words>`. **Waiting for your input lists only an agent whose session is open and in the
+  10 words>`. A finished agent whose ticket's order asks a question or an investigation
+  carries its answer: the lines of the ticket's `## Result`, one sub-line each, under its
+  line. **Waiting for your input lists only an agent whose session is open and in the
   `input` state.** A finished, closed or idle agent never stands there, and nor does a decision
   that a finished ticket's result names: that agent stands only under Finished. The reply check
   fails a Waiting line about any other agent.
-- **The manager's check is always on, and it wakes the manager only on news.** The board's
-  watchdog runs the check in Python every 10 minutes for each manager session, of every AI
-  provider. It types `octopus check` into the session only when an agent finished since the
-  last update, a question that was not reported yet waits for the owner, or a notice that
-  was not reported yet arrived. A working agent and a question reported already wake
-  nothing. The manager makes no `CronCreate` job for the check. While the board does not
-  run, the manager's fallback watcher, `octopus check --watch` in a background command of a
-  Claude manager, runs the check every hour when the last check found an agent, and every
-  three hours when it found none; it exits with the update on news. Each check launches
+- **The manager's check is always on, and it gives the full update every 10 minutes while
+  any ticket runs.** The board's watchdog runs the check in Python every 10 minutes for each
+  manager session, of every AI provider. It types `octopus check` into the session while any
+  agent finished since the last update, waits for the owner, works or waits for something
+  else, and when a notice that was not reported yet arrived. A finished ticket reaches the
+  owner within one interval. The manager makes no `CronCreate` job for the check. While the
+  board does not run, the manager's fallback watcher, `octopus check --watch` in a background
+  command of a Claude manager, runs the check every 10 minutes; it exits with the update on
+  the same news. Each check launches
   every follow-up that a ticket holding `projects`, in Verification or Done, names under
   `## Follow-ups` and nobody launched, and prints the full update whenever any agent
   finished since the last update, waits for the owner, works or waits for something else,
