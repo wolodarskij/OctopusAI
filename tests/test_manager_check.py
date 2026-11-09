@@ -1,9 +1,10 @@
 """The manager's check (`octopus check`): the full update while any agent finished, waits or
 works, nothing only when none does, no launch of a follow-up, the news that wakes the manager,
-the fallback watcher, and the board's wake.
+the engine's watcher, and the board's wake.
 python -m unittest discover tests"""
 
 import argparse
+import contextlib
 import io
 import os
 import unittest
@@ -226,10 +227,13 @@ class Watch(FixtureCase):
         super().setUp()
         self.make("Sample Game")
         self.clock = [100000.0]
-        self.evaluate = mock.Mock(return_value=(False, {"notices": []}))
-        self.patches = [mock.patch.object(C, "evaluate", self.evaluate),
-                        mock.patch.object(C, "_report",
-                                          lambda reg, dry, out, err: out.write("update\n"))]
+        self.wake = mock.Mock(return_value=[])
+        self.stamp = mock.Mock(return_value=1)
+        self.has_manager = mock.Mock(return_value=True)
+        self.patches = [mock.patch.object(C, "wake_home", self.wake),
+                        mock.patch.object(C, "_engine_stamp", self.stamp),
+                        mock.patch.object(C, "_home_has_manager", self.has_manager),
+                        mock.patch.object(T, "in_manager_home", contextlib.nullcontext)]
         for p in self.patches:
             p.start()
 
@@ -250,23 +254,18 @@ class Watch(FixtureCase):
     def test_a_running_board_keeps_it_idle(self):
         C.mark_board(self.clock[0])
         self.watch(5)
-        self.assertFalse(self.evaluate.called)
+        self.assertFalse(self.wake.called)
 
-    def test_it_checks_every_ten_minutes(self):
-        C.update_state(checked=self.clock[0])
-        self.watch(C.INTERVAL // C.WATCH_POLL - 1)
-        self.assertFalse(self.evaluate.called)
-        self.watch(1)
-        self.assertEqual(self.evaluate.call_count, 1)
+    def test_it_wakes_the_manager_and_keeps_running(self):
+        self.wake.return_value = ["T0001-work"]
+        self.assertEqual(self.watch(3), (0, ""))
+        self.assertEqual(self.wake.call_count, 3)
 
-    def test_it_exits_with_the_update_on_news(self):
-        self.evaluate.return_value = (True, {"notices": ["N0001"]})
-        rc, out = self.watch(None)
-        self.assertEqual((rc, out), (0, "update\n"))
-        self.assertEqual(C.load_state()["notices"], ["N0001"])
+    def test_it_records_its_process(self):
+        self.watch(0)
+        self.assertEqual(C.load_state()["watcher_pid"], os.getpid())
 
     def test_a_newer_watcher_replaces_it_silently(self):
-        C.update_state(checked=self.clock[0])
         orig = self.sleep
 
         def sleep(seconds):
@@ -274,7 +273,24 @@ class Watch(FixtureCase):
             C.update_state(watcher="w2")
         self.sleep = sleep
         self.assertEqual(self.watch(None), (0, ""))
-        self.assertFalse(self.evaluate.called)
+        self.assertFalse(self.wake.called)
+
+    def test_a_code_change_ends_it(self):
+        self.stamp.side_effect = [1, 2]
+        self.assertEqual(self.watch(None), (0, ""))
+        self.assertFalse(self.wake.called)
+
+    def test_no_active_manager_ends_it(self):
+        self.has_manager.return_value = False
+        self.assertEqual(self.watch(None), (0, ""))
+        self.assertFalse(self.wake.called)
+
+    def test_a_failed_poll_keeps_it_running(self):
+        self.wake.side_effect = [OSError("gone"), []]
+        rc, out = self.watch(2)
+        self.assertEqual(rc, 0)
+        self.assertIn("OSError: gone", out)
+        self.assertEqual(self.wake.call_count, 2)
 
 
 class Wake(FixtureCase):
@@ -421,7 +437,7 @@ class Restart(unittest.TestCase):
 
 
 class Brief(FixtureCase):
-    def test_the_manager_brief_starts_the_watcher_and_no_cron_job(self):
+    def test_the_manager_brief_starts_no_watcher_and_no_cron_job(self):
         root = self.make("Sample Game")
         mid = self.new_ticket(root, "the manager", "--repeat", "manager", "--permits",
                               "projects")
@@ -430,7 +446,8 @@ class Brief(FixtureCase):
             text = T.build_brief(T.find(T.load_all(), mid), "work")
         finally:
             project.reset(tok)
-        self.assertIn('octopus.py" check --watch', text)
+        self.assertNotIn("check --watch", text)
+        self.assertIn("Start no watcher: the engine starts it.", text)
         self.assertIn("make no `CronCreate` job", text)
         self.assertNotIn("--job-created", text)
         self.assertNotIn("{octopus}", text)

@@ -4573,6 +4573,8 @@ def cmd_work(args):
         return 2
     record_launch(t, mode, provider)
     moved = start_lane(t, mode)
+    if t.repeat == MANAGER:
+        _ensure_manager_watcher()
     print("%s  %s  launched in a new terminal%s"
           % (t.id, mode.upper(), "" if provider == "claude" else " on %s" % provider))
     print("  lane    %s" % moved)
@@ -5624,6 +5626,15 @@ def running_managers(skip=""):
     return out
 
 
+def _ensure_manager_watcher():
+    """Start the engine's watcher of the manager's check when none runs. Never raises."""
+    try:
+        import managercheck
+        managercheck.ensure_watcher()
+    except Exception:                                   # noqa: BLE001 - the caller goes on
+        pass
+
+
 def claim_manager(t, take_over=False, sid=None, origin=None):
     """Make the session this process runs under the `work` session of manager `t`: the
     ticket records it under `sessions:` and `session:`, moves to the active lane, and its
@@ -5683,6 +5694,7 @@ def claim_manager(t, take_over=False, sid=None, origin=None):
     P.BRIEFS.mkdir(parents=True, exist_ok=True)
     brief = P.BRIEFS / ("%s.md" % t.id)
     _write(brief, build_brief(t, "work"))
+    _ensure_manager_watcher()
     print("%s  session %s is the manager now" % (t.id, sid))
     print("instructions: %s" % brief.as_posix())
     return 0

@@ -31,37 +31,29 @@ nothing to finish, nothing to hand over and nothing to verify.
 
 ## Your check runs all the time
 
-The check is permanently on. The board runs it in Python every 10 minutes. It
-types the check into this session every 10 minutes while any agent finished,
-waits for the owner, works or waits for something else, and when a new notice
-arrived. So the owner gets the full update every 10 minutes while any ticket
-runs, and a finished ticket within 10 minutes. While the board does not run,
-your fallback watcher runs the check every 10 minutes too. The check launches no
-ticket and no follow-up.
+The check is permanently on. The engine runs it in Python every 10 minutes: the
+board when it runs, else the engine's watcher. It types the check into this
+session every 10 minutes while any agent finished, waits for the owner, works or
+waits for something else, and when a new notice arrived. So the owner gets the
+full update every 10 minutes while any ticket runs, and a finished ticket within
+10 minutes. The check launches no ticket and no follow-up.
 
 1. **At the start of this session, and every time it starts again** (the
    watchdog resumes it with this same brief): make no `CronCreate` job for the
    check. When `CronList` shows a job that runs `{octopus} check`, delete it with
-   `CronDelete`. When your AI provider calls you back after a background command
-   exits (Claude Code: Bash with `run_in_background`), start the fallback watcher
-   in the background: `{octopus} check --watch`. Write nothing about it. Launch,
-   resume or send an order to no ticket whose session did not run when this
-   session stopped, also a blocker or a watched ticket. Then wait for the owner's
-   orders.
-2. **When the board types the check into this session** (`Manager check: run
+   `CronDelete`. Start no watcher: the engine starts it. Launch, resume or send
+   an order to no ticket whose session did not run when this session stopped,
+   also a blocker or a watched ticket. Then wait for the owner's orders.
+2. **When the check is typed into this session** (`Manager check: run
    {octopus} check`), run it. Print its output as it is and nothing else. When it
    prints nothing, write nothing at all. Then end the turn.
-3. **When the fallback watcher exits,** read its output. When it printed nothing,
-   a newer watcher replaced it: write nothing, and do not start it again.
-   Otherwise print its output as it is and nothing else, decide the notices it
-   lists, and start `{octopus} check --watch` again in the background.
-4. **Each check** prints the full update in the format below whenever any agent
+3. **Each check** prints the full update in the format below whenever any agent
    finished since the last update, waits for your input, works, or waits for
    something else. Every waiting question stands in it word for word, on every
    check, until it is answered. It prints nothing at all only when no agent
    finished, none waits and none works; then you write nothing. It launches no
    ticket and no follow-up, and you never answer an agent for the owner.
-5. **Each check also lists the notices** that sessions of other projects sent
+4. **Each check also lists the notices** that sessions of other projects sent
    about a defect of an Octopus AI tool (`notify`), until you decide each one.
    Decide it yourself, with no question to the owner, and write nothing about it:
    - a new Octopus AI ticket: `notice <id> ticket --title "..." --severity ...
@@ -73,9 +65,8 @@ ticket and no follow-up.
 
    Read the open Octopus AI tickets with `query` before you decide. `notices`
    lists the open notices, and `notices <id>` prints one in full.
-6. **Never call sleep, poll, or make a wait loop** to keep this session open.
-   The board and the fallback watcher own the timer; the session remains open for
-   the owner's messages.
+5. **Never call sleep, poll, or make a wait loop** to keep this session open.
+   The engine owns the timer; the session remains open for the owner's messages.
 
 ## How the manager works
 

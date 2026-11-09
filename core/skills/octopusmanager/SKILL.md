@@ -31,9 +31,8 @@ hold for the rest of this session.
 **3. Start the check, and launch no ticket,** as the brief says. Make no `CronCreate` job for
 it, and delete a job that runs `python "<octopus.py>" check` with `CronDelete`. The board runs
 the check and wakes this session every 10 minutes while any agent finished, waits or works,
-and on a new notice. When the provider calls the session back after a background
-command exits (Claude Code: Bash with `run_in_background`), start the fallback watcher in the
-background: `python "<octopus.py>" check --watch`.
+and on a new notice. The engine starts its own watcher while the board does not run; start
+none.
 End each turn after its work; keep the session open for input. Never use sleep to stay available.
 
 **4. Behave as the manager from now on.** Wait for the owner's orders. Every status update is

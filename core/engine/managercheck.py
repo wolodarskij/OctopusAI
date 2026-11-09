@@ -3,16 +3,18 @@
     python octopus.py check [--watch] [--dry-run]
 
 The manager's model runs only when the manager has something to say. Two timers run the check
-in Python every `INTERVAL` seconds and wake the manager only on news (`evaluate`):
+in Python every `INTERVAL` seconds and wake the manager only on news (`evaluate`). Both type
+`wake_text()` into each live manager session through `wake_home`, and `claim_wake` lets one
+wake per interval through across both:
 
-- THE BOARD. Every `INTERVAL` seconds the board's watchdog runs `evaluate` for each live
-  manager session of every AI provider, and types `wake_text()` into the session on news. Its
-  heartbeat (`mark_board`) says that the board runs.
-- THE FALLBACK. `check --watch`, which a Claude manager runs in the background, wakes no model
-  while it waits. While the board's heartbeat is older than `BOARD_STALE`, it runs `evaluate`
-  `INTERVAL` after the last check. On news it runs the check, prints it, and exits, which
-  calls the manager back. A new watcher replaces the one before it, which exits with no
-  output.
+- THE BOARD. Every `INTERVAL` seconds the board's watchdog runs `wake_home` for each live
+  manager session of every AI provider. Its heartbeat (`mark_board`) says that the board runs.
+- THE FALLBACK. `check --watch` is a detached engine process that wakes no model while it
+  waits. The engine starts it (`ensure_watcher`) when it launches or claims the manager, and
+  at each end of the manager's turn when it does not run; the manager's model starts none.
+  While the board's heartbeat is older than `BOARD_STALE`, it runs `wake_home` every
+  `WATCH_POLL` seconds. It never exits on news. It exits when a newer watcher replaced it,
+  when the engine's code changed, or when the home project has no active manager ticket.
 
 News is every row of the update: an agent that finished since the last update, one that waits
 for the owner, one that works and one that waits for anything else. A notice that was not
@@ -64,12 +66,12 @@ _TICKET = re.compile(r"\bT\d{4,}\b")
 
 
 def wake_text():
-    """What the board types into a manager session on news."""
+    """What the board and the watcher type into a manager session on news."""
     return ('Manager check: run python "%s" check. Print its output as it is; when it '
             'prints nothing, write nothing. Decide each notice it lists with the command it '
             'names, and write nothing about the notices. Then end this turn immediately. '
             'Keep the session open for the owner. Do not call sleep, poll, close the '
-            'session, or schedule another check; the board owns the timer.'
+            'session, or schedule another check; the engine owns the timer.'
             % (project.OCTOPUS / "octopus.py").as_posix())
 
 
@@ -88,6 +90,59 @@ def claim_wake(key, now, interval=INTERVAL):
                 return False
             db.execute("INSERT OR REPLACE INTO wakes VALUES (?, ?, ?)", (*key, now))
             return row is not None and now >= row[0]
+
+
+# ── the wake ───────────────────────────────────────────────────────────────
+
+def wake_home(now, note=None, mark=False):
+    """Check the manager sessions of the current project, when it is the manager's home, and
+    type the check into each one on news. A session whose brief is older than the brief
+    sections is told to read the brief again first. `mark` writes the board's heartbeat.
+    `note(now, managers, skip)` hears what the tick saw. Returns the keys of the sessions
+    woken."""
+    import todo as T
+    note = note or (lambda *_a: None)
+    if not T.at_manager_home():
+        return []
+    root = project.P.ROOT
+    managers = {t.id: t for t in T.load_all()
+                if t.repeat == T.MANAGER and t.state == T.lane("active")}
+    if not managers:
+        note(now, managers, "")
+        return []
+    if mark:
+        mark_board(now)
+    woken = []
+    live = [s for s in T.live_sessions()
+            if s.get("id") in managers and s.get("mode") == "work" and s.get("claude")]
+    note(now, managers, "" if live else "no manager session runs")
+    for s in live:
+        if s.get("wait") == "input":
+            note(now, managers, "the manager waits for your answer")
+            continue
+        t = managers[s["id"]]
+        if T.manager_brief_stale(t):
+            brief = T.rewrite_manager_brief(t)
+            try:
+                T.send_session(s, T.manager_brief_text(brief), ["Enter"])
+            except (OSError, ValueError) as exc:
+                os.utime(str(brief), ns=(0, 0))         # stale again: the next tick tries again
+                print("watchdog: %s %s: the new brief could not be typed: %s"
+                      % (root.name, s["id"], exc))
+            continue
+        if not claim_wake((os.path.normcase(str(root.resolve())), s["session"]), now):
+            continue
+        news, seen = evaluate(now=now)
+        if not news:
+            continue
+        try:
+            T.send_session(s, wake_text(), ["Enter"])
+        except (OSError, ValueError) as exc:
+            print("watchdog: %s %s: the check could not be typed: %s" % (root.name, s["id"], exc))
+            continue
+        remember(seen)
+        woken.append(s["key"])
+    return woken
 
 
 # ── the follow-ups ─────────────────────────────────────────────────────────
@@ -166,7 +221,8 @@ def state_file():
 
 
 def load_state():
-    """`{"board", "checked", "notices", "watcher"}`, each part absent
+    """`{"board", "checked", "notices", "watcher", "watcher_pid", "watcher_started"}`,
+    each part absent
     until something wrote it."""
     try:
         data = json.loads(state_file().read_text(encoding="utf-8"))
@@ -273,34 +329,83 @@ def run(dry_run=False, registry=None, out=None, err=None):
     return 0
 
 
+def _engine_stamp():
+    import todo_server
+    return todo_server._code_stamp()
+
+
+def _home_has_manager(T):
+    """Whether the manager's home project has a manager ticket in the active lane."""
+    try:
+        with T.in_manager_home():
+            return any(t.repeat == T.MANAGER and t.state == T.lane("active")
+                       for t in T.load_all())
+    except LookupError:
+        return False
+
+
 def watch(registry=None, out=None, now_fn=None, sleep=None, token=None, loops=None):
-    """The fallback while the board does not run. Waits with no output, and returns after it
-    printed the update and the notices on `out` on news. Returns 0 with no output when a newer
-    watcher replaced it."""
+    """The fallback while the board does not run. Every `WATCH_POLL` seconds it runs
+    `wake_home` in the manager's home project, which types the check into the manager on
+    news, as the board does. It writes nothing on `out` but the errors of a poll, and keeps
+    running. Returns 0 when a newer watcher replaced it, when the engine's code changed, or
+    when the home project has no manager ticket in the active lane."""
     import uuid
+    import todo as T
+    import winproc
     out = sys.stdout if out is None else out
     now_fn = time.time if now_fn is None else now_fn
     sleep = time.sleep if sleep is None else sleep
     token = token or uuid.uuid4().hex
-    update_state(watcher=token)
+    pid = os.getpid()
+    update_state(watcher=token, watcher_pid=pid, watcher_started=winproc.created_at(pid))
+    stamp = _engine_stamp()
     n = 0
     while loops is None or n < loops:
         n += 1
         sleep(WATCH_POLL)
-        st = load_state()
-        if st.get("watcher") != token:
-            return 0
-        now = now_fn()
-        if board_runs(now):
-            continue
-        if _within(now, st.get("checked"), INTERVAL):
-            continue
-        news, seen = evaluate(registry, now=now, err=out)
-        if news:
-            _report(registry, False, out, out)
-            remember(seen)
-            return 0
+        try:
+            if load_state().get("watcher") != token or _engine_stamp() != stamp:
+                return 0
+            if not _home_has_manager(T):
+                return 0
+            now = now_fn()
+            if board_runs(now):
+                continue
+            with T.in_manager_home():
+                wake_home(now)
+        except Exception as exc:                        # noqa: BLE001 - the watcher must live
+            out.write("check --watch: %s: %s\n" % (type(exc).__name__, exc))
+            out.flush()
     return 0
+
+
+def watcher_alive(state=None):
+    """Whether the watcher that the state names still runs."""
+    import winproc
+    st = load_state() if state is None else state
+    pid = st.get("watcher_pid")
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if pid not in winproc.processes():
+        return False
+    started = winproc.created_at(pid)
+    return started is not None and started == st.get("watcher_started")
+
+
+def ensure_watcher():
+    """Start the watcher when none runs. Returns whether it started one. Never raises."""
+    try:
+        if watcher_alive():
+            return False
+        import todo as T
+        T.spawn_detached([sys.executable, str(project.OCTOPUS / "octopus.py"), "check",
+                          "--watch"])
+        return True
+    except Exception:                                   # noqa: BLE001 - the caller goes on
+        return False
 
 
 def main(argv=None):
@@ -309,9 +414,9 @@ def main(argv=None):
                                              "any agent finished, waits or works. It "
                                              "launches nothing")
     ap.add_argument("--watch", action="store_true",
-                    help="the fallback while the board does not run: check every ten "
-                         "minutes, and exit with the update while any agent finished, "
-                         "waits or works, or a new notice waits")
+                    help="the engine's watcher while the board does not run: type the "
+                         "check into the manager every ten minutes while any agent "
+                         "finished, waits or works, or a new notice waits")
     ap.add_argument("--dry-run", action="store_true",
                     help="move no ticket, and leave the snapshot of the last update as it "
                          "was")

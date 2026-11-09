@@ -552,9 +552,9 @@ the owner. It grants `projects`, so the session reaches every registered project
   agent finished since the last update, waits for the owner, works or waits for something
   else, and when a notice that was not reported yet arrived. A finished ticket reaches the
   owner within one interval. The manager makes no `CronCreate` job for the check. While the
-  board does not run, the manager's fallback watcher, `octopus check --watch` in a background
-  command of a Claude manager, runs the check every 10 minutes; it exits with the update on
-  the same news. The check launches no ticket and no follow-up. A restarted manager
+  board does not run, the engine's watcher, `octopus check --watch`, does the same. The
+  engine starts it with the manager and at each end of the manager's turn when it does not
+  run; the manager starts none. The check launches no ticket and no follow-up. A restarted manager
   launches, resumes or sends an order to no ticket whose session did not run when it
   stopped. Each check prints the full update whenever any agent finished since the last
   update, waits for the owner, works or waits for something else, each waiting question
@@ -562,14 +562,14 @@ the owner. It grants `projects`, so the session reaches every registered project
   waits and none works does the manager write nothing at all; it never writes "no change"
   or any line like it. It answers no agent.
   The manager ends each turn after its work and stays open for input. It never uses sleep
-  or a polling loop to stay available. The board shares wake timing across its processes.
+  or a polling loop to stay available. The board and the watcher share one wake per interval.
 
     python .octopus/todo.py manager                    the Octopus AI project's manager ticket, from the template when there is none
     python .octopus/todo.py manager --start            start it unless it runs
     python .octopus/todo.py manager --claim            this session becomes the manager, from any project
     python octopus.py sessions --since-last            the manager's update, every project
     python octopus.py check                            the manager's check: the update while any agent finished, waits or works; it launches nothing
-    python octopus.py check --watch                    the manager's fallback while the board does not run: exits with the update on news
+    python octopus.py check --watch                    the engine's watcher while the board does not run: types the check into the manager on news
     python .octopus/todo.py watchdog                   every manager ticket of the Octopus AI project, alive or dead
 
 ## Parent and children

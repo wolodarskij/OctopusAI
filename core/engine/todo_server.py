@@ -574,19 +574,14 @@ def _watch_project(root, now):
 # seconds, never for a session that waits for the owner's answer. It types
 # `managercheck.wake_text()` into the session only on news. The first check comes one
 # interval after the watchdog first sees the session. Every tick writes the board's
-# heartbeat, which keeps the manager's fallback watcher (`check --watch`) idle.
+# heartbeat, which keeps the engine's watcher (`check --watch`) idle. While the board does
+# not run, that watcher types the check the same way; `managercheck.wake_home` serves both,
+# and `managercheck.claim_wake` lets one wake per interval through across both.
 #
 # A brief section file newer than the manager's brief means the session reads old orders:
 # the tick writes the brief again and types `T.manager_brief_text` into the session in place
 # of the check. The page marks the Manager button while no check ran within its interval
 # (`manager_check_view`), with the reason the last tick saw.
-
-def wake_due(key, now, interval=None):
-    """Reserve a due wake in the shared schedule before sending the prompt."""
-    import managercheck
-    interval = managercheck.INTERVAL if interval is None else interval
-    return managercheck.claim_wake(key, now, interval)
-
 
 _CHECK = {"since": 0.0, "managers": False, "skip": ""}   # what the last tick of the check saw
 
@@ -613,48 +608,9 @@ def _note_check(now, managers, skip=""):
 
 def _wake_project(root, now):
     """Check the manager sessions of one project, the current one, and type the check into
-    each one on news. A session whose brief is older than the brief sections is told to read
-    the brief again first. Returns the keys of the sessions woken."""
+    each one on news (`managercheck.wake_home`). Returns the keys of the sessions woken."""
     import managercheck
-    if not T.at_manager_home():
-        return []
-    managers = {t.id: t for t in T.load_all()
-                if t.repeat == T.MANAGER and t.state == T.lane("active")}
-    if not managers:
-        _note_check(now, managers)
-        return []
-    managercheck.mark_board(now)
-    woken = []
-    live = [s for s in T.live_sessions()
-            if s.get("id") in managers and s.get("mode") == "work" and s.get("claude")]
-    _note_check(now, managers, "" if live else "no manager session runs")
-    for s in live:
-        if s.get("wait") == "input":
-            _note_check(now, managers, "the manager waits for your answer")
-            continue
-        t = managers[s["id"]]
-        if T.manager_brief_stale(t):
-            brief = T.rewrite_manager_brief(t)
-            try:
-                T.send_session(s, T.manager_brief_text(brief), ["Enter"])
-            except (OSError, ValueError) as exc:
-                os.utime(str(brief), ns=(0, 0))         # stale again: the next tick tries again
-                print("watchdog: %s %s: the new brief could not be typed: %s"
-                      % (root.name, s["id"], exc))
-            continue
-        if not wake_due((os.path.normcase(str(root.resolve())), s["session"]), now):
-            continue
-        news, seen = managercheck.evaluate(now=now)
-        if not news:
-            continue
-        try:
-            T.send_session(s, managercheck.wake_text(), ["Enter"])
-        except (OSError, ValueError) as exc:
-            print("watchdog: %s %s: the check could not be typed: %s" % (root.name, s["id"], exc))
-            continue
-        managercheck.remember(seen)
-        woken.append(s["key"])
-    return woken
+    return managercheck.wake_home(now, note=_note_check, mark=True)
 
 
 # ── the close of finished sessions ─────────────────────────────────────────

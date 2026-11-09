@@ -84,8 +84,7 @@ APPROVAL_POLICIES = ("auto-review", "", "on-request", "untrusted", "never")
 # permission mode that keeps a plan from editing. `deny`: a tool denied per launch. `resume`:
 # the ticket's own session again. `addDir`: a directory outside the project. `effort`: a
 # reasoning effort. `skills`: it reads `.agents/skills/`, or Claude's pointers to them.
-# `scheduler`: it calls the session back when a background command exits; a manager on it
-# runs the fallback check (`check --watch`) while the board does not run.
+# `scheduler`: it calls the session back when a background command exits.
 FEATURES = ("hooks", "remoteControl", "planMode", "deny", "resume", "addDir", "effort",
             "skills", "scheduler")
 LIST_FIELDS = ("args", "prompt", "model", "effort", "auto", "plan", "addDir", "resume",

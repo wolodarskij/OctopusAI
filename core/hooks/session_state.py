@@ -2490,6 +2490,13 @@ def _hook(payload, started=None):
                 close_finished(sid, text, shell, launch)
             except Exception:                           # noqa: BLE001 - a hook never raises
                 pass
+            # Each end of the manager's turn starts the engine's watcher again when it died.
+            if launch[0] is not None and getattr(launch[0], "repeat", "") == "manager":
+                try:
+                    import managercheck
+                    managercheck.ensure_watcher()
+                except Exception:                       # noqa: BLE001 - a hook never raises
+                    pass
             # The finished line closes the session: no next prompt reads a reply note.
             if not says_finished(text):
                 start_reply_check(sid, shell, payload, text)
