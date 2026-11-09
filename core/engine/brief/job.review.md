@@ -20,6 +20,7 @@ Then do exactly one of these:
 | partly closed | rewrite it to name ONLY what survives, and lower the severity |
 | no longer true | write why in the body, then `{cli} move {id} {lane:verify}`. **You may not close it** - only a verification session moves a ticket to `{lane:closed}` |
 | another ticket must land first | `{cli} link {id} --blocked-by <blocker>`, then `{cli} move {id} {lane:blocked}` |
+| an outside cause stops its work, and no way removes it | `{cli} report {id} blocked --why "<the cause>" --tried "<every way tried>" --mode {mode}` |
 | the owner must decide | keep the board, run `{cli} report {id} input --why "<the question>" --mode {mode}`, then ask the owner with the `AskUserQuestion` tool. Only the owner's order sets `blocked by user` |
 
 **The only file you may change is this ticket.** If the re-evaluation turns up

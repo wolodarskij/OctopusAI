@@ -134,7 +134,7 @@ DEFAULT_LANES = [
      "statuses": ["waiting", "investigating", "planning", "ready to implement",
                   "implementing"]},
     {"dir": "Blocked", "label": "Blocked", "role": "blocked", "color": "#c25b5b",
-     "statuses": ["blocked by other task", "blocked by user"]},
+     "statuses": ["blocked by other task", "blocked by outside cause", "blocked by user"]},
     {"dir": "Verification", "label": "Verification", "role": "verify", "color": "#8e77d6",
      "statuses": ["waiting", "testing"]},
     {"dir": "Done", "label": "Done", "role": "closed", "color": "#3f9e6b",
@@ -164,8 +164,10 @@ def with_ai_lane(lanes, roles=None):
 # The statuses the code acts on, by role. A project renames one by mapping the role to
 # another word; the word must be a status of the lane the role needs.
 STATUS_ROLES = ("pipeline", "waiting", "investigating", "planning", "ready to implement",
-                "implementing", "testing", "blocked by other task", "blocked by user", "done",
-                "closed by other task", "cancelled")
+                "implementing", "testing", "blocked by other task", "blocked by outside cause",
+                "blocked by user", "done", "closed by other task", "cancelled")
+# A status role that a project's own lanes may not list yet: the lane of its role gets it.
+ADDED_STATUSES = {"blocked by outside cause": "blocked"}
 
 CATEGORY_CODE = "project code"
 CATEGORY_TOOLING = "internal tooling"
@@ -993,6 +995,11 @@ class Project:
                 role = "none"
             out.append({"dir": d, "label": ln.get("label") or d, "role": role,
                         "color": ln.get("color") or "#888888", "statuses": list(st)})
+        for r, lane_role in ADDED_STATUSES.items():
+            word = roles.get(r) or r
+            for ln in out:
+                if ln["role"] == lane_role and word not in ln["statuses"]:
+                    ln["statuses"].append(word)
         self.lanes = out
         self.STATES = tuple(ln["dir"] for ln in out)
         self.STATE_LABEL = {ln["dir"]: ln["label"] for ln in out}
@@ -1008,7 +1015,8 @@ class Project:
         need = {"pipeline": "start", "implementing": "active", "planning": "active",
                 "investigating": "active", "ready to implement": "active",
                 "waiting": "active", "testing": "verify", "blocked by other task": "blocked",
-                "blocked by user": "blocked", "done": "closed",
+                "blocked by outside cause": "blocked", "blocked by user": "blocked",
+                "done": "closed",
                 "closed by other task": "closed", "cancelled": "closed"}
         for r, lane_role in need.items():
             lane = self.ROLE[lane_role]

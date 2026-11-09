@@ -27,7 +27,8 @@ and names each failing sentence with a quote (`PROMPT`). A sentence that says a 
 request was done, is being done or will be done passes. A quote that stands nowhere in the
 message is dropped. A sentence is never failed when it is a question (it ends with `?`), the
 finished line `WORK IS FINISHED`, or a statement that a ticket is in the verify or the closed
-lane. Every fault (no CLI, no answer within `SECONDS`, no JSON) gives no note. The
+lane, except an offer or a question to do only a part of the work (`"kind": "partial"`): only
+the owner says that a part is enough, so it fails also as a question. Every fault (no CLI, no answer within `SECONDS`, no JSON) gives no note. The
 check's own CLI runs with `ENV` set, and every Octopus AI hook under it returns at
 once.
 
@@ -96,7 +97,8 @@ LAUNCH_ASKS = {
     "work": "the files this ticket changed; a problem only if one stopped the ticket, in one "
             "sentence; then a question for the owner as the last line, or, only when the work "
             "is finished, the last line WORK IS FINISHED. Stopped work says what it waits for "
-            "and has no finished line. The outcome of the ticket stands on the ticket, not in "
+            "and has no finished line. It never offers or asks to do only a part of the work. "
+            "The outcome of the ticket stands on the ticket, not in "
             "the message.",
     "plan": "that the plan is on the ticket; a decision only the owner can make, as a "
             "question on the last line, or, only when the plan is finished, the last line "
@@ -144,7 +146,13 @@ that failed "before this ticket";
 reasoning, a decision and why, an approach dropped;
 - an opening or a closing sentence, an offer of more work.
 
-These always PASS:
+These FAIL also when they end with "?", and get "kind": "partial":
+- an offer, a proposal or a question to do, deliver or commit only a part of the work, or \
+whether a part of the work is enough, unless the request itself asks for exactly that part. \
+A line that copies another agent's question, as a list of waiting agents does, is not of this \
+kind.
+
+These always PASS, except a sentence of the "partial" kind:
 - the answer, the result, a list, a table or a number the request asked for;
 - a file the work changed, and what it does now;
 - a part of the request that is missing, with its exact cause in one sentence;
@@ -155,7 +163,7 @@ These always PASS:
 Answer with ONE JSON object and nothing else:
 {"parts": ["<each part of the request, in a few words>"], "fails": [{"sentence": "<the \
 failing sentence, copied exactly from the message>", "why": "<at most 12 words: which kind \
-above>"}]}
+above>", "kind": "<partial or other>"}]}
 "fails" is an empty list when every sentence passes."""
 
 NOTE = """The reply check of the reporting rule read your last message to the owner, after \
@@ -294,7 +302,8 @@ def _ask(prompt, cwd, model, timeout):
 
 def parse(answer, message, info=None):
     """`[(sentence, why)]`: the failing sentences of the answer whose quote stands in the
-    message and that are not protected. `info` gets the parts of the request it read."""
+    message and that are not protected; a sentence of the `partial` kind fails also when it
+    is protected. `info` gets the parts of the request it read."""
     m = re.search(r"\{.*\}", answer or "", re.S)
     if not m:
         return []
@@ -311,7 +320,8 @@ def parse(answer, message, info=None):
             continue
         s = " ".join(str(f.get("sentence") or "").split())
         key = _plain(s).strip(" .,;:-")
-        if not key or key in seen or key not in body or protected(s):
+        partial = str(f.get("kind") or "").strip().lower() == "partial"
+        if not key or key in seen or key not in body or (protected(s) and not partial):
             continue
         seen.add(key)
         out.append((s, " ".join(str(f.get("why") or "").split())[:120]))

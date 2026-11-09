@@ -6619,7 +6619,8 @@ def cmd_approve_readme(args):
 def cmd_report(args):
     """A session says what it waits for: `input` keeps its terminal open wherever the
     ticket is and names the question in `--why`, `event` does too and names the outside event in `--why`, such as an editor
-    restart, and `finished` lets `Close finished` close it."""
+    restart, `blocked` moves the ticket to the blocked lane for the outside cause in `--why`
+    and waits as `event`, and `finished` lets `Close finished` close it."""
     import session_state
     t = find(load_all(), args.id)
     if t is None:
@@ -6627,6 +6628,8 @@ def cmd_report(args):
         return 2
     sid = ticket_session_id(t, args.mode)
     why = (getattr(args, "why", None) or "").strip()
+    if args.word == "blocked":
+        return _report_blocked(t, sid, args.mode, why, getattr(args, "tried", None))
     if args.word == "event" and not why:
         print("Error: `event` needs --why: the outside event the session waits for",
               file=sys.stderr)
@@ -6637,6 +6640,50 @@ def cmd_report(args):
         return 2
     session_state.report(sid, session_state.owning_shell(), args.word, why)
     print("%s/%s  reported %s%s" % (t.id, args.mode, args.word, ": " + why if why else ""))
+    return 0
+
+
+BLOCKED_SECTION = "Blocked"
+
+
+def _report_blocked(t, sid, mode, why, tried):
+    """Move `t` to the blocked lane as `blocked by outside cause`, write the cause and every
+    way the session tried under `## Blocked`, and report the session as `event`, so its
+    terminal stays open while it waits for the cause to go."""
+    import datetime
+    import session_state
+    why, tried = " ".join((why or "").split()), " ".join((tried or "").split())
+    if not why:
+        print("Error: `blocked` needs --why: the outside cause that stops the work",
+              file=sys.stderr)
+        return 2
+    if not tried:
+        print("Error: `blocked` needs --tried: every way the session tried to remove the "
+              "cause. Try every way first; a ticket goes to %s only when none works"
+              % lane("blocked"), file=sys.stderr)
+        return 2
+    state, status = lane("blocked"), S("blocked by outside cause")
+    problem = manager_lane_problem(t, state, status)
+    if problem:
+        print("Error: %s." % problem, file=sys.stderr)
+        return 2
+    path = t.path
+    if t.state != state:
+        path = _dest_dir(state, t.epic) / t.path.name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(t.path), str(path))
+        _prune_empty_dirs()
+    _restatus(path, state, status)
+    meta, body = parse(_read(path))
+    stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    body = add_section_line(body, BLOCKED_SECTION,
+                            "- %s: %s Tried: %s" % (stamp, why.rstrip(".") + ".", tried))
+    _write(path, render(meta, body))
+    session_state.report(sid, session_state.owning_shell(), "event",
+                         "%s: %s" % (status, why))
+    write_index(quiet=True)
+    print("%s  %s -> %s / %s; %s/%s reported event: %s"
+          % (t.id, P.STATE_LABEL[t.state], P.STATE_LABEL[state], status, t.id, mode, why))
     return 0
 
 
@@ -7418,12 +7465,17 @@ def _main(argv):
     p.set_defaults(fn=cmd_review_old)
 
     p = sub.add_parser("report", help="a session says what it waits for: the owner's "
-                                      "answer, an outside event, or nothing")
+                                      "answer, an outside event, an outside cause that "
+                                      "blocks its ticket, or nothing")
     p.add_argument("id", help="the ticket the session works")
-    p.add_argument("word", choices=["input", "event", "finished"])
+    p.add_argument("word", choices=["input", "event", "blocked", "finished"])
     p.add_argument("--why", default="",
                    help="what the session waits for, required: the question it asks with "
-                        "`input`, the outside event with `event`")
+                        "`input`, the outside event with `event`, the outside cause that "
+                        "stops the work with `blocked`")
+    p.add_argument("--tried", default="",
+                   help="with `blocked`, required: every way the session tried to remove "
+                        "the cause")
     p.add_argument("--mode", choices=list(MODES), default="work")
     p.set_defaults(fn=cmd_report)
 

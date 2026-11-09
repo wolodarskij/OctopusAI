@@ -46,7 +46,7 @@ comes unasked, because a report out of context misleads. An answer holds no unas
   the owner saw it already. The sentences that fail come to you as context with the next prompt. Write
   no sentence of those kinds again, and never repeat, correct or explain the earlier message. It never
   fails a question to the owner, the line `WORK IS FINISHED`, or a statement that a ticket is in
-  Verification or Done. It does not run on a message whose last line is `WORK IS FINISHED`: that
+  Verification or Done, except an offer or a question to do only a part of the work. It does not run on a message whose last line is `WORK IS FINISHED`: that
   session closes at once. `replyCheck: false` in `.octopus/project.json` turns it off.
 - **The outcome line.** A `work` or a `verify` session writes the result on its ticket (`move ...
   --outcome "..."`), at most 20 words, with no measurement, no caveat and no other ticket. The
@@ -98,6 +98,11 @@ of each part and each sentence of it, against the order.
 Do every part of the request before you report. Never send a "Not done", "Remaining" or "Next steps" section.
 Never ask "shall I also..." or "do you want me to...": do it. Stop only for a decision only the owner can make,
 for another agent's active claim, or for something outside every project, and then say which in one line.
+
+**Never offer, propose or ask to do only a part of the work,** and never ask whether a part is enough. Only the
+owner, on the owner's own order, says that a part is enough. The reply check fails such an offer, also as a
+question. A part that cannot be done is a stop: a session on a ticket tries every way, then sends the ticket to
+Blocked with the cause (`todo-tracking.md`).
 
 **Solve, do not report.** Before you name a problem to the owner, ask: can I settle it now, with the tools and
 permits I have? If yes, settle it and report it as work done. "It needs a run to confirm" when the run is available,

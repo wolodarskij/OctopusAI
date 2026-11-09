@@ -119,6 +119,7 @@ names no status lands on it.
 | InProgress | `ready to implement` | a `plan` session, when the plan is on the ticket |
 | InProgress | `implementing` | a `work` session, at its start, and the check of a blocked session when the blocker lands |
 | Blocked | `blocked by other task` | a session that finds another ticket must land first. `blocked-by:` names that ticket |
+| Blocked | `blocked by outside cause` | a session that tried every way and found an outside cause that stops its work: `report <id> blocked`. `## Blocked` names the cause and the ways it tried |
 | Blocked | `blocked by user` | the owner's direct order only |
 | Verification | `waiting` | a `work` session when it finishes, and any move to Verification |
 | Verification | `testing` | a `verify` session, at its start |
@@ -133,6 +134,25 @@ A project can map a status role to another word (`statusRoles` in `project.json`
 **Only the owner's direct order sets `blocked by user`.** A session never infers it. A ticket that
 waits for an answer from the owner stays in its board, and the session asks the owner. `move` and
 `new` refuse the status to a Claude session that does not pass `--owner-order`.
+
+**A session that cannot do its job tries every way to remove the cause first.** It searches the
+project for what is missing, uses another tool or another route, corrects what fails inside its
+ticket's scope, and runs the failed step again. When no way works and an outside cause stops
+the work (a missing asset, file or value, an ungranted permit, an outside action, a tool, a
+server or a lock that fails), it runs:
+
+    python .octopus/todo.py report <id> blocked --why "<the cause>" --tried "<every way tried>" --mode <mode>
+
+The command moves the ticket to Blocked `blocked by outside cause`, writes the cause and the
+ways tried under `## Blocked`, and reports the session as `event`. The session ends the turn
+without `WORK IS FINISHED`, stays open and waits. When the cause is gone, it moves the ticket
+to InProgress `implementing` and continues. A session that an outside cause stops is in Blocked,
+and nowhere else.
+
+**No agent offers, proposes or asks to do only a part of the work,** and no agent asks
+whether a part is enough. Only the owner, on the owner's own order, says that a part is
+enough. A part of the order that cannot be done sends the ticket to Blocked with its cause.
+The reply check fails such an offer, also when it is a question.
 
 **A launched session that meets a blocker:**
 
@@ -206,8 +226,8 @@ mode, and the brief lists them. A session works in them as in the project root.
 session at its prompt at once, the rest the next launch. Codex has none. The manager
 should keep it on; the board says so when it is off.
 
-**Do not work around an ungranted permit.** Write the permit on the ticket, move the ticket to
-InProgress `waiting`, and stop.
+**Do not work around an ungranted permit.** Run `report <id> blocked --why "the owner grants
+the permit <name>" --tried "<every way tried>"`, and wait.
 
 ## Working a ticket in its own Claude session
 
@@ -234,7 +254,7 @@ InProgress `waiting`, and stop.
 **A session is in one of seven states.** `running`: its turn runs. `input`: it waits for the
 owner's answer, and only when it explicitly waits for it. `event`: it waits for something
 outside the project, such as an editor restart; it reported it with `report <id> event --why
-"<the event>" --mode <mode>`, and nobody has to answer it. `working` (the engine's word is
+"<the event>" --mode <mode>`, or with `report <id> blocked`, and nobody has to answer it. `working` (the engine's word is
 `subagent`): it still works on what is not the owner's, its scheduled job, its own subagent or
 a background shell that runs a process, or the judge says it still does its own work; Claude Code calls it back when
 that work completes. `blocker`: the same, while its ticket waits for other tickets (`blocked by
@@ -250,14 +270,13 @@ never makes a session `working`.
 line and checks nothing else, so a session writes it only when its work is done: a `work`
 ticket in Verification, a plan `ready to implement` that leaves nothing open, a `review`
 verdict given, a `verify` measurement made. A session that cannot do its work (a missing
-asset or file, an ungranted permit, an outside action, another ticket, a decision of the
-owner) never writes it, and no plan, note or brief step makes it do so. It writes on its
-ticket what stops it, reports what it waits for, ends the turn without the line, and stays
-open. A session that cannot find what its work needs (an asset, a file, a value) asks the
-owner with `report <id> input` and the question dialog, and waits for the answer; a note
-that forbids questions or the dialog only moves the question to the last line of its
-message. An ungranted permit or an outside action is `report <id> event`; another ticket is
-the steps for a blocker. **A session whose work is finished never leaves the line out:** in
+asset or file, an ungranted permit, an outside action, a tool or a server that fails, another
+ticket, a decision of the owner) never writes it, and no plan, note or brief step makes it do
+so. It tries every way to remove the cause, then ends the turn without the line and stays
+open. An outside cause is `report <id> blocked`, which moves the ticket to Blocked; another
+ticket is the steps for a blocker; a decision of the owner is `report <id> input` and the
+question dialog, and a note that forbids questions or the dialog only moves the question to
+the last line of its message. **A session whose work is finished never leaves the line out:** in
 every launch mode, also in the turn after the owner's answer, after a message of the owner,
 after a resume, and after the event or the background job it waited for.
 

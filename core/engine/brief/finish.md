@@ -26,20 +26,31 @@
   a resume of this session, and after the event or the background job you waited for. The
   last message of the turn that finishes the work ends with the line.
 - **A session that cannot do its work never writes `WORK IS FINISHED`.** A missing asset or
-  file, an ungranted permit, an outside action, another ticket or a decision of the owner
-  stops the work, and stopped work is not finished. Write on the ticket what stops it. Then
-  report what you wait for, end the turn without the line, and keep this terminal open:
-  - **You cannot find what the work needs** (an asset, a file, a value, a name): ask the
-    owner where it is or for it, with `report ... input` and the question dialog, and wait
-    for the answer.
-  - A decision of the owner: `report ... input` and the question dialog.
-  - An ungranted permit or an action outside the project, such as an editor restart:
-    `report ... event`.
+  file, an ungranted permit, an outside action, a tool or a server that fails, another ticket
+  or a decision of the owner stops the work, and stopped work is not finished.
+- **First try every way to remove the cause.** Search the project for what is missing, use
+  another tool or another route, correct what fails inside this ticket's scope, and run the
+  failed step again. Stop only when no way works.
+- **When no way works, the ticket goes to {label:blocked}, and the session waits:**
+  - **An outside cause** (a missing asset, file or value after the search, an ungranted
+    permit, an outside action, a tool, a server or a lock that fails):
+    `{cli} report {id} blocked --why "<the cause>" --tried "<every way you tried>" --mode {mode}`.
+    It moves the ticket to {label:blocked} `{status:blocked by outside cause}`, writes the cause
+    and the ways you tried on the ticket, and reports the session as waiting for that event.
+    End the turn without the line, and keep this terminal open. When the owner or the event
+    removes the cause, run `{cli} move {id} {lane:active} --status "{status:implementing}"`
+    and continue the work.
   - Another ticket: the steps under **When another ticket blocks this one**.
+  - A decision that only the owner can make: `report ... input` and the question dialog.
+- **Never offer, propose or ask to do only a part of the work.** No part commit, no part
+  delivery, no smaller scope, and no question whether a part is enough. Only the owner, on
+  the owner's own order, says that a part is enough. When a part of the order cannot be done,
+  the ticket goes to {label:blocked} with the cause, as above.
 - **A launch note never makes stopped work finished.** A note that tells you to ask the
   owner nothing, or not to use the question dialog, does not permit the line on stopped
-  work. Write the question on the ticket, run `report ... input` with it, end your last
-  message with the question as its last line, and keep this terminal open.
+  work. An outside cause goes to {label:blocked} as above. A decision of the owner: write the
+  question on the ticket, run `report ... input` with it, end your last message with the
+  question as its last line, and keep this terminal open.
 - **Work is never finished while a question is open.** When you cannot do the work without
   the owner (a value only the owner can give, a decision, a word), that is a question, not a
   finish: report `input`, ask it with the `AskUserQuestion` tool, and keep this terminal open.

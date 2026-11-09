@@ -144,6 +144,9 @@ ticket that nobody can size.
     python .octopus/todo.py close --finished              close every terminal whose session is finished
     python .octopus/todo.py report T0001 input --why "Which board?" --mode work   the session asks the owner this question
     python .octopus/todo.py report T0001 event --why "editor restart" --mode work   ... or for an outside event
+    python .octopus/todo.py report T0001 blocked --why "the server refuses the commit" --tried "retry, other route" --mode work
+                                                          ... or for an outside cause: moves the ticket to Blocked
+                                                          `blocked by outside cause`, writes the cause, reports `event`
 
 - `focus`, `screen`, `send` and `close` take a ticket id, or the first 8 or more characters of a
   session id for a session that has no ticket.
