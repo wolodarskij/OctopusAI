@@ -409,7 +409,8 @@ goes to its own ticket, and this ticket does not describe it.
 `move` to Verification or Done refuses a ticket whose outcome, `## Result` or `## Verified` says
 so: "still fails", "does not work", "not fixed", "known limit", "works partly". `outcome` and
 `check` refuse such an outcome on a ticket in Verification or Done. A `cancelled` ticket is
-not finished work, and the test does not apply to it.
+not finished work, and the test does not apply to it. Never reword such a text to pass the
+test: the work is not finished, and the ticket stays where its work stands.
 
 ### Only a verification session closes a ticket
 
@@ -664,7 +665,9 @@ The file and line you read, or the command you ran.
 
 **The body states the order and nothing more.** Keep the scope that the owner gave. Add no part,
 step, test, check, proof or background that the owner did not ask for. A session's `## Result` is
-a short list: the path of the deliverable and the facts the owner must know.
+a short list: the path of the deliverable and the facts the owner must know. Each fact is proven
+and holds now: a finding that a later fact disproves is deleted and replaced, never kept beside
+it as "superseded".
 
 **The title says whether the ticket is a bug, a feature or a documentation ticket.** A bug title
 starts with `Bug: ` and says what is wrong: "Bug: The board drops a ticket that has no severity". A

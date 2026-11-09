@@ -5,8 +5,10 @@
   terminal open, wherever the ticket is, and shows the question and its options.
   - One dialog holds up to 4 questions. Put a longer list into several dialogs, one after the
     other.
-  - Give each question its options, with a short description of each option. Put the
-    recommended option first.
+  - Give each question its options, with a short description of each option.
+  - The question and its options state only proven facts, or mark a claim "Unverified:".
+    Recommend an option only when proven facts support it, and never an option that does only
+    a part of the work. A recommended option stands first.
   - Put the context the owner needs into the question and the option descriptions, or into a
     short message before the dialog.
 - **When you wait for something outside the project, not for an answer**, such as an

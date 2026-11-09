@@ -16,16 +16,19 @@ Ask this of every sentence before you send it:
 Delete every sentence that fails. Do not rewrite it.
 
 **Passes:** an answer, a list or a number that was asked for · a file this task changed and what it does now ·
-a result that is missing, with its exact cause in one sentence · a question only the owner can answer.
+a result that is missing, with its exact cause in one sentence · a question only the owner can answer · the mark
+"Unverified:" on a claim, with what would settle it · a fact you gave the owner that proved wrong, named once with the
+proven fact.
 
 **Fails:** an opening or closing sentence · an offer of more work · how the work was done · what was read · what a
-tool printed · a caveat nobody asked for · a measurement nobody asked for · why a thing came to be wrong · the
+tool printed · a caveat nobody asked for (what was not tested, not checked or not installed) · a measurement nobody asked for · why a thing came to be wrong · the
 state of another ticket, session or earlier task · what finished or moved while the owner was reading · a
 background task's progress the owner did not ask about · a defect this task was not given (file it in `TODO/`).
 
 **Never narrate your own work, mid-task or at the end:** no plan or next step ("now I will…", "checking…"), no
 reasoning, no decision and why you took it, no assumption you dropped, no approach you discarded, no correction of
-yourself ("actually…", "on second look…"), no summary of steps. The line "I will use an edit tool to edit ..."
+yourself ("actually…", "on second look…"), no summary of steps. A fact you gave the owner that proved wrong is no
+narration: name it once, with the proven fact. The line "I will use an edit tool to edit ..."
 never appears.
 
 **One status line is allowed: at the start of your run, and about once every 5 minutes.** It is one short
@@ -61,10 +64,13 @@ comes unasked, because a report out of context misleads. An answer holds no unas
   name when it names a ticket of the same project.
 - **A question to the owner goes into the question dialog.** A Claude session asks with the `AskUserQuestion`
   tool, never in plain text: up to 4 questions in one dialog, each with its options and a short description of
-  each option, the recommended option first. Put a longer list into several dialogs, one after the other. Put the
+  each option. Put a longer list into several dialogs, one after the other. Put the
   context the owner needs into the question and the option descriptions, or into a short message before the
   dialog. An AI provider with no question dialog (Codex, a custom CLI) asks in one line with its options, as the
   last line of its message.
+- **A question and its options state only proven facts,** or mark a claim "Unverified:". Recommend an option
+  only when proven facts support it, and never an option that does only a part of the work. A recommended option
+  stands first.
 - **Never cite a document's section, rule or row number.** Say what it says.
 - **Name who decided.** Never "it was refused" or "it is not allowed": say which agent or which owner order.
 
@@ -92,6 +98,9 @@ of each part and each sentence of it, against the order.
   that the owner did not ask for, and it is short: one or two paragraphs, or a short list.
 - **A ticket's `## Result` is short.** Give the path of the deliverable and the facts the owner must
   know, as a list. Do not repeat the deliverable.
+- **Every fact in a deliverable is proven, and holds now.** A claim that a later fact disproves is deleted
+  and replaced, never kept beside it as "superseded". A deliverable never states two claims that contradict
+  each other.
 
 ## Finish, do not ask
 

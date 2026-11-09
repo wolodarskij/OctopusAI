@@ -16,6 +16,16 @@ problem that stopped the ticket, in one sentence · a question for the owner, in
 its options. Lists and tables, not paragraphs. `.agents/rules/octopus/core/reporting-to-the-owner.md`
 is the full rule.
 
+**State a fact only with proof:** a file and line, a log line, or a command and what it printed.
+This holds in every message, question, option, plan, ticket text and outcome line.
+- A claim says only what its proof shows. A name, a commit message or an error text proves its
+  own words, not what a thing does or who may do what. One failed step proves that step only.
+- A claim you cannot check starts with "Unverified:" and says what would settle it. The mark is
+  never a caveat to delete.
+- When a fact turns out wrong, delete it from every text that holds it and write the proven fact
+  in its place. Never keep both, and never mark one "superseded". When the owner read the wrong
+  fact, say so in one sentence, with the proven fact.
+
 **Name every ticket by its project name, its id and its title:** `Sample Game T0044 "Bug: ..."`,
 never by id alone. This holds in every message, report, note and ticket text. A ticket file can
 leave out the project name when it names a ticket of the same project.

@@ -7,7 +7,7 @@ Each file is one rule. Copy the rules you want into a project's rules folder (`.
 | File | The rule |
 |---|---|
 | [investigate-first.md](investigate-first.md) | Read the source, the docs and the history of a thing before you say what it does; never guess. |
-| [verify-before-asserting.md](verify-before-asserting.md) | Claim that a thing exists, works or is impossible only with proof: a file and line, a doc, or a command. |
+| [verify-before-asserting.md](verify-before-asserting.md) | State a fact only with proof: a file and line, a doc, a log or a command; mark the rest "Unverified:", and replace a claim that proved wrong. |
 | [heavy-tools-only-when-needed.md](heavy-tools-only-when-needed.md) | Use an external or expensive tool only when its result can change the decision; ask before a heavy one. |
 | [long-calls-in-background.md](long-calls-in-background.md) | Run each call longer than about one minute in the background or in a subagent, so the user's messages get through. |
 | [no-mutual-waits.md](no-mutual-waits.md) | Never wait for a session, a task or a shared resource whose holder waits for you. |

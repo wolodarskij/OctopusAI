@@ -138,7 +138,7 @@ is running and will commit and push when it is done" answers the parts run, comm
 
 These FAIL, unless they answer a part of the request:
 - a measurement nobody asked for: seconds, counts, timings, how often something was seen;
-- a caveat nobody asked for: what was not tested, not checked, not installed, not proven;
+- a caveat nobody asked for: what was not tested, not checked, not installed;
 - a defect or a ticket this request was not given, a side ticket the agent filed, a check \
 that failed "before this ticket";
 - the state of a ticket, a session or an earlier task that no part of the request is about;
@@ -156,6 +156,8 @@ These always PASS, except a sentence of the "partial" kind:
 - the answer, the result, a list, a table or a number the request asked for;
 - a file the work changed, and what it does now;
 - a part of the request that is missing, with its exact cause in one sentence;
+- a claim marked "Unverified:" or "Assumption:", with what would settle it;
+- a statement that a fact the agent gave earlier was wrong, with the proven fact;
 - a question to the owner: every sentence that ends with "?";
 - the line WORK IS FINISHED, and a statement that a ticket is in Verification or Done;
 - a heading, a table header, a line that only formats.

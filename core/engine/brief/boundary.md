@@ -20,6 +20,7 @@ The reader is an expert. Name every file it touches by its path from the project
 actions, not descriptions: which file to edit, what to change, and how. Add no part the order
 does not name: background, a test guide, checks and proof, another route, known limits. The
 proof goes into the ticket's `## Result`, which is a short list: the path of the deliverable and
-the facts the owner must know. A part the deliverable cannot be correct without is a question
-to the owner.
+the facts the owner must know. Each fact in it is proven and holds now: a finding that a later
+fact disproves is deleted and replaced, never kept beside it. A part the deliverable cannot be
+correct without is a question to the owner.
 
