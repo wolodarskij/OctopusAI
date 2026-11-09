@@ -65,7 +65,7 @@ AI ticket with a move to Pipeline; the line stays.
   neutral words>"`, and the same check of the owner's words for each ticket.
 - A group run launches no AI-Pipeline ticket, and an AI-Pipeline ticket is never a follow-up. A
   blocker in AI-Pipeline with no session gets a worker, as in Pipeline.
-- **The engine moves an unmarked AI ticket to AI-Pipeline.** The manager's 10-minute check and
+- **The engine moves an unmarked AI ticket to AI-Pipeline.** The manager's check and
   `octopus ai-filed` read the transcript of the session that filed each open ticket in Pipeline or
   Blocked. A ticket that a turn with no owner's prompt filed, with no `--requested`, moves to
   AI-Pipeline and gets `filed-by: ai`. A requested ticket, its children, a cross-project follow-up,
@@ -172,7 +172,7 @@ installs. It notifies Octopus AI, and carries on:
   `notify`. A follow-up that a session of the Octopus AI project files in another project is not
   refused.
 - **The notice goes to the Octopus AI project,** `TODO/.notices/N####.md`, with the project, the
-  session and its ticket. The manager's 10-minute check lists each open notice on every run.
+  session and its ticket. The manager's check lists each open notice on every run.
 - **The Octopus AI manager decides on each notice:** a new Octopus AI ticket (`notice <id>
   ticket --title "..."`), the evidence on an existing ticket (`notice <id> evidence <ticket
   id>`), or no ticket (`notice <id> none --why "..."`). `notices` lists the open notices.
@@ -236,10 +236,15 @@ owner's answer, and only when it explicitly waits for it. `event`: it waits for 
 outside the project, such as an editor restart; it reported it with `report <id> event --why
 "<the event>" --mode <mode>`, and nobody has to answer it. `working` (the engine's word is
 `subagent`): it still works on what is not the owner's, its scheduled job, its own subagent or
-background shell, or the judge says it still does its own work; Claude Code calls it back when
+a background shell that runs a process, or the judge says it still does its own work; Claude Code calls it back when
 that work completes. `blocker`: the same, while its ticket waits for other tickets (`blocked by
 other task`, a ticket in its `blocked-by:`, an open child). `idle`: nothing says yet what it
 waits for. `finished`: it waits for nothing.
+
+**A background shell counts only while it runs a process.** Each scan kills by force, with
+its whole process tree, a background shell of a session that runs no process for 60 seconds,
+and every background shell of a `finished` session. A background shell that no longer runs
+never makes a session `working`.
 
 **The engine decides the state in this order, and the first step that matches wins:**
 
@@ -253,7 +258,7 @@ waits for. `finished`: it waits for nothing.
 | 0 | it reported `report <id> input --why "<the question>" --mode <mode>` in this turn | `input` |
 | 1 | its turn ended, and its last lines say its ticket is in Verification or Done, or it reported `finished` | `finished`; a manager `idle` |
 | 2 | its turn ended, and the last line of its last message is a question | `input` |
-| 3 | it holds a recurring job, or its own subagent or background shell runs | `blocker` when its ticket waits for other tickets, else `working` |
+| 3 | it holds a recurring job, its own subagent runs, or its background shell runs a process | `blocker` when its ticket waits for other tickets, else `working` |
 | 4 | its turn runs and wrote to its transcript within 5 minutes, or a tool call of its turn has no result yet | `running` |
 | 5 | its turn ended, or it wrote nothing for 5 minutes and no tool call runs: the judge reads its last message and its ticket | the verdict: `input`, `finished`, `working` or `blocker` |
 | 6 | the judge is unsure: the engine types `/recap` into the session once, and the judge reads the recap | the verdict on the recap; `idle` when it is unsure again or no recap comes within 2 minutes |
@@ -344,6 +349,34 @@ message still ends with `WORK IS FINISHED`.
     python .octopus/todo.py move T0001 Verification --outcome "The board shows the outcome line"
     python .octopus/todo.py outcome T0001 "The board shows the outcome line"
 
+### What may be called wrong
+
+**A thing is wrong only when it breaks a written reference.** The references are:
+
+1. the ticket's order: its first section and its `## Owner's orders`;
+2. an order of the owner, or a rule of the project;
+3. the documented behavior: a doc, a comment, a test, a type or a schema;
+4. an observed failure: a crash, an error, lost data, or a result that differs from what the
+   program states.
+
+Nothing else is wrong. When no reference shows the intent of a thing, it is a question to the
+owner, never a defect. A defect outside the ticket's order is not wrong with this ticket: it
+goes to its own ticket, and this ticket does not describe it.
+
+**A ticket is done, or wrong, or it asks the owner. It is never two of them.**
+
+| The ticket | Where it stays |
+|---|---|
+| done: the tree meets every part of its order | Verification or Done. Its outcome, `## Result` and `## Verified` say only what works or what was found |
+| wrong: a part of its order is not met | In Progress while its session works, or Pipeline when a verify session sends it back and says what is still wrong under `## Verification failed` |
+| a question: its session cannot tell if a thing is wrong | its board, while its session asks the owner what to call wrong |
+
+**A finished ticket that says something is still wrong contradicts itself, and is prohibited.**
+`move` to Verification or Done refuses a ticket whose outcome, `## Result` or `## Verified` says
+so: "still fails", "does not work", "not fixed", "known limit", "works partly". `outcome` and
+`check` refuse such an outcome on a ticket in Verification or Done. A `cancelled` ticket is
+not finished work, and the test does not apply to it.
+
 ### Only a verification session closes a ticket
 
 **A session that did the work never closes its own ticket.** It lands the work, moves the ticket
@@ -398,17 +431,14 @@ holds.** The brief sections `vcs.work` and `vcs.verify` give the exact steps.
   pushes nothing.
 - **No session commits a change of another ticket or of the owner,** and never a change of a
   ticket the owner keeps in Blocked.
-- **A project with `vcs: none`, or with no `vcs`, commits nothing.** A Diversion project has no
-  backend yet, so it commits nothing.
+- **A project with `vcs: none`, or with no `vcs`, commits nothing.**
 - **With the `git` pack,** a `work` launch holds `git-commit`, and a `verify` launch holds
   `git-commit` and `git-sync`, whatever the ticket says (`modePermits`).
-- **In a project with `vcs: svn` or `vcs: perforce`, a commit goes to the server at once, so the
-  `verify` session commits the work when it holds.** The `work` session commits nothing: it puts
-  its files into the changelist of its ticket and writes them on the ticket. The `verify` session
-  updates those files and commits them as `<id>: <title>` (svn), or syncs, resolves and submits the
-  changelist (Perforce). The `svn` or the `perforce` pack gives the brief sections
-  `vcs.<kind>.<mode>`, and a `verify` launch holds `svn-commit` and `svn-update`, or `p4-submit`
-  and `p4-sync`. `check` reports a project whose `vcs` names a VCS whose pack it does not list.
+- **Another VCS has its own pack:** `perforce`, `diversion`, `svn`, `mercurial` or `plastic`.
+  The project lists the pack and sets `vcs` to the same name. The pack's brief sections
+  `vcs.<kind>.<mode>` give the steps of each mode. A work session never sends work to the
+  server. A verify session sends it when the measurement holds. `check` fails a `vcs` whose
+  pack is absent.
 
 ## A repeatable ticket returns to Pipeline
 
@@ -473,7 +503,10 @@ the owner. It grants `projects`, so the session reaches every registered project
   and `watchdog` act on the manager of that project, from any project. `manager` files the
   ticket from the template when that project has none; `manager --start` also launches it
   unless it runs. A manager ticket in any other project is never started.
-- **The board starts it when it opens,** whichever project is open. One manager serves every
+- **Global settings controls Autostart manager,** enabled by default. When off, the board
+  neither starts nor restarts the manager automatically. The Manager button still starts it
+  manually, and an already-open manager remains available for input.
+- **The board starts it when it opens when autostart is enabled,** whichever project is open. One manager serves every
   project. Each manager of the Octopus AI project in InProgress whose session is not running
   starts again. With none in InProgress, the board starts the manager of the Octopus AI
   project, filed from the template when that project has none. A retired manager is never
@@ -507,29 +540,36 @@ the owner. It grants `projects`, so the session reaches every registered project
   the manager copies it and never summarizes a ticket: a finished agent is `<project> <id>
   "<title>" — <outcome>; <lane> / <status>; <commit> pushed|not pushed`, a waiting one its
   question word for word, a working one `<project> <id> "<title>" — <what it does now, at most
-  10 words>`. **Waiting for your input lists only an agent whose session is open and in the
+  10 words>`. A finished agent whose ticket's order asks a question or an investigation
+  carries its answer: the lines of the ticket's `## Result`, one sub-line each, under its
+  line. **Waiting for your input lists only an agent whose session is open and in the
   `input` state.** A finished, closed or idle agent never stands there, and nor does a decision
   that a finished ticket's result names: that agent stands only under Finished. The reply check
   fails a Waiting line about any other agent.
-- **The manager's 10-minute check always runs.** A manager session that starts or starts
-  again runs `CronList`, keeps each job it finds, and makes a recurring job that runs
-  `octopus check` every 10 minutes when none does, then runs `octopus check --job-created`.
-  It makes the job again before Claude Code expires it after 7 days, and when its recorded
-  check job is gone or no check job of the session is recorded: the check exits 3 then. The
-  check launches no ticket and no follow-up. A restarted manager launches, resumes or sends
-  an order to no ticket whose session did not run when it stopped. Each run prints the
-  full update whenever any agent finished since the last run, waits for the owner, works or
-  waits for something else, each waiting question word for word on every run until it is
-  answered. Only when no agent finished, none waits and none works does the manager write
-  nothing at all; it never writes "no change" or any line like it. It answers no agent. A
-  manager on an AI provider with no scheduler of its own (Codex) gets the check from the
-  board's watchdog, which types it into the manager session every 10 minutes.
+- **The manager's check is always on, and it gives the full update every 10 minutes while
+  any ticket runs.** The board's watchdog runs the check in Python every 10 minutes for each
+  manager session, of every AI provider. It types `octopus check` into the session while any
+  agent finished since the last update, waits for the owner, works or waits for something
+  else, and when a notice that was not reported yet arrived. A finished ticket reaches the
+  owner within one interval. The manager makes no `CronCreate` job for the check. While the
+  board does not run, the manager's fallback watcher, `octopus check --watch` in a background
+  command of a Claude manager, runs the check every 10 minutes; it exits with the update on
+  the same news. The check launches no ticket and no follow-up. A restarted manager
+  launches, resumes or sends an order to no ticket whose session did not run when it
+  stopped. Each check prints the full update whenever any agent finished since the last
+  update, waits for the owner, works or waits for something else, each waiting question
+  word for word on every check until it is answered. Only when no agent finished, none
+  waits and none works does the manager write nothing at all; it never writes "no change"
+  or any line like it. It answers no agent.
+  The manager ends each turn after its work and stays open for input. It never uses sleep
+  or a polling loop to stay available. The board shares wake timing across its processes.
 
     python .octopus/todo.py manager                    the Octopus AI project's manager ticket, from the template when there is none
     python .octopus/todo.py manager --start            start it unless it runs
     python .octopus/todo.py manager --claim            this session becomes the manager, from any project
     python octopus.py sessions --since-last            the manager's update, every project
-    python octopus.py check                            the 10-minute check: the update while any agent finished, waits or works
+    python octopus.py check                            the manager's check: the update while any agent finished, waits or works; it launches nothing
+    python octopus.py check --watch                    the manager's fallback while the board does not run: exits with the update on news
     python .octopus/todo.py watchdog                   every manager ticket of the Octopus AI project, alive or dead
 
 ## Parent and children

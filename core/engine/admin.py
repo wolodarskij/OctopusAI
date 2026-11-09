@@ -21,10 +21,17 @@ WHAT INSTALL WRITES, and records in `<project>/.octopus/installed.json` with eac
     .octopus/project.json     from core/templates/project.json, with the base rulesets and the
                               chosen packs
     .octopus/todo.py          the per-project shim: `python .octopus/todo.py <command>`
-    .claude/settings.json     the hook lines (`octopus hook`) and one env variable
+    .claude/settings.json     the env variables, the permission rules and the attribution; in
+                              the checkout also the hook lines, which name no machine path
+    .claude/settings.local.json
+                              the hook lines (`octopus hook`) of every other project
     .codex/hooks.json         the status hook lines of Codex (`octopus status-hook`), through
                               `agents.write_entries`
     the payload of every ruleset the project lists: skills, rules, templates
+
+THE MACHINE FILES (`machine_files`) name a directory of this machine: the shim, the install
+record, the hook files and every installed file whose text names the checkout. `install` and
+`refresh` put them on the ignore list of the project's VCS (`ignore_machine_files`).
 
 The registry (`projects.json`, outside the Octopus AI tree) gets the project.
 
@@ -114,6 +121,13 @@ SESSION_ATTRIBUTION = {"commit": "", "pr": "", "sessionUrl": False}
 RULES_DIR = ".claude/rules/octopus"
 # The second shim a project may hold; relocate rewrites the path it names.
 LEGACY_SHIM = ".aitools/todo.py"
+# The Claude settings every project shares through its VCS, and the ones of this machine only.
+SETTINGS = ".claude/settings.json"
+SETTINGS_LOCAL = ".claude/settings.local.json"
+# The files that name a directory of this machine by their nature, besides the shim and the
+# install record: the local hook lines, the Codex hook lines (the Python executable and the
+# checkout), and the legacy shim and its record.
+MACHINE_FILES = (SETTINGS_LOCAL, ".codex/hooks.json", LEGACY_SHIM, ".aitools/installed.json")
 
 
 def _cd(root):
@@ -141,10 +155,12 @@ def packs_of_profile(name):
 
 def hook_command(root=None):
     """The Claude hook line of the project at `root`. The checkout's own line finds
-    `octopus.py` at run time, so the tracked `.claude/settings.json` names no machine path."""
+    `octopus.py` at run time, so the tracked `.claude/settings.json` names no machine path.
+    The line ends with `HOOK_TAIL`: a missing checkout, a crash or any exit code never stops
+    the session."""
     if root is not None and is_checkout(root):
-        return 'python "$CLAUDE_PROJECT_DIR/octopus.py" hook'
-    return 'python "%s" hook' % (OCTOPUS / "octopus.py").as_posix()
+        return 'python "$CLAUDE_PROJECT_DIR/octopus.py" hook' + _agents.HOOK_TAIL
+    return 'python "%s" hook%s' % ((OCTOPUS / "octopus.py").as_posix(), _agents.HOOK_TAIL)
 
 
 def is_checkout(root):
@@ -166,8 +182,9 @@ def status_hook_command():
 
 
 # The hook line of any checkout, under either script name. A checkout that moved recognises
-# the line an install wrote at its old path.
-_HOOK_LINE = re.compile(r'^python "[^"]+/(?:octopus|aitools)\.py" hook$')
+# the line an install wrote at its old path, and the line without `HOOK_TAIL`.
+_HOOK_LINE = re.compile(r'^python "[^"]+/(?:octopus|aitools)\.py" hook(?:%s)?$'
+                        % re.escape(_agents.HOOK_TAIL))
 
 
 def is_hook_command(cmd):
@@ -210,10 +227,13 @@ class Record:
         self.settings = d.get("settings", {})
         self.entries = d.get("entries", {})
         self.tree = d.get("tree", {})
+        self.ignored = d.get("ignored", {})
 
     def save(self):
         d = {"files": self.files, "dirs": sorted(set(self.dirs)),
              "settings": self.settings, "entries": self.entries, "tree": self.tree}
+        if self.ignored:
+            d["ignored"] = self.ignored
         _write_bytes(self.path, _json_bytes(d))
 
     def mkdirs(self, p):
@@ -295,6 +315,9 @@ def install(root, packs=None, name=None, slug=None, register=True, out=print, ma
     root = Path(root).resolve()
     if not root.is_dir():
         raise ValueError("%s is not a directory" % root)
+    # What the toolkits before Octopus AI left goes first, so the rest sees the project clean.
+    import leftovers
+    leftovers.clean(root, out)
     rec = Record(root)
     cfg_path = root / CONFIG_DIR / PROJECT_FILE
     existing = _read_json(cfg_path, None) if cfg_path.exists() else None
@@ -327,7 +350,9 @@ def install(root, packs=None, name=None, slug=None, register=True, out=print, ma
     for rs in pj["rulesets"]:
         _install_payload(root, rs, rec, values, out)
     write_entries(root, rec, pj, out)
+    secure_hooks(root, rec, out)
     _install_tree(root, rec, out, manager=manager and existing is None)
+    ignore_machine_files(root, rec, pj, out)
     rec.save()
     if register:
         _project.register(root, pj["name"])
@@ -466,6 +491,62 @@ def write_entries(root, rec, pj=None, out=print):
                                  hook=status_hook_command())
 
 
+def machine_files(root, rec=None):
+    """The project-relative paths, sorted, of the files of the project at `root` that name a
+    directory of this machine for Octopus AI: the shim and the install record, the files of
+    `MACHINE_FILES`, and every installed file whose text names the checkout. The shim, the
+    install record, the local hook file and the Codex hook file count even before they exist."""
+    root = Path(root)
+    rec = rec if rec is not None else Record(root)
+    cd = _cd(root)
+    always = ["%s/todo.py" % cd, "%s/%s" % (cd, INSTALLED), SETTINGS_LOCAL, ".codex/hooks.json"]
+    names = set(always) | {rel for rel in MACHINE_FILES if (root / rel).is_file()}
+    pat = _path_pattern(OCTOPUS)
+    for rel in set(rec.files) | set(rec.entries):
+        if rel in names:
+            continue
+        try:
+            text = (root / rel).read_bytes().decode("utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if pat.search(text):
+            names.add(rel)
+    return sorted(names)
+
+
+def vcs_kind(root, pj=None):
+    """The VCS whose ignore list keeps the machine files out: `vcs` of `project.json` when it
+    names one, else the one whose marker sits in the root. None when there is none."""
+    import vcs as _vcs
+    pj = pj if pj is not None else _read_json(root / _cd(root) / PROJECT_FILE, {})
+    kind = pj.get("vcs")
+    if kind in _vcs.KINDS and kind != "none":
+        return kind
+    return _vcs.detect(root)
+
+
+def ignore_machine_files(root, rec, pj=None, out=print):
+    """Put `machine_files` on the ignore list of the project's VCS (`vcs_kind`). It runs
+    again only when the kind or the list changed since `rec.ignored`. Returns True when it
+    changed the record; the caller saves it."""
+    import vcs as _vcs
+    root = Path(root)
+    kind = vcs_kind(root, pj)
+    if kind is None:
+        return False
+    paths = machine_files(root, rec)
+    if rec.ignored == {"kind": kind, "paths": paths}:
+        return False
+    steps = _vcs.ignore(root, kind, paths)
+    failed = [s for s in steps if s.rc != 0]
+    for s in failed:
+        out("  %s: %s did not keep the machine files out: %s" % (kind, " ".join(s.argv), s.out))
+    if failed:
+        return False
+    rec.ignored = {"kind": kind, "paths": paths}
+    return True
+
+
 def adopt(root, dry_run=False, out=print):
     """Move the project's own rules and skills from Claude's places into `.agents/`, then
     write every provider's entry file (`agents.adopt`). Returns its result."""
@@ -473,6 +554,11 @@ def adopt(root, dry_run=False, out=print):
     rec = Record(root)
     if not rec.path.exists():
         raise ValueError("%s has no %s/%s: install Octopus AI first" % (root, _cd(root), INSTALLED))
+    import leftovers
+    if dry_run:
+        leftovers.report(leftovers.find(root), out)
+    else:
+        leftovers.clean(root, out)
     res = _agents.adopt(root, recorded=rec.files, dry_run=dry_run, out=out)
     for k in ("moved", "dropped", "kept", "rewritten"):
         for x in res[k]:
@@ -780,7 +866,8 @@ def refresh(root, out=print):
     renamed pack its new name with its whole payload (`migrate_pack_names`). Returns the
     number of files written or removed. The `SessionStart` hook runs it, so a pack change
     reaches every project the next time a session starts in it. In the checkout itself it
-    brings its whole payload up to date."""
+    brings its whole payload up to date. It also remakes every hook line that could stop a
+    session (`secure_hooks`)."""
     root = Path(root).resolve()
     cd = root / _cd(root)
     pj = _read_json(cd / PROJECT_FILE, None)
@@ -800,9 +887,12 @@ def refresh(root, out=print):
         return 0
     try:
         rec = Record(root)
+        # A hook line of the toolkits before Octopus AI goes at the next session start.
+        import leftovers
+        n = len(leftovers.clean_hooks(root, rec, out))
         renamed = migrate_pack_names(root, rec, pj, out)
         keys = migrate_provider_keys(root, rec, pj, out)
-        n = len(keys)
+        n += len(keys)
         if renamed or keys:
             _write_bytes(cd / PROJECT_FILE, _json_bytes(pj))
             names = [r for r in pj.get("rulesets", []) if own or _owns_payload(r)]
@@ -817,7 +907,12 @@ def refresh(root, out=print):
         # that `update` has not moved to `.agents/` yet keeps what it has.
         if (root / _agents.AGENTS_DIR).is_dir():
             n += len(write_entries(root, rec, pj, out))
-        if n:
+        # A hook line that could stop a session is remade at the next session start.
+        n += len(secure_hooks(root, rec, out))
+        # A VCS made after the install, or a new file that names the checkout, reaches the
+        # ignore list at the next session start.
+        ignored = ignore_machine_files(root, rec, pj, out)
+        if n or ignored:
             rec.save()
         return n
     finally:
@@ -825,14 +920,103 @@ def refresh(root, out=print):
         lock.unlink(missing_ok=True)
 
 
-def _install_settings(root, rec):
-    """Add the hook lines and the title variable to `.claude/settings.json`, and record
-    exactly what was added so uninstall can take it out again."""
-    p = root / ".claude" / "settings.json"
-    created = not p.exists()
-    original = None if created else p.read_bytes().decode("utf-8")
-    d = _read_json(p, {}) if not created else {}
-    cmd = hook_command(root)
+# The hook files `secure_hooks` remakes, and whether Claude Code reads each one.
+HOOK_FILES = ((SETTINGS, True), (SETTINGS_LOCAL, True), (".codex/hooks.json", False))
+_ABSOLUTE = re.compile(r"^(?:[/\\~$%]|[A-Za-z]:)")
+
+
+def _anchored(cmd, root, powershell):
+    """The Claude hook line `cmd` with each script path relative to the project root written
+    from `$CLAUDE_PROJECT_DIR`, so a session that changed its directory still finds it."""
+    try:
+        lex = shlex.shlex(cmd, posix=True, punctuation_chars=";&|()<>")
+        lex.whitespace_split = True
+        words = list(lex)
+    except ValueError:
+        return cmd
+    var ="$env:CLAUDE_PROJECT_DIR" if powershell else "$CLAUDE_PROJECT_DIR"
+    for w in dict.fromkeys(words):
+        if not w or w.startswith("-") or _ABSOLUTE.match(w) or "$" in w or "%" in w:
+            continue
+        rel = w.replace("\\", "/")
+        while rel.startswith("./"):
+            rel = rel[2:]
+        if not rel or ("/" not in rel and "." not in rel) or not (Path(root) / rel).is_file():
+            continue
+        cmd = re.sub(r"(?<![^\s;&|(])([\"']?)%s\1(?=$|[\s;&|)])" % re.escape(w),
+                     lambda _m: '"%s/%s"' % (var, rel), cmd)
+    return cmd
+
+
+def _remade(cmd, root, claude, powershell):
+    """The project's own hook line `cmd`, remade so that nothing it does stops the session."""
+    if claude:
+        cmd = _anchored(cmd, root, powershell)
+    if claude and not powershell and re.search(r"\bexit\b", cmd) and not _agents.exits_0(cmd):
+        # An `exit` inside the line leaves the shell before the tail; a subshell keeps it.
+        cmd = "(%s)" % cmd.strip().rstrip(";")
+    return _agents.never_blocks(cmd)
+
+
+def secure_hooks(root, rec=None, out=print):
+    """Remake every hook line of the project at `root` that could stop a session: the hook
+    lines of `.claude/settings.json`, `.claude/settings.local.json` and `.codex/hooks.json`.
+    The engine's own lines become the current ones (`hook_command`, `status_hook_line`); every
+    other line gets its relative script paths from `$CLAUDE_PROJECT_DIR` (Claude) and ends with
+    `HOOK_TAIL`. A file is written only when a line changed, and the install record `rec`
+    keeps the hash of a settings file it wrote in step. Returns the files changed."""
+    root = Path(root)
+    mine = hook_command(root)
+    changed = []
+    for rel, claude in HOOK_FILES:
+        p = root / rel
+        if not p.is_file():
+            continue
+        before = p.read_bytes()
+        d = _read_json(p, None)
+        hooks = d.get("hooks") if isinstance(d, dict) else None
+        if not isinstance(hooks, dict):
+            continue
+        dirty = False
+        for groups in hooks.values():
+            for g in groups if isinstance(groups, list) else []:
+                entries = g.get("hooks") if isinstance(g, dict) else None
+                entries = entries if isinstance(entries, list) else [g]
+                for h in entries:
+                    cmd = h.get("command") if isinstance(h, dict) else None
+                    if not isinstance(cmd, str) or h.get("type", "command") != "command":
+                        continue
+                    if claude and is_hook_command(cmd):
+                        new = mine
+                    elif not claude and _agents.is_status_hook(cmd):
+                        new = _agents.never_blocks(cmd)
+                    else:
+                        new = _remade(cmd, root, claude,
+                                      str(h.get("shell", "")).lower() == "powershell")
+                    if new != cmd:
+                        h["command"] = new
+                        dirty = True
+        if not dirty:
+            continue
+        data = _json_bytes(d)
+        _write_bytes(p, data)
+        changed.append(rel)
+        out("  %s: hook lines remade, so no hook stops a session" % rel)
+        if rec is not None:
+            s = rec.settings or {}
+            loc = s.get("local") or {}
+            for r, rs in ((SETTINGS, s), (SETTINGS_LOCAL, loc)):
+                if rel == r and rs:
+                    if rs.get("written") == _sha(before):
+                        rs["written"] = _sha(data)
+                    if is_hook_command(rs.get("command")):
+                        rs["command"] = mine
+    return changed
+
+
+def _add_hooks(d, cmd):
+    """Write the hook line `cmd` for every event of `hook_events` into the settings `d`.
+    Returns the events it added."""
     added = []
     hooks = d.setdefault("hooks", {})
     # A hook line under the other script name, or one written before the checkout moved,
@@ -858,6 +1042,76 @@ def _install_settings(root, rec):
             hook["async"] = True
         groups.append(dict({"matcher": matcher} if matcher else {}, hooks=[hook]))
         added.append(ev)
+    return added
+
+
+def _drop_hooks(d, cmd, events=None):
+    """Take out of the settings `d` every hook group that runs `cmd` or another hook line of
+    Octopus AI, on `events`, or on every event when it is None. Returns the events changed."""
+    hooks = d.get("hooks")
+    if not isinstance(hooks, dict):
+        return []
+    changed = []
+    for ev in list(hooks):
+        groups = hooks[ev]
+        if (events is not None and ev not in events) or not isinstance(groups, list):
+            continue
+        keep = [g for g in groups if not (isinstance(g, dict) and any(
+            isinstance(h, dict) and (h.get("command") == cmd or is_hook_command(h.get("command")))
+            for h in g.get("hooks", [])))]
+        if len(keep) == len(groups):
+            continue
+        changed.append(ev)
+        if keep:
+            hooks[ev] = keep
+        else:
+            hooks.pop(ev)
+    if not hooks:
+        d.pop("hooks", None)
+    return changed
+
+
+def hooks_file(root):
+    """The settings file that holds the hook lines of the project at `root`. The checkout's
+    line names no machine path, so it stays in `.claude/settings.json`. Every other project's
+    line names the checkout, so it goes to `.claude/settings.local.json`, which no VCS tracks
+    (`machine_files`)."""
+    return SETTINGS if is_checkout(root) else SETTINGS_LOCAL
+
+
+def _install_local_hooks(root, rec, cmd, old):
+    """Write the hook lines into `.claude/settings.local.json`. Returns its record."""
+    p = root / SETTINGS_LOCAL
+    created = not p.exists()
+    d = _read_json(p, {}) if not created else {}
+    added = _add_hooks(d, cmd)
+    if created:
+        rec.mkdirs(p)
+    data = _json_bytes(d)
+    if created or p.read_bytes() != data:
+        _write_bytes(p, data)
+    return {"created": old.get("created", created), "written": _sha(data),
+            "hooks": sorted(set(old.get("hooks", [])) | set(added)), "command": cmd}
+
+
+def _install_settings(root, rec):
+    """Add the env, the permission rules and the attribution to `.claude/settings.json`, and
+    the hook lines to the file `hooks_file` names. Record exactly what was added so uninstall
+    can take it out again."""
+    p = root / SETTINGS
+    created = not p.exists()
+    original = None if created else p.read_bytes().decode("utf-8")
+    d = _read_json(p, {}) if not created else {}
+    cmd = hook_command(root)
+    old = rec.settings or {}
+    local = hooks_file(root) == SETTINGS_LOCAL
+    if local:
+        # The hook lines an older install wrote here move to the local file.
+        _drop_hooks(d, cmd)
+        added, hooks_rec = [], []
+    else:
+        added = _add_hooks(d, cmd)
+        hooks_rec = sorted(set(old.get("hooks", [])) | set(added))
     env = d.setdefault("env", {})
     env_added = any(k not in env for k in SESSION_ENV)
     for k, v in SESSION_ENV.items():
@@ -867,7 +1121,6 @@ def _install_settings(root, rec):
     allow = d.setdefault("permissions", {}).setdefault("allow", [])
     allow_added = [r for r in SESSION_ALLOW if r not in allow]
     allow.extend(allow_added)
-    old = rec.settings or {}
     # The value before the first install, so uninstall can put it back; None when the file had none.
     attribution = old["attribution"] if "attribution" in old else {"original": d.get("attribution")}
     d["attribution"] = dict(SESSION_ATTRIBUTION)
@@ -878,10 +1131,12 @@ def _install_settings(root, rec):
     rec.settings = {"created": old.get("created", created),
                     "original": old.get("original", original),
                     "written": _sha(data),
-                    "hooks": sorted(set(old.get("hooks", [])) | set(added)),
+                    "hooks": hooks_rec,
                     "env": bool(old.get("env")) or env_added,
                     "allow": sorted(set(old.get("allow", [])) | set(allow_added)),
                     "attribution": attribution, "command": cmd}
+    if local:
+        rec.settings["local"] = _install_local_hooks(root, rec, cmd, old.get("local") or {})
 
 
 # ── uninstall ───────────────────────────────────────────────────────────────
@@ -959,9 +1214,27 @@ def uninstall(root, pack=None, out=print):
     return None
 
 
+def _uninstall_local_hooks(root, loc):
+    """Take the hook lines out of `.claude/settings.local.json`, and the file when install
+    made it and nothing else is in it."""
+    p = root / SETTINGS_LOCAL
+    if not loc or not p.exists():
+        return
+    if loc.get("created") and _sha(p.read_bytes()) == loc.get("written"):
+        p.unlink()
+        return
+    d = _read_json(p, {})
+    _drop_hooks(d, loc.get("command", hook_command()), loc.get("hooks"))
+    if loc.get("created") and not d:
+        p.unlink()
+    else:
+        _write_bytes(p, _json_bytes(d))
+
+
 def _uninstall_settings(root, rec):
-    p = root / ".claude" / "settings.json"
+    p = root / SETTINGS
     s = rec.settings or {}
+    _uninstall_local_hooks(root, s.get("local"))
     if not p.exists():
         return
     if s.get("created"):
@@ -973,18 +1246,7 @@ def _uninstall_settings(root, rec):
             fh.write(s["original"])
         return
     d = _read_json(p, {})
-    cmd = s.get("command", hook_command())
-    hooks = d.get("hooks", {})
-    for ev in s.get("hooks", []):
-        groups = [g for g in hooks.get(ev, [])
-                  if not any(h.get("command") == cmd or is_hook_command(h.get("command"))
-                             for h in g.get("hooks", []))]
-        if groups:
-            hooks[ev] = groups
-        else:
-            hooks.pop(ev, None)
-    if not hooks:
-        d.pop("hooks", None)
+    _drop_hooks(d, s.get("command", hook_command()), s.get("hooks", []))
     if s.get("env"):
         for k in SESSION_ENV:
             d.get("env", {}).pop(k, None)
@@ -1091,14 +1353,18 @@ def relocate_project(root, old, new, out=print):
         changed.append(rel)
         if rel in rec.files and rec.files[rel]["hash"] == before:
             rec.files[rel]["hash"] = _sha(data)
-        if rel == ".claude/settings.json" and rec.settings.get("written") == before:
+        if rel == SETTINGS and rec.settings.get("written") == before:
             rec.settings["written"] = _sha(data)
-    for k in ("original", "command"):
-        if isinstance(rec.settings.get(k), str):
-            moved = swap_path(rec.settings[k], old, new)
-            if moved != rec.settings[k]:
-                rec.settings[k] = moved
-                changed.append("%s (%s)" % (record, k))
+        loc = rec.settings.get("local") or {}
+        if rel == SETTINGS_LOCAL and loc.get("written") == before:
+            loc["written"] = _sha(data)
+    for s, k, name in ((rec.settings, "original", "original"), (rec.settings, "command", "command"),
+                       (rec.settings.get("local") or {}, "command", "local command")):
+        if isinstance(s.get(k), str):
+            moved = swap_path(s[k], old, new)
+            if moved != s[k]:
+                s[k] = moved
+                changed.append("%s (%s)" % (record, name))
     if changed and rec.path.exists():
         rec.save()
     for rel in changed:
@@ -1393,6 +1659,10 @@ def status(root, out=print):
     counts["reporting"] = _agents.reporting_problems(root)
     for p in counts["reporting"]:
         out("warning  %s" % p)
+    import leftovers
+    counts["leftovers"] = leftovers.find(root)
+    for it in counts["leftovers"]:
+        out("leftover %s %s  (%s)" % (it["action"], it["path"], it["why"]))
     return counts
 
 

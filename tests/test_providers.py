@@ -376,3 +376,80 @@ class Migration(FixtureCase):
             project.reset(tok)
         self.assertEqual([(s["key"], s["provider"], s["claude"]) for s in found],
                          [("%s/work" % tid, "codex", 101)])
+
+
+# A headless Claude Code that streams its responses as `--output-format stream-json` does.
+STREAMER = r'''
+import json, sys
+assert "stream-json" in sys.argv and "--include-partial-messages" in sys.argv
+prompt = sys.stdin.read()
+for e in ({"type": "system", "subtype": "hook_started"},
+          {"type": "system", "subtype": "init", "model": "claude-haiku-5-5"},
+          {"type": "system", "subtype": "status", "status": "requesting"},
+          {"type": "stream_event", "event": {"type": "content_block_start",
+                                             "content_block": {"type": "text", "text": ""}}},
+          {"type": "stream_event", "event": {"type": "content_block_delta",
+                                             "delta": {"type": "text_delta", "text": "an "}}},
+          {"type": "stream_event", "event": {"type": "content_block_delta",
+                                             "delta": {"type": "text_delta", "text": "answer"}}},
+          {"type": "rate_limit_event", "rate_limit_info": {"status": "allowed"}},
+          {"type": "result", "subtype": "success", "is_error": "fail" in prompt,
+           "result": "the answer to " + prompt.strip()}):
+    print(json.dumps(e), flush=True)
+sys.exit(1 if "fail" in prompt else 0)
+'''
+
+
+class StreamedAnswer(FixtureCase):
+    def provider(self):
+        fake = self.tmp / "streamer.py"
+        fake.write_text(STREAMER, encoding="utf-8")
+        return dict(providers.get("claude"), command=sys.executable, args=[str(fake)], env={})
+
+    def test_each_response_of_the_request_becomes_one_line(self):
+        said = []
+        got = providers.answer(self.provider(), "the note", progress=said.append)
+        self.assertEqual(got, "the answer to the note")
+        self.assertEqual(said, ["started on claude-haiku-5-5", "sent the request",
+                                "writing the answer", "writing the answer · 3 characters",
+                                "writing the answer · 9 characters", "answer received"])
+
+    def test_an_error_result_fails_with_its_text(self):
+        with self.assertRaisesRegex(ValueError, "failed: the answer to fail"):
+            providers.answer(self.provider(), "fail", progress=lambda line: None)
+
+    def test_a_limit_and_a_retry_say_what_came_back(self):
+        seen = {}
+        self.assertEqual(providers.describe_event(
+            {"type": "rate_limit_event", "rate_limit_info": {"status": "rejected"}}, seen),
+            "rate limit: rejected")
+        self.assertEqual(providers.describe_event(
+            {"type": "system", "subtype": "api_retry", "attempt": 2}, seen),
+            "api retry · attempt 2")
+        self.assertIsNone(providers.describe_event(
+            {"type": "system", "subtype": "hook_response"}, seen))
+
+
+class ProgressApi(ProvidersApi):
+    def test_the_page_reads_the_latest_line_while_the_request_runs(self):
+        seen = []
+
+        def get(key):
+            url = "http://127.0.0.1:%d/api/progress?id=%s" % (self.httpd.server_address[1], key)
+            req = urllib.request.Request(url, headers={"X-Todo-Token": todo_server.TOKEN})
+            with urllib.request.urlopen(req) as r:
+                return json.loads(r.read())
+
+        def answer(p, prompt, model, effort, timeout, progress=None):
+            progress("thinking")
+            seen.append(get("abc"))
+            return "done"
+
+        tok = project.use(self.root)
+        try:
+            with mock.patch.object(providers, "answer", answer):
+                self.assertEqual(todo_server._ask_provider("p", {"progress": "abc"}, 5), "done")
+        finally:
+            project.reset(tok)
+        self.assertEqual(seen, [{"by": "Claude Code", "say": "thinking"}])
+        self.assertEqual(get("abc"), {})

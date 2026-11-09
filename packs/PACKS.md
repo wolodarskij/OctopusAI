@@ -137,28 +137,48 @@ The commands denied to every session and the commit policy of each mode are in
 The core supplies `vcs.work` and `vcs.verify`; the pack supplies `vcs.plan`, `vcs.review` and
 `vcs.manager`.
 
-## The svn and the perforce packs
+## The other version control packs
 
-`svn` and `perforce` guard what a launched session may do with Subversion and with Perforce. Each
-needs nothing else. A commit of either goes to the server at once, so a `work` session commits
-nothing: it puts its files into the changelist of its ticket. A `verify` launch always holds the
-two permits that commit (`modePermits`), and commits the changelist when the work holds. The
-commit policy reaches a brief only when `.octopus/project.json` sets `vcs` to `svn` or
-`perforce`, and `check` reports a project whose `vcs` is one of them while it does not list that
-pack. Add one with `octopus packs <project> add svn` or `add perforce`, then set `vcs`.
+Each pack below does for its VCS what the `git` pack does for git: its permits, the commands it
+denies to every session, its rule `<pack>/rules/<pack>.md`, and the brief sections
+`vcs.<pack>.<mode>` for `work`, `verify`, `plan`, `review` and `manager`. A section reaches a
+brief only when `.octopus/project.json` sets `vcs` to the pack's name. `check` fails a project
+whose `vcs` names one of these packs while the pack is absent. Turn one on with
+`octopus packs <project> add <pack>`, then set `vcs` to the same name.
 
-| Pack | Permit | Grants | Denied while absent |
-|---|---|---|---|
-| `svn` | `svn-commit` | write to the repository | `svn commit`, `import`, and `mkdir`, `delete`, `move` on a URL |
-| `svn` | `svn-update` | bring the working copy up to date | `svn update`, `relocate` |
-| `svn` | `svn-branch` | change branches | `svn switch`, `copy`, `merge` |
-| `perforce` | `p4-submit` | submit to the depot | `p4 submit`, `populate` |
-| `perforce` | `p4-sync` | bring the workspace up to date | `p4 sync`, `update`, `flush`, `p4 set P4PORT`, `p4 set P4CLIENT` |
-| `perforce` | `p4-branch` | change streams and branches | `p4 switch`, `integrate`, `merge`, `copy`, a change of the workspace spec |
+| Pack, `vcs` | Detected by | Permits | `modePermits` | A work session | A verify session, when it holds |
+|---|---|---|---|---|---|
+| `perforce` | `.p4config`, `p4config.txt`, `.p4ignore`, `p4ignore.txt` | `p4-submit`, `p4-sync`, `p4-branch` | verify: `p4-submit`, `p4-sync` | opens its files in a numbered changelist `<id>: <title>` | syncs and resolves the changelist's files, then `p4 submit -c <change>` |
+| `diversion` | `.diversion` | `dv-commit`, `dv-sync`, `dv-branch` | verify: `dv-commit` | writes its files under `## Files` on the ticket | `dv commit <file>... -m "<id>: <title>"` |
+| `svn` | `.svn` | `svn-commit`, `svn-update`, `svn-branch` | verify: `svn-commit`, `svn-update` | puts its files into the changelist `<id>` and writes them under `## Changed files` on the ticket | `svn update` of those files, then `svn commit -m "<id>: <title>" <file>...`, one command per working copy root |
+| `mercurial` | `.hg` | `hg-commit`, `hg-sync`, `hg-branch` | work: `hg-commit`; verify: `hg-commit`, `hg-sync` | `hg commit <file>... -m "<id>: <title>"` | `hg pull`, a merge of a new head, then `hg push` |
+| `plastic` | `.plastic` | `cm-checkin`, `cm-sync`, `cm-branch` | verify: `cm-checkin` | checks out its files and writes them under `## Files` on the ticket | `cm checkin <file>... -c="<id>: <title>"` |
 
-The commands denied to every session are in `svn/rules/svn.md` and `perforce/rules/perforce.md`.
-The commit policy of each mode is in the brief sections `vcs.svn.<mode>` and
-`vcs.perforce.<mode>` of each pack.
+## The files that name a directory of this machine
+
+No VCS tracks the files of a project that name a directory of this machine for Octopus AI
+(`machine_files` in `core/engine/admin.py`): `.octopus/todo.py`, `.octopus/installed.json`,
+`.claude/settings.local.json` (the hook lines of every project but the checkout),
+`.codex/hooks.json`, `.aitools/todo.py`, `.aitools/installed.json`, and every installed file
+whose text names the checkout. `install` and `refresh` put them on the ignore list of the VCS
+that `vcs` names, else of the VCS whose marker is in the root (`ignore` in
+`core/engine/vcs.py`):
+
+| VCS | Ignore list |
+|---|---|
+| git | `.gitignore`, `/<path>`, unless git ignores the path already |
+| Diversion | `.dvignore`, `/<path>` |
+| Perforce | the file P4IGNORE names, else `.p4ignore` or `p4ignore.txt`, `/<path>`; a P4CONFIG file at the root gets `P4IGNORE=<file>` when P4IGNORE is not set |
+| svn | the `svn:ignore` property of each file's directory |
+| Mercurial | `.hgignore`, `re:^<path>$` |
+| Plastic | `ignore.conf`, `/<path>` |
+
+The install record keeps the kind and the list in `ignored`. An ignore list does not remove a
+file that the VCS tracks already.
+
+The manager's update finds the commit of a ticket by the message that starts with `<id>:`
+(`commit_of` in `core/engine/vcs.py`). A pending Perforce or svn changelist is `not pushed`; a
+Mercurial commit is `pushed` when its phase is public.
 
 ## The asset packs
 

@@ -1,0 +1,62 @@
+{
+  "title": "Diversion: the dv-commit, dv-sync and dv-branch permits, the dv commands no session runs, and the commit policy of each launch mode",
+  "detect": [".diversion"],
+  "modePermits": {
+    "verify": ["dv-commit"]
+  },
+  "permits": {
+    "dv-commit": {
+      "grants": "commit to the branch, which sends the commit to every workspace: commit and revert",
+      "deny": [
+        "Bash(dv commit:*)",
+        "Bash(dv revert:*)"
+      ]
+    },
+    "dv-sync": {
+      "grants": "merge the new commits of the branch into the workspace: update",
+      "deny": [
+        "Bash(dv update:*)"
+      ]
+    },
+    "dv-branch": {
+      "grants": "change branches: checkout, branch and merge",
+      "deny": [
+        "Bash(dv checkout:*)",
+        "Bash(dv branch:*)",
+        "Bash(dv merge:*)"
+      ]
+    }
+  },
+  "deny": [
+    {
+      "tools": [
+        "Bash(dv)",
+        "Bash(dv login:*)",
+        "Bash(dv reset:*)",
+        "Bash(dv restore:*)",
+        "Bash(dv checkout --discard-changes:*)",
+        "Bash(dv checkout * --discard-changes*)",
+        "Bash(dv branch -d:*)",
+        "Bash(dv branch * -d*)",
+        "Bash(dv commit -a:*)",
+        "Bash(dv commit * -a)",
+        "Bash(dv commit * -a *)",
+        "Bash(dv commit -m*)"
+      ],
+      "unless": []
+    }
+  ],
+  "brief": [
+    "vcs.diversion.work",
+    "vcs.diversion.verify",
+    "vcs.diversion.plan",
+    "vcs.diversion.review",
+    "vcs.diversion.manager"
+  ],
+  "payload": [
+    {
+      "from": "rules/",
+      "to": ".agents/rules/octopus/diversion/"
+    }
+  ]
+}

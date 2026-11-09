@@ -1,0 +1,101 @@
+{
+  "title": "Mercurial: the hg-commit, hg-sync and hg-branch permits, the hg commands no session runs, and the commit policy of each launch mode",
+  "detect": [".hg"],
+  "modePermits": {
+    "work": ["hg-commit"],
+    "verify": ["hg-commit", "hg-sync"]
+  },
+  "permits": {
+    "hg-commit": {
+      "grants": "commit to the local repository: commit, tag, backout and graft",
+      "deny": [
+        "Bash(hg commit:*)",
+        "Bash(hg ci:*)",
+        "Bash(hg tag:*)",
+        "Bash(hg backout:*)",
+        "Bash(hg graft:*)",
+        "Bash(hg amend:*)"
+      ]
+    },
+    "hg-sync": {
+      "grants": "exchange commits with a remote: pull, push and fetch",
+      "deny": [
+        "Bash(hg push:*)",
+        "Bash(hg pull:*)",
+        "Bash(hg fetch:*)"
+      ]
+    },
+    "hg-branch": {
+      "grants": "change branches: update, branch, bookmark and rebase",
+      "deny": [
+        "Bash(hg update:*)",
+        "Bash(hg up:*)",
+        "Bash(hg checkout:*)",
+        "Bash(hg co:*)",
+        "Bash(hg branch:*)",
+        "Bash(hg bookmark:*)",
+        "Bash(hg rebase:*)"
+      ]
+    }
+  },
+  "deny": [
+    {
+      "tools": [
+        "Bash(hg merge:*)",
+        "Bash(hg resolve:*)"
+      ],
+      "unless": [
+        "hg-branch",
+        "hg-sync"
+      ]
+    },
+    {
+      "tools": [
+        "Bash(hg revert:*)",
+        "Bash(hg update -C:*)",
+        "Bash(hg update --clean:*)",
+        "Bash(hg update * -C*)",
+        "Bash(hg update * --clean*)",
+        "Bash(hg up -C:*)",
+        "Bash(hg up --clean:*)",
+        "Bash(hg up * -C*)",
+        "Bash(hg up * --clean*)",
+        "Bash(hg purge:*)",
+        "Bash(hg clean:*)",
+        "Bash(hg strip:*)",
+        "Bash(hg prune:*)",
+        "Bash(hg rollback:*)",
+        "Bash(hg shelve:*)",
+        "Bash(hg addremove:*)",
+        "Bash(hg push -f:*)",
+        "Bash(hg push --force:*)",
+        "Bash(hg push * -f*)",
+        "Bash(hg push * --force*)",
+        "Bash(hg commit)",
+        "Bash(hg ci)",
+        "Bash(hg commit -m*)",
+        "Bash(hg ci -m*)",
+        "Bash(hg commit -A:*)",
+        "Bash(hg commit --addremove:*)",
+        "Bash(hg commit * -A*)",
+        "Bash(hg commit * --addremove*)",
+        "Bash(hg commit -i:*)",
+        "Bash(hg commit --interactive:*)"
+      ],
+      "unless": []
+    }
+  ],
+  "brief": [
+    "vcs.mercurial.work",
+    "vcs.mercurial.verify",
+    "vcs.mercurial.plan",
+    "vcs.mercurial.review",
+    "vcs.mercurial.manager"
+  ],
+  "payload": [
+    {
+      "from": "rules/",
+      "to": ".agents/rules/octopus/mercurial/"
+    }
+  ]
+}

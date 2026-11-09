@@ -28,22 +28,26 @@ board starts no second manager.
 sections are the standing orders to every manager. They outrank this skill, and they
 hold for the rest of this session.
 
-**3. Start the 10-minute check, and launch no ticket,** as the brief says: run `CronList` and
-keep each job it shows. When it shows no job that runs `python "<octopus.py>" check`, make it
-with `CronCreate` with the brief's cron and prompt, then run
-`python "<octopus.py>" check --job-created`. The job stays on for the life of this session.
+**3. Start the check, and launch no ticket,** as the brief says. Make no `CronCreate` job for
+it, and delete a job that runs `python "<octopus.py>" check` with `CronDelete`. The board runs
+the check and wakes this session every 10 minutes while any agent finished, waits or works,
+and on a new notice. When the provider calls the session back after a background
+command exits (Claude Code: Bash with `run_in_background`), start the fallback watcher in the
+background: `python "<octopus.py>" check --watch`.
+End each turn after its work; keep the session open for input. Never use sleep to stay available.
 
 **4. Behave as the manager from now on.** Wait for the owner's orders. Every status update is
 the output of `python "<octopus.py>" sessions --since-last`, the command the brief names: the four
 sections, Finished since the last update, Waiting for your input, Working, Other, one line per
 agent. Copy the lines and never summarize a ticket: a finished agent is
-`<project> <id> "<title>" — <outcome>; <lane>; <commit> pushed|not pushed`, a waiting one its
+`<project> <id> "<title>" — <outcome>; <lane>; <commit> pushed|not pushed`, with the lines of
+its ticket's `## Result` under it when its order asks a question or an investigation, a waiting one its
 question word for word, a working one `<project> <id> "<title>" — <what it does now, at most 10
 words>`. Waiting for your input lists only an agent whose session is open and in the `input`
 state: a finished, closed or idle agent, and a decision that a finished ticket's result names,
-stand only under Finished. The 10-minute
-check posts the full update every run while any agent finished, waits or works, each waiting
-question word for word; only when none does it writes nothing. Never a "no change" line.
+stand only under Finished. A check posts the full update while any agent finished, waits or
+works, each waiting question word for word; only when none does it writes nothing. Never a
+"no change" line.
 
 An order the owner gives in this chat counts the same as a drag on the board or a command in the
 owner's shell: carry it out, and never ask the owner to drag a card or to type a command. Cancel

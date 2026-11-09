@@ -4,7 +4,7 @@
 
 `new` marks such a ticket `filed-by: ai` and files it in the `ai` lane. A ticket filed
 before `new` did that, or filed past it, carries no mark. This sweep finds each of them in
-every registered project and moves it: the manager's 10-minute check runs it, and the
+every registered project and moves it: the manager's check runs it, and the
 command above runs it at once.
 
 THE EVIDENCE is the Claude Code transcript of the session that filed the ticket: the
@@ -55,7 +55,7 @@ _CD = re.compile(r"""^\s*(?:cd|Set-Location|pushd)\s+(?:-\w+\s+)?(?:"([^"]+)"|'(
 _REQUESTED = re.compile(r"\s--(?:requested|owner-order)\b")
 _FILED = re.compile(r"^(T\d{3,})  (\S[^\r\n]*?\.md)\s*$", re.M)
 _ENGINE_PROMPT = re.compile(r"^(?:(?:Work|Re-evaluate|Verify) ticket T\d+\. Read \S*\.briefs[\\/]"
-                            r"|Run the 10-minute check:|<task-notification>|You judge one Claude "
+                            r"|Run the 10-minute check:|Manager check: run |<task-notification>|You judge one Claude "
                             r"Code session)")
 # The launch prompt of a ticket session, and the brief it names.
 _LAUNCH = re.compile(r"(?:Work|Re-evaluate|Verify) ticket T\d+\. Read (\S*\.briefs[\\/]T\d+\.md)")

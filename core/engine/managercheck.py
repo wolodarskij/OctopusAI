@@ -1,27 +1,37 @@
-"""managercheck.py - the manager's 10-minute check.
+"""managercheck.py - the manager's check, permanently on.
 
-    python octopus.py check [--job-created] [--dry-run]
+    python octopus.py check [--watch] [--dry-run]
 
-A manager session runs it every 10 minutes: a recurring job it makes at its start and at
-each restart (Claude Code's `CronCreate`), or the board's watchdog, which types `WAKE_TEXT`
-into a manager whose agent has no scheduler of its own. It launches no ticket and no
-follow-up. One run does four things:
+The manager's model runs only when the manager has something to say. Two timers run the check
+in Python every `INTERVAL` seconds and wake the manager only on news (`evaluate`):
 
-1. THE UPDATE. `sessions --if-any`: the four sections, every run, while any agent finished
-   since the last update, waits for the owner, works or waits for anything else; nothing at
-   all only when none does. Never a line that says nothing changed.
+- THE BOARD. Every `INTERVAL` seconds the board's watchdog runs `evaluate` for each live
+  manager session of every AI provider, and types `wake_text()` into the session on news. Its
+  heartbeat (`mark_board`) says that the board runs.
+- THE FALLBACK. `check --watch`, which a Claude manager runs in the background, wakes no model
+  while it waits. While the board's heartbeat is older than `BOARD_STALE`, it runs `evaluate`
+  `INTERVAL` after the last check. On news it runs the check, prints it, and exits, which
+  calls the manager back. A new watcher replaces the one before it, which exits with no
+  output.
+
+News is every row of the update: an agent that finished since the last update, one that waits
+for the owner, one that works and one that waits for anything else. A notice that was not
+reported yet is news too. So while any agent runs, the manager gets the full update every
+interval, and a finished agent reaches it within one interval. `manager-watch.json` beside
+the registry holds the state.
+
+One check, `check` alone, does three things. It launches no ticket and no follow-up:
+
+1. THE UPDATE. `sessions --if-any`: the four sections while any agent finished since the last
+   update, waits for the owner, works or waits for anything else; nothing at all only when
+   none does. Never a line that says nothing changed.
 2. THE NOTICES. Each notice that a session of another project sent about a defect of an
-   Octopus AI tool (`todo notify`) and the manager did not decide yet stands on stderr, every
-   run, with the commands that decide it: a new Octopus AI ticket, its evidence on an existing
-   ticket, or no ticket.
+   Octopus AI tool (`todo notify`) and the manager did not decide yet stands on stderr, with
+   the commands that decide it: a new Octopus AI ticket, its evidence on an existing ticket,
+   or no ticket.
 3. THE AI TICKETS. Each open ticket of a registered project that an AI filed without an
    owner's request and that sits outside AI-Pipeline with no `filed-by: ai` moves there
    (`aifiled.sweep`). It writes nothing to the update.
-4. THE CHECK JOB. `--job-created` records, after `CronCreate`, the newest recurring job of
-   the calling session as its check job, with the time (`check-jobs.json` beside the
-   registry). Claude Code deletes a recurring job after 7 days. A run in a session that holds
-   recurring jobs exits 3 and says on stderr to make the job again when its check job is not
-   recorded, is gone, or is older than `RENEW_SECONDS`.
 
 `named_followups` reads the `## Follow-ups` section of a ticket for `aifiled`.
 """
@@ -29,8 +39,10 @@ follow-up. One run does four things:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import io
 import json
+import os
 import re
 import sys
 import time
@@ -44,19 +56,38 @@ for _d in (HERE, HERE.parent / "win", HERE.parent / "hooks"):
 import project  # noqa: E402
 
 INTERVAL = 600
-RENEW_SECONDS = 6 * 24 * 3600
-JOBS_FILE = "check-jobs.json"
-RENEW = 3
+BOARD_STALE = 2 * INTERVAL
+WATCH_POLL = 60
+STATE_FILE = "manager-watch.json"
 FOLLOWUPS = "Follow-ups"
 _TICKET = re.compile(r"\bT\d{4,}\b")
 
 
 def wake_text():
-    """What the watchdog types into a manager whose agent has no scheduler."""
-    return ('Run the 10-minute check: python "%s" check. Print its output as it is; when it '
+    """What the board types into a manager session on news."""
+    return ('Manager check: run python "%s" check. Print its output as it is; when it '
             'prints nothing, write nothing. Decide each notice it lists with the command it '
-            'names, and write nothing about the notices.'
+            'names, and write nothing about the notices. Then end this turn immediately. '
+            'Keep the session open for the owner. Do not call sleep, poll, close the '
+            'session, or schedule another check; the board owns the timer.'
             % (project.OCTOPUS / "octopus.py").as_posix())
+
+
+def claim_wake(key, now, interval=INTERVAL):
+    """Reserve at most one wake per interval across board processes and restarts."""
+    import sqlite3
+    path = project.home() / "manager-wakes.sqlite3"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with contextlib.closing(sqlite3.connect(str(path), timeout=1)) as db:
+        db.execute("CREATE TABLE IF NOT EXISTS wakes "
+                   "(root TEXT, session TEXT, at REAL, PRIMARY KEY(root, session))")
+        with db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT at FROM wakes WHERE root=? AND session=?", key).fetchone()
+            if row is not None and 0 <= now - row[0] < interval:
+                return False
+            db.execute("INSERT OR REPLACE INTO wakes VALUES (?, ?, ?)", (*key, now))
+            return row is not None and now >= row[0]
 
 
 # ── the follow-ups ─────────────────────────────────────────────────────────
@@ -128,177 +159,166 @@ def sort_ai_tickets(registry=None, dry_run=False, err=None):
         err.write("check: the AI ticket sweep failed: %s: %s\n" % (type(exc).__name__, exc))
 
 
-# ── the check job ──────────────────────────────────────────────────────────
+# ── the news ───────────────────────────────────────────────────────────────
 
-def _use(root):
+def state_file():
+    return project.home() / STATE_FILE
+
+
+def load_state():
+    """`{"board", "checked", "notices", "watcher"}`, each part absent
+    until something wrote it."""
     try:
-        return project.use(root)
-    except Exception:                                   # noqa: BLE001 - an unreachable project
-        return None
-
-
-def jobs_file():
-    return project.home() / JOBS_FILE
-
-
-def load_jobs():
-    """`{session id: {"job": <job id>, "made": <seconds>}}`. A mark in another form names
-    no job."""
-    try:
-        data = json.loads(jobs_file().read_text(encoding="utf-8"))
+        data = json.loads(state_file().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
     return data if isinstance(data, dict) else {}
 
 
-def _made(mark):
-    return mark.get("made") if isinstance(mark, dict) \
-        and isinstance(mark.get("made"), (int, float)) else None
-
-
-def record_job(sid, job, now=None):
-    """Record `job` as the check job of session `sid`, made now. Forgets marks older than a
-    job lives."""
-    now = time.time() if now is None else now
-    data = {k: v for k, v in load_jobs().items()
-            if _made(v) is not None and now - _made(v) < 2 * RENEW_SECONDS}
-    data[sid] = {"job": job, "made": now}
-    f = jobs_file()
+def update_state(**parts):
+    """Write `parts` into the state. Returns the new state."""
+    data = load_state()
+    data.update(parts)
+    f = state_file()
     f.parent.mkdir(parents=True, exist_ok=True)
-    f.write_text(json.dumps(data, indent=1), encoding="utf-8")
+    tmp = f.with_name("%s.%d.tmp" % (f.name, os.getpid()))
+    tmp.write_text(json.dumps(data, indent=1), encoding="utf-8")
+    os.replace(str(tmp), str(f))
+    return data
 
 
-def session_jobs(sid, root=None, now=None):
-    """`{job id: when it was made}`: every recurring job that session `sid` holds, by the
-    hook's record of each of its terminals and by its transcript, in the project at `root`
-    (the current project when None). A cancelled job is not held, and nor is a job older
-    than a job lives that did not fire within `FIRE_SECONDS`."""
-    import session_state as S
-    import todo as T
-    now = time.time() if now is None else now
-    tok = _use(root) if root is not None else None
-    if root is not None and tok is None:
-        return {}
+def _within(now, then, span):
+    """Whether `then` lies at most `span` seconds before `now`."""
     try:
-        found = {}
-        for p in S._dir().glob("%s.*.cron" % sid.lower()):
-            for j, t in S._read_jobs(p).items():
-                if isinstance(t, (int, float)) and t >= now - S.JOB_SECONDS \
-                        and not j.startswith("?"):
-                    found[j] = min(found.get(j, t), t)
-        transcript = T.session_transcript(sid)
-        alive = S.transcript_jobs(sid, transcript, now)
-        st = S.scan_transcript(sid, transcript) or {}
-        gone = st.get("gone") or {}
-        found = {j: t for j, t in found.items() if j not in gone}
-        for j in alive:
-            found[j] = (st.get("made") or {}).get(j) or found.get(j) \
-                or (st.get("fired") or {}).get(j) or now
-    except Exception:                                   # noqa: BLE001 - the check goes on
-        return {}
-    finally:
-        if tok is not None:
-            project.reset(tok)
-    return found
+        return 0 <= now - float(then or 0) < span
+    except (TypeError, ValueError):
+        return False
 
 
-def stale_job(sid, held, now=None):
-    """Why the check job of session `sid` must be made again, or "" when it need not: no
-    check job of the session is recorded, its recorded job is gone, or it is older than
-    `RENEW_SECONDS`. `held` is `session_jobs` of the session. A session that holds no
-    recurring job (a check typed by hand, or by the watchdog) needs none."""
-    if not held:
-        return ""
+def mark_board(now=None):
+    """The board's heartbeat: the board runs and checks the manager."""
     now = time.time() if now is None else now
-    mark = load_jobs().get(sid)
-    if _made(mark) is None or not mark.get("job"):
-        return "no check job of this session is recorded"
-    if mark["job"] not in held:
-        return "the recorded check job %s is gone" % mark["job"]
-    if now - _made(mark) > RENEW_SECONDS:
-        return "the check job %s is older than %d days" % (mark["job"],
-                                                          RENEW_SECONDS // 86400)
-    return ""
+    if not _within(now, load_state().get("board"), WATCH_POLL):
+        update_state(board=now)
 
 
-def own_session(registry=None):
-    """`(session id, project root)` of the Claude this process runs under: looked up in the
-    project of the working directory first, then in every registered project. `("", None)`
-    when none names it."""
+def board_runs(now=None):
+    """Whether the board's heartbeat is younger than `BOARD_STALE`."""
+    now = time.time() if now is None else now
+    return _within(now, load_state().get("board"), BOARD_STALE)
+
+
+def notice_ids():
+    """The ids of the notices that wait for the manager's decision."""
     import todo as T
-    roots = []
-    here = project.find_root()
-    if here:
-        roots.append(here)
-    roots += [Path(r["path"]) for r in (project.load_registry() if registry is None
-                                       else registry)]
-    for root in roots:
-        tok = _use(root)
-        if tok is None:
-            continue
-        try:
-            sid = T.own_session_id()
-        except Exception:                               # noqa: BLE001
-            sid = ""
-        finally:
-            project.reset(tok)
-        if sid:
-            return sid, root
-    return "", None
+    try:
+        with T.in_manager_home():
+            return sorted(str(meta.get("id") or f) for f, meta, _b in T.open_notices())
+    except Exception:                                   # noqa: BLE001 - the check goes on
+        return []
+
+
+def evaluate(registry=None, dry_run=False, now=None, err=None):
+    """One check with no model: the AI ticket sweep and the update's rows,
+    with no write of the update's snapshot. Records when it ran. News is any row of the
+    update, or a notice that was not reported yet. Returns `(news, seen)`; call
+    `remember(seen)` once the news reached the manager."""
+    import sessionreport
+    err = sys.stderr if err is None else err
+    now = time.time() if now is None else now
+    sort_ai_tickets(registry, dry_run, err)
+    rows, _live = sessionreport.collect(True, registry)
+    seen = {"notices": notice_ids()}
+    news = bool(rows) or bool(set(seen["notices"]) - set(load_state().get("notices") or ()))
+    update_state(checked=now, **({} if news else seen))
+    return news, seen
+
+
+def remember(seen):
+    """Record the notices that reached the manager."""
+    update_state(**seen)
+
+
+LATE_MARGIN = 60
+
+
+def check_view(since, now=None, interval=INTERVAL):
+    """`{"checked", "interval", "late"}`: when the last check ran, and whether none ran within
+    `interval` plus `LATE_MARGIN` seconds. `since` is when the board began to check, so a
+    board that just started is not late."""
+    now = time.time() if now is None else now
+    try:
+        checked = float(load_state().get("checked") or 0)
+    except (TypeError, ValueError):
+        checked = 0.0
+    late = now - max(checked, float(since or 0)) > interval + LATE_MARGIN
+    return {"checked": checked, "interval": interval, "late": late}
 
 
 # ── the run ────────────────────────────────────────────────────────────────
 
-def run(job_created=False, dry_run=False, registry=None, sid=None, out=None, err=None,
-        now=None, held=None):
-    """One check. Returns 0, 2 when `--job-created` finds no job, or `RENEW` when the
-    caller's check job must be made again. `held` stands for `session_jobs` of the caller."""
+def _report(registry, dry_run, out, err):
     import sessionreport
-    out = sys.stdout if out is None else out
-    err = sys.stderr if err is None else err
-    root = None
-    if sid is None:
-        sid, root = own_session(registry)
-    if held is None:
-        held = session_jobs(sid, root, now) if sid else {}
-    if job_created:
-        if not sid:
-            err.write("check: no hook names the session this runs in\n")
-            return 2
-        if not held:
-            err.write("check: this session holds no recurring job: make the check job with "
-                      "CronCreate first, then run check --job-created\n")
-            return 2
-        if not dry_run:
-            record_job(sid, max(held, key=lambda j: held[j]), now)
-    sort_ai_tickets(registry, dry_run, err)
     sessionreport.report(since_last=True, if_any=True, registry=registry, out=out,
                          save=not dry_run)
     list_notices(err)
-    if job_created:
-        return 0
-    why = stale_job(sid, held, now) if sid else ""
-    if why:
-        err.write("check: %s: make the check job again with CronCreate, with the same cron "
-                  "and prompt, delete every other job that runs check with CronDelete, then "
-                  "run check --job-created\n" % why)
-        return RENEW
+
+
+def run(dry_run=False, registry=None, out=None, err=None):
+    """One check, with the update. Returns 0."""
+    out = sys.stdout if out is None else out
+    err = sys.stderr if err is None else err
+    sort_ai_tickets(registry, dry_run, err)
+    _report(registry, dry_run, out, err)
+    return 0
+
+
+def watch(registry=None, out=None, now_fn=None, sleep=None, token=None, loops=None):
+    """The fallback while the board does not run. Waits with no output, and returns after it
+    printed the update and the notices on `out` on news. Returns 0 with no output when a newer
+    watcher replaced it."""
+    import uuid
+    out = sys.stdout if out is None else out
+    now_fn = time.time if now_fn is None else now_fn
+    sleep = time.sleep if sleep is None else sleep
+    token = token or uuid.uuid4().hex
+    update_state(watcher=token)
+    n = 0
+    while loops is None or n < loops:
+        n += 1
+        sleep(WATCH_POLL)
+        st = load_state()
+        if st.get("watcher") != token:
+            return 0
+        now = now_fn()
+        if board_runs(now):
+            continue
+        if _within(now, st.get("checked"), INTERVAL):
+            continue
+        news, seen = evaluate(registry, now=now, err=out)
+        if news:
+            _report(registry, False, out, out)
+            remember(seen)
+            return 0
     return 0
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="octopus check",
-                                 description="the manager's 10-minute check: print the "
-                                             "update while any agent finished, waits or "
-                                             "works. It launches nothing")
-    ap.add_argument("--job-created", action="store_true",
-                    help="this session just made its check job: record its newest "
-                         "recurring job as the check job, and when")
+                                 description="the manager's check: print the update while "
+                                             "any agent finished, waits or works. It "
+                                             "launches nothing")
+    ap.add_argument("--watch", action="store_true",
+                    help="the fallback while the board does not run: check every ten "
+                         "minutes, and exit with the update while any agent finished, "
+                         "waits or works, or a new notice waits")
     ap.add_argument("--dry-run", action="store_true",
-                    help="move no ticket, record no job, and leave the snapshot of the "
-                         "last update as it was")
+                    help="move no ticket, and leave the snapshot of the last update as it "
+                         "was")
     a = ap.parse_args(argv)
-    return run(job_created=a.job_created, dry_run=a.dry_run)
+    if a.watch:
+        return watch()
+    return run(dry_run=a.dry_run)
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@ and the manager copies the lines and never summarizes a ticket:
 
     **Finished since the last update**
     - <project> <id> "<title>" — <outcome>; <lane> / <status>; <commit> pushed|not pushed
+      - <a line of its `## Result`, when its order asks a question or an investigation>
     **Waiting for your input**
     - <project> <id> "<title>" — <the question, word for word>
     **Working**
@@ -18,7 +19,10 @@ and the manager copies the lines and never summarizes a ticket:
 The outcome is the ticket's `outcome:` line, which its `work` or `verify` session wrote
 (`todo.outcome_problem`); a ticket without one leaves it out. The commit is the newest commit
 whose message starts with `<id>:`, and `pushed` when a remote branch holds it; `no commit`
-when none does, nothing in a project without git. A session with no ticket is
+when none does, nothing in a project without git. THE ANSWER: a finished agent whose ticket's
+order (its title, its first section and its `## Owner's orders`) asks a question or an
+investigation (`asks_answer`) carries the lines of the ticket's last `## Result` section, one
+sub-line each, under its line (`answer_lines`). A session with no ticket is
 `<project> <session> (<mode>)`. Waiting for your input holds only an open session whose agent
 runs and whose state is `input`; a finished or closed one is under Finished, whatever its
 ticket's result names for the owner. A session the engine calls `input` whose ticket waits for
@@ -40,7 +44,7 @@ and no snapshot is read or written.
 ONLY WHEN AN AGENT IS THERE. `--if-any` is `--since-last` that prints nothing only when the
 update has no row: no agent finished since that call, none waits for the owner, none works and
 none waits for anything else. Otherwise it prints all four sections, every run, and a waiting
-question again on every run until it is answered. The manager's 10-minute check runs it
+question again on every run until it is answered. The manager's check runs it
 (`managercheck.py`). No output ever says that nothing changed.
 """
 
@@ -69,6 +73,12 @@ TEXT_WIDTH = 200
 # The most words of what a working agent does now.
 DOING_WORDS = 10
 DASH = "—"
+# The most lines of a finished ticket's `## Result` that the update gives as its answer.
+ANSWER_LINES = 30
+# What in an order asks a question or an investigation.
+ASKS = re.compile(r"\?|\b(?:investigat\w*|analy[sz]\w*|finds? out|measur\w*|evaluat\w*|"
+                  r"determin\w*|assess\w*|research\w*|compar\w*|root cause|whether|"
+                  r"how (?:many|much|long|often|fast|big)|why)\b", re.I)
 
 
 def snapshot_file():
@@ -142,17 +152,10 @@ def _last_result(T, sid):
 
 
 def commit_of(root, tid, kind):
-    """`<hash> pushed`, `<hash> not pushed` or `no commit` for the newest commit of ticket
-    `tid` in a git project; "" in a project without git."""
-    if kind != "git" or not tid:
-        return ""
+    """`<ref> pushed`, `<ref> not pushed` or `no commit` for the newest commit of ticket
+    `tid`; "" in a project without a VCS."""
     import vcs
-    st = vcs._git(root, "log", "-1", "--format=%h", "--grep", "^%s:" % tid, timeout=30)
-    h = st.out.strip().splitlines()[0].strip() if st.rc == 0 and st.out.strip() else ""
-    if not h:
-        return "no commit"
-    st = vcs._git(root, "branch", "-r", "--contains", h, timeout=30)
-    return "%s %s" % (h, "pushed" if st.rc == 0 and st.out.strip() else "not pushed")
+    return vcs.commit_of(root, kind, tid)
 
 
 def _words(text, n):
@@ -178,6 +181,39 @@ def finished_text(T, t, fallback=""):
         return fallback
     return "; ".join(x for x in (t.meta.get(T.OUTCOME_FIELD, ""), _where(T, t),
                                  commit_of(T.P.ROOT, t.id, T.P.vcs)) if x)
+
+
+def _section(body, heading):
+    """The texts of every `## <heading>` section of a ticket body, a heading with a suffix
+    such as `## Result (run 3)` included, in the order they stand."""
+    return re.findall(r"^##[ \t]+%s\b[^\n]*\n(.*?)(?=^##\s|\Z)" % re.escape(heading),
+                      body or "", re.M | re.S)
+
+
+def asks_answer(T, t):
+    """Whether the order of ticket `t` asks a question or an investigation: its title, its
+    first section or its `## Owner's orders` hold a question mark or a word of `ASKS`."""
+    text = "\n".join([t.title, T.first_section(t.body)] + _section(t.body, "Owner's orders"))
+    return bool(ASKS.search(text))
+
+
+def answer_lines(T, t):
+    """The lines of the last `## Result` section of ticket `t`, without list marks and table
+    rules, when its order asks a question or an investigation; else []. At most
+    `ANSWER_LINES`; a longer section ends with a line that says how many more it holds."""
+    if t is None or not asks_answer(T, t):
+        return []
+    found = _section(t.body, "Result")
+    lines = []
+    for ln in (found[-1] if found else "").splitlines():
+        ln = re.sub(r"^\s*(?:#+|[-*+]|\d+[.)])\s+", "", ln).strip()
+        if not ln or ln.startswith("```") or set(ln) <= set("-:| "):
+            continue
+        lines.append(" ".join(ln.split()))
+    if len(lines) > ANSWER_LINES:
+        more = len(lines) - ANSWER_LINES + 1
+        lines = lines[:ANSWER_LINES - 1] + ["... %d more lines in %s's ## Result" % (more, t.id)]
+    return lines
 
 
 def classify(T, s, t):
@@ -218,7 +254,8 @@ def _row(name, T, s, t):
             "state": T.state_word(s), "lane": _where(T, t), "section": section,
             # A question is repeated word for word, never cut.
             "text": " ".join(str(text or "").split()) if section == "input"
-            else _cut(text, TEXT_WIDTH)}
+            else _cut(text, TEXT_WIDTH),
+            "answer": answer_lines(T, t) if section == "finished" else []}
 
 
 def _gone_row(name, T, e, t):
@@ -229,7 +266,8 @@ def _gone_row(name, T, e, t):
     # A note only: the ticket check never moves the agent out of Finished.
     undone = T.finish_undone(t, e.get("mode") or "") if t is not None else ""
     row.update(section="finished",
-               text=_cut("%s; note: %s" % (text, undone) if undone else text, TEXT_WIDTH))
+               text=_cut("%s; note: %s" % (text, undone) if undone else text, TEXT_WIDTH),
+               answer=answer_lines(T, t))
     return row
 
 
@@ -310,7 +348,7 @@ def line(r):
 
 def render(rows):
     """The four sections as Markdown, every section present, an empty one as `none`, one
-    line per agent."""
+    line per agent, and under a finished agent the lines of its answer."""
     out = []
     for key, heading in SECTIONS:
         mine = sorted((r for r in rows if r["section"] == key),
@@ -320,6 +358,7 @@ def render(rows):
             out.append("none")
         for r in mine:
             out.append("- " + line(r))
+            out += ["  - " + a for a in r.get("answer") or ()]
         out.append("")
     return "\n".join(out).rstrip() + "\n"
 

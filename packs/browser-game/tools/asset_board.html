@@ -146,6 +146,26 @@ pre{
 }
 #toast.on{display:block}
 #toast.bad{border-color:#5e2b2e;color:#ffb3b3}
+
+/* ── file a task ────────────────────────────────────────────────────── */
+#task{
+  width:min(460px,92vw);padding:14px 16px;background:var(--col);color:var(--fg);
+  border:1px solid #333b4a;border-radius:10px;box-shadow:0 20px 50px #000c;
+}
+#task::backdrop{background:#0009}
+#task h3{margin:0 0 10px;font-size:13px}
+#task label{display:block;margin-top:8px;font-size:9.5px;letter-spacing:.7px;text-transform:uppercase;color:var(--faint)}
+#task input,#task select,#task textarea{
+  display:block;width:100%;margin-top:3px;padding:5px 8px;background:#0b0d11;color:var(--fg);
+  border:1px solid var(--line);border-radius:5px;outline:none;font-size:12px;
+}
+#task textarea{min-height:90px;resize:vertical;font:inherit;font-size:12px}
+#task input:focus,#task select:focus,#task textarea:focus{border-color:var(--accent)}
+#task .row{display:flex;gap:8px}
+#task .row > div{flex:1 1 0}
+#task .src{margin-top:3px;font:11px ui-monospace,Consolas,monospace;color:var(--dim);overflow-wrap:anywhere}
+#task .act{display:flex;gap:6px;margin-top:12px;flex-direction:row-reverse}  /* File first, so Enter files */
+#task .act .go{background:var(--accent);border-color:var(--accent);color:#fff}
 </style>
 </head>
 <body>
@@ -165,6 +185,24 @@ pre{
   <aside id="pane"></aside>
 </main>
 <div id="toast"></div>
+
+<dialog id="task">
+  <form method="dialog">
+    <h3>File a task</h3>
+    <label>Title<input name="title" required autocomplete="off"></label>
+    <div class="row">
+      <div><label>Severity<select name="severity"></select></label></div>
+      <div><label>Difficulty<select name="difficulty"></select></label></div>
+      <div><label>Group<select name="group"></select></label></div>
+    </div>
+    <label>Description<textarea name="description"></textarea></label>
+    <label>Source</label><div class="src" id="task-src"></div>
+    <div class="act">
+      <button value="file" class="go">File</button>
+      <button value="cancel" formnovalidate>Cancel</button>
+    </div>
+  </form>
+</dialog>
 
 <script>
 const TOKEN = "__TOKEN__";
@@ -204,9 +242,28 @@ function size(n) {
     : (n / 1048576).toFixed(1) + " MB";
 }
 
+/* The project's own previews (`previewScripts`). Each script sets
+   ASSET_PREVIEWS[<preview>] = {thumb(a, kit), detail(a, kit)}; each returns an element. */
+window.ASSET_PREVIEWS = window.ASSET_PREVIEWS || {};
+const KIT = {el, src, toast, size, jsonPreview: (a, box) => jsonPreview(a, box)};
+const LOADED = new Set();
+function loadScript(name) {
+  if (LOADED.has(name)) return Promise.resolve();
+  LOADED.add(name);
+  return new Promise((ok) => {
+    const s = document.createElement("script");
+    s.src = withProject("/asset-script/" + encodeURIComponent(name) + "?token=" + encodeURIComponent(TOKEN));
+    s.onload = ok;
+    s.onerror = () => { toast("Cannot load the preview script " + name, true); ok(); };
+    document.head.append(s);
+  });
+}
+const own = (a) => window.ASSET_PREVIEWS[a.preview];
+
 async function load() {
   try {
     DATA = await api("/api/assets");
+    await Promise.all((DATA.scripts || []).map(loadScript));
   } catch (e) { toast("Cannot read the assets: " + e.message, true); return; }
   const hash = decodeURIComponent(location.hash.slice(1));
   if (hash && DATA.assets.some((a) => a.id === hash)) SEL = hash;
@@ -256,6 +313,11 @@ function chips(a, box) {
   box.append(el("span", "pill kind", a.kind));
   for (const b of a.badges) box.append(el("span", "pill" + (b === "generated" ? " gen" : ""), b));
   if (a.usedBy && !a.usedBy.length) box.append(el("span", "pill unused", "unused"));
+  if (own(a)?.badges) {
+    Promise.resolve(own(a).badges(a, KIT))
+      .then((bs) => { for (const b of bs || []) box.append(el("span", "pill", b)); })
+      .catch(() => box.append(el("span", "pill", "unreadable")));
+  }
 }
 
 function thumb(a) {
@@ -266,6 +328,7 @@ function thumb(a) {
   } else if (a.preview === "audio") { t.classList.add("txt"); t.textContent = "♪"; }
   else if (a.preview === "json") { t.classList.add("txt"); t.textContent = "{ }"; }
   else if (a.preview === "html") t.textContent = a.badges[0] || "sheet";
+  else if (own(a)?.thumb) { t.classList.add("txt"); t.append(own(a).thumb(a, KIT)); }
   else t.textContent = "open only · " + size(a.bytes);
   return t;
 }
@@ -330,11 +393,47 @@ function preview(a) {
     }
   } else if (a.preview === "json") {
     jsonPreview(a, box);
+  } else if (own(a)?.detail) {
+    return own(a).detail(a, KIT);
   } else {
     box.className = "pv plain";
     box.textContent = "Open only: a " + size(a.bytes) + " bundle. Use Open.";
   }
   return box;
+}
+
+/* The ticket fields come from the board's own snapshot, once. A kind's `task` is the group
+   a task on it defaults to (`taskGroups` in assets.json). */
+let TICKETS = null;
+async function fileTask(a) {
+  const dlg = $("#task"), form = dlg.querySelector("form"), f = form.elements;
+  try { TICKETS = TICKETS || await api("/api/tickets"); }
+  catch (e) { toast("Cannot read the ticket fields: " + e.message, true); return; }
+  const fill = (sel, values, pick) => {
+    sel.replaceChildren(...values.map(([v, label]) => { const o = el("option", "", label);
+      o.value = v; return o; }));
+    if (pick !== undefined) sel.value = pick;
+  };
+  const kind = DATA.kinds.find((k) => k.kind === a.kind);
+  fill(f.severity, TICKETS.severities.map((v) => [v, v]), "Low");
+  fill(f.difficulty, TICKETS.difficulties.map((v) => [v, v]), "unknown");
+  fill(f.group, [["", "(none)"]].concat(Object.keys(TICKETS.groups || {}).map((g) => [g, g])),
+    kind && kind.task ? kind.task : "");
+  f.title.value = a.name; f.description.value = "";
+  $("#task-src").textContent = a.id;
+  form.onsubmit = async (e) => {
+    if (e.submitter?.value !== "file") return;
+    e.preventDefault();
+    try {
+      const r = await api("/api/asset-task", {id: a.id, title: f.title.value,
+        severity: f.severity.value, difficulty: f.difficulty.value, group: f.group.value,
+        description: f.description.value});
+      dlg.close();
+      toast("Filed " + r.id);
+    } catch (err) { toast(err.message, true); }
+  };
+  dlg.showModal();
+  f.title.select();
 }
 
 async function openAs(a, how) {
@@ -360,6 +459,9 @@ function drawPane() {
     ["reveal", "Reveal", "Show the file in Explorer"]]) {
     const b = el("button", "", label); b.title = tip; b.onclick = () => openAs(a, how); act.append(b);
   }
+  const task = el("button", "", "File a task");
+  task.title = "A ticket with this file as its source"; task.onclick = () => fileTask(a);
+  act.append(task);
   if (a.preview === "html") {
     act.append(el("span", "sp"));
     const w = el("button", "", pane.classList.contains("wide") ? "Narrow" : "Wide");
@@ -391,6 +493,7 @@ $("#search").addEventListener("input", () => draw(false));
 $("#reload").onclick = load;
 window.addEventListener("resize", () => FIT && FIT());
 document.addEventListener("keydown", (e) => {
+  if ($("#task").open) return;
   if (e.key === "/" && document.activeElement !== $("#search")) { e.preventDefault(); $("#search").focus(); }
   else if (e.key === "Escape" && document.activeElement === $("#search")) { $("#search").value = ""; draw(false); }
 });

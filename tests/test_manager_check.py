@@ -1,10 +1,11 @@
-"""The manager's 10-minute check (`octopus check`): the full update while any agent finished,
-waits or works, nothing only when none does,
-no launch of a follow-up, the record and the age of the check job, and the watchdog's
-wake of a manager whose agent has no scheduler.
+"""The manager's check (`octopus check`): the full update while any agent finished, waits or
+works, nothing only when none does, no launch of a follow-up, the news that wakes the manager,
+the fallback watcher, and the board's wake.
 python -m unittest discover tests"""
 
+import argparse
 import io
+import os
 import unittest
 import uuid
 from unittest import mock
@@ -13,7 +14,6 @@ from support import FixtureCase, project
 
 import admin  # noqa: E402
 import managercheck as C  # noqa: E402
-import providers  # noqa: E402
 import session_state  # noqa: E402
 import sessionreport as R  # noqa: E402
 import todo as T  # noqa: E402
@@ -21,7 +21,6 @@ import todo_server  # noqa: E402
 
 SID_A = str(uuid.UUID(int=11))
 SID_B = str(uuid.UUID(int=12))
-DAY = 24 * 3600
 
 
 def sess(sid, tid, wait=None, mode="work", **kw):
@@ -80,6 +79,31 @@ class IfAny(FixtureCase):
         self.assertIn(self.a, out)
         self.assertEqual(self.report([]), "")
 
+    def write_body(self, tid, order, result):
+        tok = project.use(self.root)
+        try:
+            t = T.find(T.load_all(), tid)
+            text = t.path.read_text(encoding="utf-8")
+            head = text[:text.index("\n## ")]
+            t.path.write_text(head + "\n## What it should do\n\n" + order
+                              + "\n\n## Result\n\n" + result + "\n", encoding="utf-8")
+        finally:
+            project.reset(tok)
+
+    def test_a_finished_investigation_gives_its_answer(self):
+        self.write_body(self.a, "Measure how long the board takes to load.",
+                        "- The board loads in 2.4 s.\n- The ticket list takes 1.9 s of it.")
+        self.write_body(self.b, "The board shows the outcome line.",
+                        "- `core/engine/todo_board.html`")
+        self.report([sess(SID_A, self.a, None), sess(SID_B, self.b, None)])
+        out = self.report([])
+        lines = out.splitlines()
+        first = lines.index(next(x for x in lines if self.a in x))
+        self.assertEqual(lines[first + 1:first + 3],
+                         ["  - The board loads in 2.4 s.",
+                          "  - The ticket list takes 1.9 s of it."])
+        self.assertNotIn("todo_board.html", out)
+
     def test_no_agent_at_all_prints_nothing(self):
         self.assertEqual(self.report([]), "")
         self.assertEqual(self.report([]), "")
@@ -132,70 +156,125 @@ class FollowUps(FixtureCase):
     def test_the_check_launches_no_follow_up(self):
         work = mock.Mock(return_value=0)
         with mock.patch.object(T, "cmd_work", work), \
-                mock.patch.object(R, "report", return_value=0):
+                mock.patch.object(R, "report", return_value=0), \
+                mock.patch.object(R, "collect", return_value=([], [])):
             for _ in range(3):
-                C.run(sid=SID_A, held={}, out=io.StringIO(), err=io.StringIO())
+                C.run(out=io.StringIO(), err=io.StringIO())
+                C.evaluate(err=io.StringIO())
         self.assertFalse(work.called)
 
 
-class JobAge(FixtureCase):
+class News(FixtureCase):
     def setUp(self):
         super().setUp()
         self.make("Sample Game")
+        self.rows = []
+        self.patches = [mock.patch.object(C, "sort_ai_tickets"),
+                        mock.patch.object(C, "notice_ids", return_value=[]),
+                        mock.patch.object(R, "collect",
+                                          side_effect=lambda *a, **k: (self.rows, []))]
+        for p in self.patches:
+            p.start()
 
-    def run_check(self, **kw):
-        out, err = io.StringIO(), io.StringIO()
-        with mock.patch.object(R, "report", return_value=0):
-            rc = C.run(out=out, err=err, **kw)
-        return rc, err.getvalue()
+    def tearDown(self):
+        for p in self.patches:
+            p.stop()
+        super().tearDown()
 
-    def test_job_created_records_the_newest_job_of_the_session(self):
-        held = {"old1": 10, "new2": 900}
-        rc, _e = self.run_check(job_created=True, sid=SID_A, now=1000, held=held)
-        self.assertEqual(rc, 0)
-        self.assertEqual(C.load_jobs()[SID_A], {"job": "new2", "made": 1000})
+    def news(self, now=1000):
+        news, seen = C.evaluate(now=now)
+        if news:
+            C.remember(seen)
+        return news
 
-    def test_job_created_without_a_job_refuses(self):
-        self.assertEqual(self.run_check(job_created=True, sid=SID_A, held={})[0], 2)
+    def test_a_working_agent_is_news_on_every_check(self):
+        self.rows = [{"key": "a", "section": "working", "text": "Bash"}]
+        self.assertTrue(self.news(1000))
+        self.assertTrue(self.news(1000 + C.INTERVAL))
 
-    def test_job_created_without_a_session_refuses(self):
-        self.assertEqual(self.run_check(job_created=True, sid="", held={})[0], 2)
+    def test_an_agent_waiting_for_something_else_is_news(self):
+        self.rows = [{"key": "a", "section": "other", "text": "event: an editor restart"}]
+        self.assertTrue(self.news())
 
-    def test_a_fresh_job_needs_nothing(self):
-        C.record_job(SID_A, "j1", now=0)
-        self.assertEqual(self.run_check(sid=SID_A, now=5 * DAY, held={"j1": 0})[0], 0)
+    def test_a_finished_agent_is_news(self):
+        self.rows = [{"key": "a", "section": "finished", "text": "done"}]
+        self.assertTrue(self.news())
 
-    def test_an_old_job_exits_three_and_says_to_make_it_again(self):
-        C.record_job(SID_A, "j1", now=0)
-        rc, err = self.run_check(sid=SID_A, now=6 * DAY + 1, held={"j1": 0})
-        self.assertEqual(rc, C.RENEW)
-        self.assertIn("CronCreate", err)
+    def test_a_waiting_question_is_news_on_every_check(self):
+        self.rows = [{"key": "a", "section": "input", "text": "Which one?"}]
+        self.assertTrue(self.news())
+        self.assertTrue(self.news())
 
-    def test_a_gone_check_job_exits_three_while_an_older_job_runs(self):
-        C.record_job(SID_A, "deleted", now=5 * DAY)
-        rc, err = self.run_check(sid=SID_A, now=5 * DAY + 60, held={"older": 0})
-        self.assertEqual(rc, C.RENEW)
-        self.assertIn("deleted", err)
+    def test_no_agent_is_no_news(self):
+        self.rows = []
+        self.assertFalse(self.news())
+        self.assertEqual(C.load_state()["checked"], 1000)
 
-    def test_a_job_with_no_record_exits_three(self):
-        rc, err = self.run_check(sid=SID_B, now=DAY, held={"j1": 0})
-        self.assertEqual(rc, C.RENEW)
-        self.assertIn("CronCreate", err)
+    def test_a_new_notice_is_news_once(self):
+        with mock.patch.object(C, "notice_ids", return_value=["N0001"]):
+            self.assertTrue(self.news())
+            self.assertFalse(self.news())
 
-    def test_a_mark_without_a_job_id_exits_three(self):
-        C.jobs_file().parent.mkdir(parents=True, exist_ok=True)
-        C.jobs_file().write_text('{"%s": 1000}' % SID_A, encoding="utf-8")
-        self.assertEqual(self.run_check(sid=SID_A, now=2000, held={"j1": 0})[0], C.RENEW)
+    def test_news_not_remembered_stays_news(self):
+        self.rows = [{"key": "a", "section": "input", "text": "Which one?"}]
+        self.assertTrue(C.evaluate(now=1)[0])
+        self.assertTrue(C.evaluate(now=2)[0])
 
-    def test_a_session_with_no_job_needs_nothing(self):
-        self.assertEqual(self.run_check(sid=SID_B, now=30 * DAY, held={})[0], 0)
 
-    def test_session_jobs_reads_the_hook_record_of_every_terminal(self):
-        now = 1e9
-        session_state.add_job(SID_A, 41, "a1", now=now - 100)
-        session_state.add_job(SID_A, 42, "b2", now=now - 50)
-        session_state.add_job(SID_A, 43, "old", now=now - session_state.JOB_SECONDS - 1)
-        self.assertEqual(C.session_jobs(SID_A, now=now), {"a1": now - 100, "b2": now - 50})
+class Watch(FixtureCase):
+    def setUp(self):
+        super().setUp()
+        self.make("Sample Game")
+        self.clock = [100000.0]
+        self.evaluate = mock.Mock(return_value=(False, {"notices": []}))
+        self.patches = [mock.patch.object(C, "evaluate", self.evaluate),
+                        mock.patch.object(C, "_report",
+                                          lambda reg, dry, out, err: out.write("update\n"))]
+        for p in self.patches:
+            p.start()
+
+    def tearDown(self):
+        for p in self.patches:
+            p.stop()
+        super().tearDown()
+
+    def sleep(self, seconds):
+        self.clock[0] += seconds
+
+    def watch(self, loops, token="w1"):
+        out = io.StringIO()
+        rc = C.watch(out=out, now_fn=lambda: self.clock[0], sleep=self.sleep, token=token,
+                     loops=loops)
+        return rc, out.getvalue()
+
+    def test_a_running_board_keeps_it_idle(self):
+        C.mark_board(self.clock[0])
+        self.watch(5)
+        self.assertFalse(self.evaluate.called)
+
+    def test_it_checks_every_ten_minutes(self):
+        C.update_state(checked=self.clock[0])
+        self.watch(C.INTERVAL // C.WATCH_POLL - 1)
+        self.assertFalse(self.evaluate.called)
+        self.watch(1)
+        self.assertEqual(self.evaluate.call_count, 1)
+
+    def test_it_exits_with_the_update_on_news(self):
+        self.evaluate.return_value = (True, {"notices": ["N0001"]})
+        rc, out = self.watch(None)
+        self.assertEqual((rc, out), (0, "update\n"))
+        self.assertEqual(C.load_state()["notices"], ["N0001"])
+
+    def test_a_newer_watcher_replaces_it_silently(self):
+        C.update_state(checked=self.clock[0])
+        orig = self.sleep
+
+        def sleep(seconds):
+            orig(seconds)
+            C.update_state(watcher="w2")
+        self.sleep = sleep
+        self.assertEqual(self.watch(None), (0, ""))
+        self.assertFalse(self.evaluate.called)
 
 
 class Wake(FixtureCase):
@@ -206,27 +285,26 @@ class Wake(FixtureCase):
         rc, _out, err = self.todo(self.root, "move", self.mid, "InProgress",
                                   "--status", "implementing")
         self.assertEqual(rc, 0, err)
-        todo_server._WAKES.clear()
         self.tok = project.use(self.root)
-        t = T.find(T.load_all(), self.mid)
-        t.meta["provider"] = "codex"
-        T._write(t.path, T.render(t.meta, t.body))
-        self.live = [sess(SID_A, self.mid, None, provider="codex")]
+        self.live = [sess(SID_A, self.mid, None)]
         self.send = mock.Mock()
+        self.news = (True, {"notices": []})
         self.patches = [mock.patch.object(T, "live_sessions",
                                           lambda tickets=None: self.live),
-                        mock.patch.object(T, "send_session", self.send)]
+                        mock.patch.object(T, "send_session", self.send),
+                        mock.patch.object(C, "evaluate", lambda **kw: self.news),
+                        mock.patch.dict(todo_server._CHECK,
+                                        {"since": 0.0, "managers": False, "skip": ""})]
         for p in self.patches:
             p.start()
 
     def tearDown(self):
         for p in self.patches:
             p.stop()
-        todo_server._WAKES.clear()
         project.reset(self.tok)
         super().tearDown()
 
-    def test_a_manager_without_a_scheduler_is_woken_every_ten_minutes(self):
+    def test_a_manager_is_woken_on_news_at_most_every_ten_minutes(self):
         now = 1e9
         self.assertEqual(todo_server._wake_project(self.root, now), [])
         self.assertEqual(todo_server._wake_project(self.root, now + C.INTERVAL - 1), [])
@@ -236,29 +314,114 @@ class Wake(FixtureCase):
         self.assertEqual(keys, ["Enter"])
         self.assertEqual(todo_server._wake_project(self.root, now + C.INTERVAL + 30), [])
 
+    def test_no_news_types_nothing(self):
+        self.news = (False, {"notices": []})
+        todo_server._wake_project(self.root, 1e9)
+        self.assertEqual(todo_server._wake_project(self.root, 1e9 + C.INTERVAL), [])
+        self.assertFalse(self.send.called)
+
+    def test_every_provider_is_woken(self):
+        self.live = [sess(SID_A, self.mid, None, provider="codex")]
+        todo_server._wake_project(self.root, 1e9)
+        self.assertEqual(len(todo_server._wake_project(self.root, 1e9 + C.INTERVAL)), 1)
+
     def test_a_manager_waiting_for_the_owner_is_not_typed_into(self):
-        self.live = [sess(SID_A, self.mid, "input", provider="codex")]
+        self.live = [sess(SID_A, self.mid, "input")]
         todo_server._wake_project(self.root, 1e9)
         self.assertEqual(todo_server._wake_project(self.root, 1e9 + C.INTERVAL), [])
         self.assertFalse(self.send.called)
 
-    def test_a_claude_manager_schedules_its_own_check(self):
+    def test_the_board_writes_its_heartbeat(self):
+        todo_server._wake_project(self.root, 1e9)
+        self.assertTrue(C.board_runs(1e9 + C.INTERVAL))
+        self.assertFalse(C.board_runs(1e9 + C.BOARD_STALE))
+
+    def stale_brief(self):
         t = T.find(T.load_all(), self.mid)
-        t.meta.pop("provider")
-        T._write(t.path, T.render(t.meta, t.body))
-        self.live = [sess(SID_A, self.mid, None)]
-        todo_server._wake_project(self.root, 1e9)
-        self.assertEqual(todo_server._wake_project(self.root, 1e9 + C.INTERVAL), [])
+        brief = T.rewrite_manager_brief(t)
+        os.utime(str(brief), ns=(1, 1))
+        self.assertTrue(T.manager_brief_stale(t))
+        return t, brief
+
+    def test_a_manager_with_an_old_brief_is_told_to_read_the_new_one(self):
+        t, brief = self.stale_brief()
+        self.assertEqual(todo_server._wake_project(self.root, 1e9), [])
+        text = self.send.call_args[0][1]
+        self.assertIn(brief.as_posix(), text)
+        self.assertIn("Manager brief", text)
+        self.assertFalse(T.manager_brief_stale(t))
+        self.send.reset_mock()
+        todo_server._wake_project(self.root, 1e9 + 30)
         self.assertFalse(self.send.called)
 
-    def test_only_claude_has_a_scheduler(self):
-        p = providers.load()
-        self.assertTrue(p["claude"]["features"]["scheduler"])
-        self.assertFalse(p["codex"]["features"]["scheduler"])
+    def test_a_manager_waiting_for_the_owner_gets_no_new_brief(self):
+        t, _brief = self.stale_brief()
+        self.live = [sess(SID_A, self.mid, "input")]
+        todo_server._wake_project(self.root, 1e9)
+        self.assertFalse(self.send.called)
+        self.assertTrue(T.manager_brief_stale(t))
+
+    def test_the_view_says_when_the_check_is_late_and_why(self):
+        self.live = [sess(SID_A, self.mid, "input")]
+        todo_server._wake_project(self.root, 1e9)
+        late = 1e9 + C.INTERVAL + C.LATE_MARGIN + 1
+        view = todo_server.manager_check_view(late)
+        self.assertTrue(view["late"])
+        self.assertEqual(view["why"], "the manager waits for your answer")
+        C.update_state(checked=late - 5)
+        self.assertFalse(todo_server.manager_check_view(late)["late"])
+
+
+class Restart(unittest.TestCase):
+    def test_a_code_change_restarts_only_once_it_holds_for_a_tick(self):
+        self.assertEqual(todo_server.restart_due(None, 5, start=5), (False, None))
+        self.assertEqual(todo_server.restart_due(None, 6, start=5), (False, 6))
+        self.assertEqual(todo_server.restart_due(6, 7, start=5), (False, 7))
+        self.assertEqual(todo_server.restart_due(7, 7, start=5), (True, 7))
+
+    def args(self, **kw):
+        a = dict(port=4321, project="Sample Game", page="board", no_manager=False,
+                 no_open=False)
+        a.update(kw)
+        return argparse.Namespace(**a)
+
+    def test_the_supervisor_starts_the_server_again_on_the_same_port_and_keys(self):
+        codes = [todo_server.RESTART_EXIT, 0]
+        calls = []
+
+        def call(argv, env):
+            calls.append((argv, env))
+            return codes.pop(0)
+        rc = todo_server.supervise(self.args(), call=call, stamp=lambda: 1, sleep=None)
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(calls), 2)
+        first, again = calls[0][0], calls[1][0]
+        self.assertNotIn("--no-open", first)
+        self.assertIn("--no-open", again)
+        self.assertEqual(first[first.index("--port") + 1], "4321")
+        self.assertEqual(again[again.index("--port") + 1], "4321")
+        env = calls[1][1]
+        self.assertEqual(env[todo_server.TOKEN_ENV], todo_server.TOKEN)
+        self.assertEqual(env[todo_server.CHILD_ENV], "1")
+
+    def test_a_failed_restart_waits_for_the_next_code_change(self):
+        codes = [todo_server.RESTART_EXIT, 1, 0]
+        stamps = [1, 2, 2, 2, 3, 3]
+        slept = []
+        rc = todo_server.supervise(self.args(), call=lambda argv, env: codes.pop(0),
+                                   stamp=lambda: stamps.pop(0), sleep=slept.append)
+        self.assertEqual(rc, 0)
+        self.assertEqual(codes, [])
+        self.assertEqual(len(slept), 2)
+
+    def test_a_server_that_fails_at_the_first_start_ends_the_board(self):
+        rc = todo_server.supervise(self.args(), call=lambda argv, env: 2, stamp=lambda: 1,
+                                   sleep=None)
+        self.assertEqual(rc, 2)
 
 
 class Brief(FixtureCase):
-    def test_the_manager_brief_starts_the_check(self):
+    def test_the_manager_brief_starts_the_watcher_and_no_cron_job(self):
         root = self.make("Sample Game")
         mid = self.new_ticket(root, "the manager", "--repeat", "manager", "--permits",
                               "projects")
@@ -267,9 +430,9 @@ class Brief(FixtureCase):
             text = T.build_brief(T.find(T.load_all(), mid), "work")
         finally:
             project.reset(tok)
-        self.assertIn("CronCreate", text)
-        self.assertIn("1,11,21,31,41,51 * * * *", text)
-        self.assertIn('octopus.py" check --job-created', text)
+        self.assertIn('octopus.py" check --watch', text)
+        self.assertIn("make no `CronCreate` job", text)
+        self.assertNotIn("--job-created", text)
         self.assertNotIn("{octopus}", text)
 
 

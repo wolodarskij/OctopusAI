@@ -1,8 +1,11 @@
 """vcs.py - the version control of a project: one interface, a git backend, and nothing else.
 
-    detect(root)         "git", "svn", "perforce" or "diversion": the kind whose marker
-                         (`MARKERS`) sits in the root, else None
+    detect(root)         the kind whose marker sits in the root (`MARKERS`), else None
     backend(root, kind)  `Git` for "git", else `NoVcs`. Without a kind, `detect` picks it
+    commit_of(root, kind, tid)
+                         the newest commit of ticket `tid`, and whether it reached the server
+    ignore(root, kind, paths)
+                         put root-relative paths on the ignore list of the VCS `kind`
 
 EVERY METHOD RETURNS A LIST OF `Step(argv, rc, out)`, one per command it ran, in order. A
 method that runs several commands stops at the first that fails, so the last step says why.
@@ -17,23 +20,26 @@ a terminal: `GIT_TERMINAL_PROMPT=0`, and stdin is empty.
 
 The project chooses its VCS in `.octopus/project.json`: `vcs` is one of `KINDS` (absent means
 none), and `vcsPull` is how `sync` pulls (`PULL_ARGS`). A project with no VCS works as before.
-`svn` and `perforce` have no backend here: the `svn` and the `perforce` packs give their sessions
-the commit policy (`PACK_KINDS`), and every call of the board on them does nothing.
+Each kind but `none` has a pack (`PACKS`). The pack of git, perforce, diversion, svn, mercurial
+or plastic supplies the rule, the permits and the brief sections of that kind.
 """
 
 from __future__ import annotations
 
 import io
 import os
+import re
 import subprocess
 from collections import namedtuple
 from pathlib import Path
 
-KINDS = ("git", "svn", "perforce", "none")
-# The kinds whose commit policy only a pack of the same name supplies.
-PACK_KINDS = ("svn", "perforce")
-MARKERS = (("git", ".git"), ("svn", ".svn"), ("perforce", ".p4config"), ("perforce", ".p4ignore"),
-           ("diversion", ".diversion"))
+KINDS = ("git", "perforce", "diversion", "svn", "mercurial", "plastic", "none")
+PACKS = {"git": "git", "perforce": "perforce", "diversion": "diversion", "svn": "svn",
+         "mercurial": "mercurial", "plastic": "plastic"}
+MARKERS = (("git", ".git"), ("diversion", ".diversion"), ("svn", ".svn"), ("mercurial", ".hg"),
+           ("plastic", ".plastic"), ("perforce", ".p4config"), ("perforce", "p4config.txt"),
+           ("perforce", ".p4ignore"), ("perforce", "p4ignore.txt"))
+COMMIT_TIMEOUT = 30
 PULL_ARGS = {
     "rebase": ["--rebase", "--autostash"],
     "merge": ["--no-rebase"],
@@ -78,26 +84,126 @@ def backend(root, kind=None):
     return Git(root) if kind == "git" else NoVcs(root)
 
 
-def _git(root, *args, timeout=TIMEOUT):
-    """Run `git <args>` in the root with no console window and no prompt. One `Step`."""
-    argv = ["git"] + [str(a) for a in args]
-    env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
+def _run(tool, root, *args, timeout=TIMEOUT):
+    """Run `<tool> <args>` in the root with no console window and no prompt. One `Step`."""
+    argv = [tool] + [str(a) for a in args]
+    env = dict(os.environ, GIT_TERMINAL_PROMPT="0", HGPLAIN="1")
     try:
         r = subprocess.run(argv, capture_output=True, text=True, timeout=timeout,
                            cwd=str(root), encoding="utf-8", errors="replace", env=env,
                            stdin=subprocess.DEVNULL,
                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     except FileNotFoundError:
-        return Step(argv, 127, "git is not on the PATH")
+        return Step(argv, 127, "%s is not on the PATH" % tool)
     except subprocess.TimeoutExpired:
-        return Step(argv, 124, "git did not finish in %d seconds" % timeout)
+        return Step(argv, 124, "%s did not finish in %d seconds" % (tool, timeout))
     out = "\n".join(s.strip() for s in (r.stdout, r.stderr) if s and s.strip())
     return Step(argv, r.returncode, out)
 
 
-def merge_gitignore(path, lines):
-    """Append to the `.gitignore` at `path` every line of `lines` it lacks. True when it
-    wrote."""
+def _git(root, *args, timeout=TIMEOUT):
+    """Run `git <args>` in the root. One `Step`."""
+    return _run("git", root, *args, timeout=timeout)
+
+
+def _lines(step):
+    return step.out.splitlines() if step.rc == 0 and step.out else []
+
+
+def _commit_git(root, tid):
+    st = _git(root, "log", "-1", "--format=%h", "--grep", "^%s:" % tid, timeout=COMMIT_TIMEOUT)
+    h = (_lines(st) or [""])[0].strip()
+    if not h:
+        return None
+    st = _git(root, "branch", "-r", "--contains", h, timeout=COMMIT_TIMEOUT)
+    return h, bool(st.rc == 0 and st.out.strip())
+
+
+def _commit_mercurial(root, tid):
+    st = _run("hg", root, "log", "-r", "last(grep(r'^%s:'))" % re.escape(tid),
+              "-T", "{node|short} {phase}\n", timeout=COMMIT_TIMEOUT)
+    for ln in _lines(st):
+        parts = ln.split()
+        if len(parts) == 2:
+            return parts[0], parts[1] == "public"
+    return None
+
+
+def _commit_svn(root, tid):
+    st = _run("svn", root, "log", "-l", "1", "-q", "--search", "%s:" % tid,
+              timeout=COMMIT_TIMEOUT)
+    for ln in _lines(st):
+        m = re.match(r"(r\d+) \|", ln)
+        if m:
+            return m.group(1), True
+    st = _run("svn", root, "status", "-q", "--changelist", tid, timeout=COMMIT_TIMEOUT)
+    if any(ln.strip() and not ln.startswith("---") for ln in _lines(st)):
+        return "changelist %s" % tid, False
+    return None
+
+
+def _commit_perforce(root, tid):
+    st = _run("p4", root, "-F", "%clientName%", "info", timeout=COMMIT_TIMEOUT)
+    client = (_lines(st) or [""])[0].strip()
+    if not client:
+        return None
+    st = _run("p4", root, "-ztag", "changes", "-l", "-m", "200", "-c", client,
+              timeout=COMMIT_TIMEOUT)
+    rec = {}
+    for ln in _lines(st) + ["... change "]:
+        if ln.startswith("... change "):
+            if rec.get("desc", "").startswith("%s:" % tid):
+                return "change %s" % rec.get("change", "?"), rec.get("status") == "submitted"
+            rec = {"change": ln[len("... change "):].strip()}
+        elif ln.startswith("... status "):
+            rec["status"] = ln[len("... status "):].strip()
+        elif ln.startswith("... desc "):
+            rec["desc"] = ln[len("... desc "):].strip()
+    return None
+
+
+def _commit_diversion(root, tid):
+    st = _run("dv", root, "log", "-n", "200", "--oneline", timeout=COMMIT_TIMEOUT)
+    for ln in _lines(st):
+        if "%s:" % tid in ln:
+            m = re.search(r"dv\.commit\.\d+", ln)
+            return (m.group(0) if m else "a commit"), True
+    return None
+
+
+def _commit_plastic(root, tid):
+    st = _run("cm", root, "find", "changeset",
+              "where comment like '%s:%%' order by date desc limit 1" % tid,
+              "--format={changesetid}", "--nototal", timeout=COMMIT_TIMEOUT)
+    for ln in _lines(st):
+        if ln.strip().isdigit():
+            return "cs:%s" % ln.strip(), True
+    return None
+
+
+_COMMIT_OF = {"git": _commit_git, "mercurial": _commit_mercurial, "svn": _commit_svn,
+              "perforce": _commit_perforce, "diversion": _commit_diversion,
+              "plastic": _commit_plastic}
+
+
+def commit_of(root, kind, tid):
+    """`<ref> pushed`, `<ref> not pushed` or `no commit` for the newest commit of ticket `tid`,
+    the one whose message starts with `<tid>:`; "" in a project with no VCS. A pending
+    Perforce or svn changelist is `not pushed`. A commit of svn, Perforce, Diversion or
+    Plastic is on the server, so it is `pushed`. A Mercurial commit is pushed when its phase
+    is public."""
+    fn = _COMMIT_OF.get(kind)
+    if fn is None or not tid:
+        return ""
+    found = fn(root, tid)
+    if not found:
+        return "no commit"
+    return "%s %s" % (found[0], "pushed" if found[1] else "not pushed")
+
+
+def merge_gitignore(path, lines, header=GITIGNORE_HEADER):
+    """Append to the `.gitignore` at `path` every line of `lines` it lacks, under `header`
+    when the file lacks it and `header` is not empty. True when it wrote."""
     path = Path(path)
     try:
         with io.open(path, "r", encoding="utf-8") as fh:
@@ -112,12 +218,117 @@ def merge_gitignore(path, lines):
         text += "\n"
     if text:
         text += "\n"
-    if GITIGNORE_HEADER not in have:
-        text += GITIGNORE_HEADER + "\n"
+    if header and header not in have:
+        text += header + "\n"
     text += "\n".join(new) + "\n"
     with io.open(path, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(text)
     return True
+
+
+# The ignore file each kind reads at the root, and how a root-relative path is written in it.
+# Diversion reads `.dvignore` with the rules of `.gitignore`; a leading `/` anchors a rule to
+# the file's directory in `.p4ignore` and Plastic's `ignore.conf`.
+IGNORE_FILES = {"git": ".gitignore", "diversion": ".dvignore", "plastic": "ignore.conf",
+                "mercurial": ".hgignore"}
+P4IGNORE_NAMES = (".p4ignore", "p4ignore.txt")
+P4CONFIG_NAMES = (".p4config", "p4config.txt")
+
+
+def _anchored(path):
+    return "/" + path
+
+
+def _hg_rule(path):
+    return "re:^%s$" % re.escape(path)
+
+
+def _write_step(path, lines, header=GITIGNORE_HEADER):
+    """Merge `lines` into the ignore file at `path`. One `Step`."""
+    try:
+        merge_gitignore(path, lines, header)
+    except OSError as exc:
+        return Step(["write", str(path)], 1, str(exc))
+    return Step(["write", str(path)], 0, "")
+
+
+def _ignore_git(root, paths):
+    st = _git(root, "check-ignore", "--no-index", "--", *paths)
+    done = {ln.strip() for ln in st.out.splitlines()} if st.rc == 0 else set()
+    rest = [p for p in paths if p not in done]
+    return [_write_step(root / ".gitignore", [_anchored(p) for p in rest])] if rest else []
+
+
+def _ignore_perforce(root, paths):
+    """Write the rules into the P4IGNORE file. When p4 names none, a P4CONFIG file at the root
+    gets `P4IGNORE=.p4ignore`, so the workspace reads the file."""
+    st = _run("p4", root, "set", "-q", "P4IGNORE")
+    named = ""
+    for ln in _lines(st):
+        if ln.startswith("P4IGNORE="):
+            named = ln.split("=", 1)[1].split(" (", 1)[0].strip()
+    steps = []
+    if named:
+        name = re.split(r"[;,]", named)[0].strip()
+    else:
+        name = next((n for n in P4IGNORE_NAMES if (root / n).is_file()), P4IGNORE_NAMES[0])
+        cfg = next((root / n for n in P4CONFIG_NAMES if (root / n).is_file()), None)
+        if cfg is None:
+            return [Step(["p4", "set", "-q", "P4IGNORE"], 1,
+                         "P4IGNORE is not set and the root holds no P4CONFIG file, so p4 "
+                         "reads no ignore file")]
+        steps.append(_write_step(cfg, ["P4IGNORE=%s" % name], header=""))
+        if steps[-1].rc != 0:
+            return steps
+    target = Path(name) if Path(name).is_absolute() else root / name
+    steps.append(_write_step(target, [_anchored(p) for p in paths]))
+    return steps
+
+
+def _svn_ignore(root, paths):
+    """Add each file's name to the `svn:ignore` property of its directory, and put an
+    unversioned directory under version control first, with no content."""
+    steps = []
+    by_dir = {}
+    for p in paths:
+        d, _, name = p.rpartition("/")
+        by_dir.setdefault(d or ".", []).append(name)
+    for d, names in sorted(by_dir.items()):
+        if d != "." and _run("svn", root, "info", "--show-item", "kind", d).rc != 0:
+            steps.append(_run("svn", root, "add", "--depth=empty", "--parents", d))
+            if steps[-1].rc != 0:
+                return steps
+        st = _run("svn", root, "propget", "svn:ignore", d)
+        have = [ln.strip() for ln in st.out.splitlines() if ln.strip()] if st.rc == 0 else []
+        new = [n for n in names if n not in have]
+        if not new:
+            continue
+        steps.append(_run("svn", root, "propset", "svn:ignore", "\n".join(have + new), d))
+        if steps[-1].rc != 0:
+            return steps
+    return steps
+
+
+def ignore(root, kind, paths):
+    """Put the root-relative `paths` on the ignore list of the VCS `kind`: git `.gitignore`
+    (a path git already ignores is left out), Diversion `.dvignore`, Plastic `ignore.conf`,
+    Mercurial `.hgignore`, Perforce the P4IGNORE file, svn the `svn:ignore` property of each
+    file's directory. A list of `Step`; empty for no kind, for `none` and for no paths. An
+    ignore list does not remove a file that the VCS tracks already."""
+    root = Path(root)
+    paths = [str(p).replace("\\", "/").strip("/") for p in paths if str(p).strip("/")]
+    if not paths or kind in (None, "none"):
+        return []
+    if kind == "git":
+        return _ignore_git(root, paths)
+    if kind == "perforce":
+        return _ignore_perforce(root, paths)
+    if kind == "svn":
+        return _svn_ignore(root, paths)
+    if kind in IGNORE_FILES:
+        rule = _hg_rule if kind == "mercurial" else _anchored
+        return [_write_step(root / IGNORE_FILES[kind], [rule(p) for p in paths])]
+    return [Step(["ignore", kind], 1, "%s is not a VCS Octopus AI knows" % kind)]
 
 
 class NoVcs:

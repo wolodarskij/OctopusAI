@@ -657,6 +657,33 @@ def load_rules(root, project=None):
     return rules, problems
 
 
+def manager_autostart():
+    """Whether the board automatically starts and restarts the manager."""
+    try:
+        data = json.loads((home() / "manager-settings.json").read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return True
+    except (OSError, ValueError):
+        return False
+    return isinstance(data, dict) and data.get("autostart") is True
+
+
+def save_manager_autostart(enabled):
+    if not isinstance(enabled, bool):
+        raise ValueError("autostart must be true or false")
+    import tempfile
+    path = home() / "manager-settings.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
+                                     delete=False) as fh:
+        tmp = Path(fh.name)
+        fh.write(json.dumps({"autostart": enabled}) + "\n")
+    try:
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
 def global_rules_file():
     """The global switches of the optional rules. Outside the Octopus AI tree."""
     return home() / "rules.json"
@@ -767,11 +794,11 @@ class Project:
             self.problems.append("%s/%s: `vcs` is %r; one of %s"
                                  % (self.config_dir, PROJECT_FILE, self.vcs, ", ".join(_vcs.KINDS)))
             self.vcs = "none"
-        if self.vcs in _vcs.PACK_KINDS and self.vcs not in rules["rulesets"]:
-            self.problems.append("%s/%s: `vcs` is %s, and the project does not list the %s pack;"
-                                 " run: octopus packs \"%s\" add %s"
-                                 % (self.config_dir, PROJECT_FILE, self.vcs, self.vcs,
-                                    self.name, self.vcs))
+        pack = _vcs.PACKS.get(self.vcs)
+        if self.vcs != "git" and pack and pack not in rules["rulesets"]:
+            self.problems.append("%s/%s: `vcs` is %s, but the %s pack is not installed: "
+                                 "octopus packs <project> add %s"
+                                 % (self.config_dir, PROJECT_FILE, self.vcs, pack, pack))
         self.vcs_pull = cfg.get("vcsPull") or _vcs.DEFAULT_PULL
         if self.vcs_pull not in _vcs.PULL_ARGS:
             self.problems.append("%s/%s: `vcsPull` is %r; one of %s"

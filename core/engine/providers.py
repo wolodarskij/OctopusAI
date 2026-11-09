@@ -20,8 +20,9 @@ THE FIELDS of a provider:
     dialect                how a launch's command line is built: `claude` or `codex` (the
                            launch of that CLI, `todo.py`), or `template` (the fields below)
     command, args          the executable; the arguments every launch and every check carries first
-    approvalPolicy        Codex interactive launches: empty inherits its config, or on-request,
-                           untrusted, never. Headless answer calls remain noninteractive.
+    approvalPolicy         Codex interactive launches: auto-review (default), empty inherits its
+                           config, or on-request, untrusted, never. Explicit approval arguments
+                           override auto-review. Headless answer calls remain noninteractive.
     prompt                 template: where the prompt goes, `["{prompt}"]`
     model, effort          template: `["--model", "{model}"]`; empty when the CLI takes none
     auto, plan             template: the permission or sandbox mode of a launch that may edit,
@@ -65,6 +66,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -76,14 +78,14 @@ DEFAULT_FILE = "default-provider.json"
 OLD_FILE = "agents.json"
 OLD_KEY = "agents"
 DIALECTS = ("claude", "codex", "template")
-APPROVAL_POLICIES = ("", "on-request", "untrusted", "never")
+APPROVAL_POLICIES = ("auto-review", "", "on-request", "untrusted", "never")
 # `hooks`: the board reads its state from the hook files and its transcript; without them,
 # from its process and `report`. `remoteControl`: Claude Code's Remote Control. `planMode`: a
 # permission mode that keeps a plan from editing. `deny`: a tool denied per launch. `resume`:
 # the ticket's own session again. `addDir`: a directory outside the project. `effort`: a
 # reasoning effort. `skills`: it reads `.agents/skills/`, or Claude's pointers to them.
-# `scheduler`: it schedules its own recurring prompt (`CronCreate`); a manager on a provider
-# without one gets its 10-minute check from the board's watchdog.
+# `scheduler`: it calls the session back when a background command exits; a manager on it
+# runs the fallback check (`check --watch`) while the board does not run.
 FEATURES = ("hooks", "remoteControl", "planMode", "deny", "resume", "addDir", "effort",
             "skills", "scheduler")
 LIST_FIELDS = ("args", "prompt", "model", "effort", "auto", "plan", "addDir", "resume",
@@ -124,6 +126,7 @@ BUILTIN = {
     },
     "codex": {
         "label": "OpenAI Codex", "dialect": "codex", "command": "codex",
+        "approvalPolicy": "auto-review",
         "features": _none(addDir=1, effort=1, skills=1),
         # No default model or effort: Codex takes its own, from its config.
         "models": {"codex": "gpt-6.1-sol", "gpt-6.1-sol": "gpt-6.1-sol",
@@ -299,6 +302,8 @@ def _merge(base, over):
 def _complete(pid, spec):
     """Every field present: the template's defaults under what the spec names."""
     out = _merge(_TEMPLATE, spec)
+    if out["dialect"] == "codex" and "approvalPolicy" not in spec:
+        out["approvalPolicy"] = "auto-review"
     out["id"] = pid
     out["label"] = out.get("label") or pid
     out["features"] = {f: bool((out.get("features") or {}).get(f)) for f in FEATURES}
@@ -416,7 +421,7 @@ def validate(row):
         out.append("a built-in keeps its dialect, %s" % BUILTIN[pid]["dialect"])
     policy = row.get("approvalPolicy", "")
     if policy not in APPROVAL_POLICIES:
-        out.append("`approvalPolicy` must be empty, on-request, untrusted or never")
+        out.append("`approvalPolicy` must be auto-review, empty, on-request, untrusted or never")
     elif policy and d != "codex":
         out.append("`approvalPolicy` applies only to the codex dialect")
     if not builtin and not (isinstance(row.get("command"), str) and row["command"].strip()):
@@ -523,10 +528,40 @@ def fill(args, **values):
     return out
 
 
+def _has_approval_args(args):
+    """Whether explicit Codex arguments select an approval policy or reviewer."""
+    flags = {"--ask-for-approval", "--approve-for-me", "--full-auto", "--yolo",
+             "--dangerously-bypass-approvals-and-sandbox"}
+    args = iter(args)
+    for arg in args:
+        if arg == "--":
+            break
+        if arg.partition("=")[0] in flags or arg.startswith("-a"):
+            return True
+        if arg in ("-c", "--config"):
+            assignment = next(args, "")
+        elif arg.startswith("--config="):
+            assignment = arg[len("--config="):]
+        elif arg.startswith("-c"):
+            assignment = arg[2:].removeprefix("=")
+        else:
+            continue
+        key, sep, _ = assignment.partition("=")
+        if sep and key.strip() in ("approval_policy", "approvals_reviewer"):
+            return True
+    return False
+
+
 def approval_argv(p):
-    """An optional Codex interactive override; otherwise let its config decide."""
+    """Codex interactive defaults, with explicit approval arguments taking precedence."""
     policy = p.get("approvalPolicy", "")
-    return ["--ask-for-approval", policy] if p["dialect"] == "codex" and policy else []
+    if p["dialect"] != "codex" or not policy:
+        return []
+    if policy == "auto-review":
+        if _has_approval_args(p.get("args", [])):
+            return []
+        return ["--ask-for-approval", "on-request", "-c", "approvals_reviewer=auto_review"]
+    return ["--ask-for-approval", policy]
 
 
 def template_argv(p, prompt, mode_args, model="", effort="", dirs=(), session="", root=""):
@@ -583,8 +618,13 @@ def check_argv(p, prompt=CHECK_PROMPT, model_key=None):
     return argv + fill(p["check"], prompt=prompt, model=model, effort=effort)
 
 
-def answer_argv(p, model="", effort="", output=""):
-    """A bounded stdin-to-answer call. Codex drafting uses an isolated read-only workspace."""
+# Claude Code's arguments for an answer that reports each response while it runs.
+STREAM_ARGS = ["--output-format", "stream-json", "--verbose", "--include-partial-messages"]
+
+
+def answer_argv(p, model="", effort="", output="", stream=False):
+    """A bounded stdin-to-answer call. Codex drafting uses an isolated read-only workspace.
+    With `stream`, Claude Code writes its responses as JSON lines (`STREAM_ARGS`)."""
     argv = [launch_command(p["command"])] + fill(p["args"], model=model, effort=effort)
     if p["dialect"] == "codex":
         argv += ["exec", "--sandbox", "read-only", "--skip-git-repo-check", "--ephemeral",
@@ -604,13 +644,110 @@ def answer_argv(p, model="", effort="", output=""):
             argv += ["--model", model]
         if effort:
             argv += ["--effort", effort]
-        return argv
+        return argv + (STREAM_ARGS if stream else [])
     raise ValueError("%s does not support headless answers; choose Claude Code or Codex"
                      % p["label"])
 
 
-def answer(p, prompt, model="", effort="", timeout=240):
-    """Return only a successful final answer; neither provider receives the project tree."""
+def describe_event(e, seen):
+    """The line that one event of Claude Code's `stream-json` output shows, or None for an
+    event that says nothing to the owner (a hook, a block end). `seen` holds the characters
+    of thinking and of answer text received so far, across the events of one answer."""
+    kind = e.get("type")
+    if kind == "system":
+        sub = str(e.get("subtype") or "")
+        if sub == "init":
+            return "started on %s" % (e.get("model") or "its default model")
+        if sub == "status":
+            status = e.get("status")
+            return "sent the request" if status == "requesting" else (
+                str(status).replace("_", " ") if status else None)
+        if not sub or sub.startswith("hook_"):
+            return None
+        attempt = e.get("attempt")
+        return sub.replace("_", " ") + (" · attempt %s" % attempt if attempt else "")
+    if kind == "stream_event":
+        ev = e.get("event") or {}
+        if ev.get("type") == "content_block_start":
+            block = (ev.get("content_block") or {}).get("type")
+            return {"thinking": "thinking", "redacted_thinking": "thinking",
+                    "text": "writing the answer"}.get(block)
+        if ev.get("type") == "content_block_delta":
+            d = ev.get("delta") or {}
+            part = {"text_delta": "text", "thinking_delta": "thinking"}.get(d.get("type"))
+            if not part:
+                return None
+            seen[part] = seen.get(part, 0) + len(d.get(part) or "")
+            return "%s · %d characters" % (
+                "writing the answer" if part == "text" else "thinking", seen[part])
+        return None
+    if kind == "rate_limit_event":
+        info = e.get("rate_limit_info") or {}
+        status = info.get("status")
+        if not status or status == "allowed":
+            return None
+        at = info.get("resetsAt")
+        return "rate limit: %s" % str(status).replace("_", " ") + (
+            ", resets at %s" % time.strftime("%H:%M", time.localtime(at))
+            if isinstance(at, (int, float)) else "")
+    if kind == "result":
+        return "failed" if e.get("is_error") else "answer received"
+    return None
+
+
+def _streamed(p, argv, prompt, work, env, timeout, progress):
+    """Run a `stream` answer call; give `progress` the line of each event that has one
+    (`describe_event`). Returns `(the result event or None, the exit code, stderr)`."""
+    proc = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, cwd=work, env=env, text=True,
+                            encoding="utf-8", errors="replace",
+                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    err, late = [], []
+
+    def feed():
+        try:
+            proc.stdin.write(prompt)
+            proc.stdin.close()
+        except OSError:
+            pass
+
+    def drain():
+        err.append(proc.stderr.read())
+
+    def kill():
+        late.append(True)
+        proc.kill()
+
+    readers = [threading.Thread(target=job, daemon=True) for job in (feed, drain)]
+    for r in readers:
+        r.start()
+    timer = threading.Timer(timeout, kill)
+    timer.start()
+    result, seen = None, {}
+    with proc:
+        for line in proc.stdout:
+            try:
+                e = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(e, dict):
+                continue
+            if e.get("type") == "result":
+                result = e
+            say = describe_event(e, seen)
+            if say:
+                progress(say)
+        readers[1].join(timeout)
+    timer.cancel()
+    if late:
+        raise ValueError("%s did not answer in %d seconds" % (p["label"], timeout))
+    return result, proc.returncode, "".join(err)
+
+
+def answer(p, prompt, model="", effort="", timeout=240, progress=None):
+    """Return only a successful final answer; neither provider receives the project tree.
+    `progress`, a function of one line, gets each response of a Claude Code answer while it
+    runs, and one line for a provider that reports none before its answer."""
     env = dict(os.environ, **p["env"])
     env.pop("CLAUDECODE", None)
     key = p.get("keyEnv")
@@ -618,6 +755,28 @@ def answer(p, prompt, model="", effort="", timeout=240):
         raise ValueError("%s is unset" % key)
     with tempfile.TemporaryDirectory(prefix="octopus-answer-") as work:
         output = Path(work) / "answer.txt"
+        if progress and p["dialect"] == "claude":
+            try:
+                result, code, err = _streamed(p, answer_argv(p, model, effort, stream=True),
+                                              prompt, work, env, timeout, progress)
+            except OSError as exc:
+                raise ValueError("%s did not start: %s. Set its executable path in Global "
+                                 "settings." % (p["label"], exc))
+            if result is not None and result.get("is_error"):
+                raise ValueError("%s failed: %s" % (p["label"], _tail(str(
+                    result.get("result") or result.get("subtype") or "no diagnostic"))))
+            if result is not None and not code:
+                text = str(result.get("result") or "").strip()
+                if not text:
+                    raise ValueError("%s returned no answer" % p["label"])
+                return text
+            if "unknown option" not in err:
+                raise ValueError("%s failed (exit %s): %s" % (
+                    p["label"], code, _tail(err or "no diagnostic")))
+            # A Claude Code without STREAM_ARGS answers once, with no responses before it.
+            progress("waiting for the answer")
+        elif progress:
+            progress("waiting for the answer; %s reports nothing before it" % p["label"])
         argv = answer_argv(p, model, effort, str(output))
         try:
             r = subprocess.run(argv, input=prompt, cwd=work, env=env, capture_output=True,

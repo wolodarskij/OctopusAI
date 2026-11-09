@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/octopus.py\" hook"
+            "command": "python \"$CLAUDE_PROJECT_DIR/octopus.py\" hook; exit 0"
           }
         ]
       }
@@ -15,7 +15,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/octopus.py\" hook"
+            "command": "python \"$CLAUDE_PROJECT_DIR/octopus.py\" hook; exit 0"
           }
         ]
       }
@@ -25,7 +25,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/octopus.py\" hook"
+            "command": "python \"$CLAUDE_PROJECT_DIR/octopus.py\" hook; exit 0"
           }
         ]
       }
@@ -36,7 +36,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/octopus.py\" hook"
+            "command": "python \"$CLAUDE_PROJECT_DIR/octopus.py\" hook; exit 0"
           }
         ]
       }
@@ -47,7 +47,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/octopus.py\" hook"
+            "command": "python \"$CLAUDE_PROJECT_DIR/octopus.py\" hook; exit 0"
           }
         ]
       }
@@ -57,7 +57,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/octopus.py\" hook",
+            "command": "python \"$CLAUDE_PROJECT_DIR/octopus.py\" hook; exit 0",
             "async": true
           }
         ]
@@ -68,7 +68,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/octopus.py\" hook"
+            "command": "python \"$CLAUDE_PROJECT_DIR/octopus.py\" hook; exit 0"
           }
         ]
       }

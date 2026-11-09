@@ -278,8 +278,60 @@ _MEASURE = re.compile(r"\b\d+(?:[.,]\d+)?\s*(?:%|ms|s|sec|secs|seconds?|min|minu
                       r"problems?)\b|\b\d+\s*/\s*\d+\b|\b\d+(?:[.,]\d+)?\s*[-–]\s*\d+", re.I)
 
 
-def outcome_problem(text, own_id=""):
-    """Why `text` is no outcome line, or "" when it is one."""
+# WHAT MAY BE CALLED WRONG. A ticket is done, or wrong, or it asks the owner; never two of them.
+# A finished ticket (in the verify or the closed lane, not `cancelled`) whose outcome, `## Result`
+# or `## Verified` says that something is still wrong contradicts itself, so `move`, `outcome`
+# and `check` refuse it. The pattern holds only the phrases that state a defect that remains.
+_STILL_WRONG = re.compile(
+    r"\bstill\s+(?:(?:is|are)\s+)?(?:wrong|broken|buggy|fails?|failing|missing|open|unfixed|"
+    r"unsolved|incomplete|undone|absent|lacks?|needs?|requires?|cannot|can['’]t)\b"
+    r"|\bstill\s+(?:does|do|is|are|can|will|has|have)\s*(?:n['’]t\b|\s(?:not|no|never)\b)"
+    r"|\b(?:does|do|is|are)\s*(?:n['’]t|\snot)\s+(?:yet\s+)?work(?:ing)?\b"
+    r"|\bnot\s+(?:yet\s+)?(?:fixed|done|implemented|solved|resolved|finished|completed?|"
+    r"working|handled|addressed)\b|\bnot\s+yet\b"
+    r"|\bknown\s+(?:issues?|limits?|limitations?|defects?|bugs?|problems?)\b"
+    r"|\b(?:remains?|left)\s+(?:wrong|broken|open|unfixed|missing|undone|as\s+is)\b"
+    r"|\b(?:works?|fixed|done|implemented)\s+(?:only\s+)?(?:partly|partially|in\s+part)\b"
+    r"|\b(?:partly|partially)\s+(?:works?|fixed|done|implemented)\b"
+    r"|\bstill\s+to\s+(?:do|fix)\b", re.I)
+FINISHED_SECTIONS = re.compile(r"^(?:Result|Verified)\s*$", re.I)
+
+
+def still_wrong(text):
+    """The phrase of `text` (str) that says something is still wrong, or ""."""
+    m = _STILL_WRONG.search(str(text or ""))
+    return m.group(0) if m else ""
+
+
+def is_finished(state, status=""):
+    """Whether a ticket in `state` with `status` is finished work: the verify or the closed
+    lane, and not `cancelled`."""
+    if state == lane("verify"):
+        return True
+    return state == lane("closed") and (status or default_status(state)) != S("cancelled")
+
+
+def finished_problem(t, said=None):
+    """Why ticket `t` cannot be finished work, or "": its outcome (`said`, else its own
+    `outcome:`), its `## Result` or its `## Verified` says that something is still wrong. Of a
+    repeatable ticket only the current run's `## Result (run <n>)` counts."""
+    said = t.meta.get(OUTCOME_FIELD, "") if said is None else said
+    phrase = still_wrong(said)
+    if phrase:
+        return "its outcome says that something is still wrong (%r)" % phrase
+    own = re.compile(r"^Result \(run %d\)$" % t.run) if t.repeat else FINISHED_SECTIONS
+    for m in re.finditer(r"^##\s+([^\n]*)\n(.*?)(?=^##\s|\Z)", t.body or "", re.M | re.S):
+        if own.match(m.group(1).strip()):
+            phrase = still_wrong(m.group(2))
+            if phrase:
+                return "its `## %s` says that something is still wrong (%r)" \
+                    % (m.group(1).strip(), phrase)
+    return ""
+
+
+def outcome_problem(text, own_id="", finished=False):
+    """Why `text` is no outcome line, or "" when it is one. A `finished` ticket's outcome also
+    says nothing that is still wrong."""
     text = str(text or "")
     if "\n" in text.strip() or "\r" in text.strip():
         return "the outcome is one line"
@@ -299,6 +351,10 @@ def outcome_problem(text, own_id=""):
     if m:
         return "the outcome carries a measurement (%r); the measurement goes on the ticket" \
             % m.group(0)
+    phrase = still_wrong(text) if finished else ""
+    if phrase:
+        return ("the outcome says that something is still wrong (%r); a finished ticket says "
+                "only what works or what was found" % phrase)
     return ""
 
 
@@ -319,7 +375,7 @@ def outcome_due(t):
 
 def set_outcome(t, text):
     """Write `outcome:` on the ticket. Returns the problem of the text, or ""."""
-    why = outcome_problem(text, t.id)
+    why = outcome_problem(text, t.id, is_finished(t.state, t.status))
     if why:
         return why
     meta, body = parse(_read(t.path))
@@ -987,6 +1043,21 @@ def save_groups(mapping):
     _write(P.GROUPS_MAP, json.dumps(mapping, indent=1, ensure_ascii=False) + "\n")
 
 
+def load_group_descriptions():
+    """Descriptions by group name, separate from membership in the map store."""
+    import json
+    if P.groups_store == "files":
+        return {g["slug"]: g["description"] for g in group_table()["groups"]}
+    path = P.TODO / ".group-descriptions.json"
+    return json.loads(_read(path)) if path.exists() else {}
+
+
+def _save_group_descriptions(descriptions):
+    import json
+    _write(P.TODO / ".group-descriptions.json",
+           json.dumps(descriptions, indent=1, ensure_ascii=False) + "\n")
+
+
 def todo_groups(tickets, mapping):
     """(members by group name, open tickets in no group). Only open tickets count.
 
@@ -1015,6 +1086,79 @@ def group_names():
     if P.groups_store == "files":
         return sorted(load_group_files())
     return list(load_groups().keys())
+
+
+def load_group_layout():
+    """The manual group order and parent links, independent of ticket membership."""
+    import json
+    names = group_names()
+    try:
+        data = json.loads(_read(P.TODO / ".group-layout.json"))
+    except (OSError, ValueError):
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    order = [name for name in _lane_list(data.get("order")) if name in names]
+    order += [name for name in names if name not in order]
+    raw = data.get("parents")
+    parents = {}
+    for name, parent in (raw.items() if isinstance(raw, dict) else ()):
+        if name not in names or not isinstance(parent, str) or parent not in names:
+            continue
+        ancestor = parent
+        while ancestor in parents and ancestor != name:
+            ancestor = parents[ancestor]
+        if ancestor != name:
+            parents[name] = parent
+    return {"order": order, "parents": parents}
+
+
+def _save_group_layout(layout):
+    import json
+    _write(P.TODO / ".group-layout.json", json.dumps(layout, indent=1, ensure_ascii=False) + "\n")
+
+
+def group_move(name, parent="", before=None, *, manual=False):
+    """Move one group with its children. Only a manual board action can set parent links."""
+    if manual is not True:
+        raise ValueError("move groups by hand on the Groups page")
+    layout = load_group_layout()
+    order, parents = layout["order"], layout["parents"]
+    if not isinstance(name, str) or name not in order:
+        raise ValueError("no Todo group %r" % name)
+    if not isinstance(parent, str) or (parent and parent not in order):
+        raise ValueError("no parent group %r" % parent)
+    ancestor = parent
+    while ancestor:
+        if ancestor == name:
+            raise ValueError("a group cannot be inside itself or one of its children")
+        ancestor = parents.get(ancestor, "")
+    if before is not None:
+        if (not isinstance(before, str) or before not in order or before == name
+                or parents.get(before, "") != parent):
+            raise ValueError("the placement must name another group with the same parent")
+    if parent:
+        parents[name] = parent
+    else:
+        parents.pop(name, None)
+    order.remove(name)
+    order.insert(order.index(before) if before is not None else len(order), name)
+    _save_group_layout(layout)
+    return layout
+
+
+def _rename_group_layout(layout, old, new):
+    layout["order"] = [new if name == old else name for name in layout["order"]]
+    layout["parents"] = {new if name == old else name: new if parent == old else parent
+                         for name, parent in layout["parents"].items()}
+    _save_group_layout(layout)
+
+
+def _delete_group_layout(layout, name):
+    layout["order"] = [item for item in layout["order"] if item != name]
+    layout["parents"] = {child: parent for child, parent in layout["parents"].items()
+                         if child != name and parent != name}
+    _save_group_layout(layout)
 
 
 def group_assign(ids, name):
@@ -1047,6 +1191,9 @@ def group_create(name, title=None, description=None):
     if name in mapping:
         raise ValueError("%r is already a Todo group" % name)
     mapping[name] = []
+    descriptions = load_group_descriptions()
+    descriptions[name] = (description or "").strip()
+    _save_group_descriptions(descriptions)
     _save_and_render(mapping)
     return mapping
 
@@ -1063,10 +1210,16 @@ def group_rename(old, new):
         raise ValueError("a group needs a name")
     if new != old and new in mapping:
         raise ValueError("%r is already a Todo group" % new)
+    layout = load_group_layout()
     out = {}
     for k, v in mapping.items():
         out[new if k == old else k] = v
+    descriptions = load_group_descriptions()
+    if old in descriptions:
+        descriptions[new] = descriptions.pop(old)
+        _save_group_descriptions(descriptions)
     _save_and_render(out)
+    _rename_group_layout(layout, old, new)
     return out
 
 
@@ -1077,8 +1230,14 @@ def group_delete(name, into=None):
     mapping = load_groups()
     if name not in mapping:
         raise ValueError("no Todo group %r" % name)
+    layout = load_group_layout()
     del mapping[name]
+    descriptions = load_group_descriptions()
+    if name in descriptions:
+        del descriptions[name]
+        _save_group_descriptions(descriptions)
     _save_and_render(mapping)
+    _delete_group_layout(layout, name)
     return mapping
 
 
@@ -1102,6 +1261,7 @@ def auto_group(name):
 
 def build_groups(members, ungrouped, autos):
     n = sum(len(v) for v in members.values())
+    descriptions = load_group_descriptions()
     lines = ["# Todo groups", "",
              "%d open tickets in %d groups. A group holds tickets that share a `group`, a "
              "`related` or a `blocked-by` field, so one session can work them together. Name "
@@ -1110,6 +1270,8 @@ def build_groups(members, ungrouped, autos):
              "no group." % (n, len(members), P.cli), ""]
     for name, ts in members.items():
         lines += ["## %s (%d)" % (name, len(ts)), ""]
+        if descriptions.get(name):
+            lines += [descriptions[name], ""]
         for t in sorted(ts, key=lambda t: t.id):
             state = "" if t.state == lane("start") else " (%s)" % t.state
             lines.append("- %s — %s%s" % (t.id, t.title, state))
@@ -1185,6 +1347,7 @@ def group_file_rename(old, new):
         return []
     if new in groups:
         raise ValueError("group %r already exists" % new)
+    layout = load_group_layout()
     src = groups[old][1]
     meta, body = parse(_read(src))
     meta["id"] = new
@@ -1196,6 +1359,7 @@ def group_file_rename(old, new):
             t.meta["group"] = new
             _write(t.path, render(t.meta, t.body))
             moved.append(t.id)
+    _rename_group_layout(layout, old, new)
     write_index(quiet=True)
     return moved
 
@@ -1237,7 +1401,9 @@ def group_file_delete(slug, into=None):
         raise ValueError("%d open ticket(s) name group %r: %s. Regroup them, or pass --into "
                          "<other>" % (len(members), slug, " ".join(t.id for t in members)))
     moved = [i for i, _ in group_file_assign([t.id for t in members], into)] if members else []
+    layout = load_group_layout()
     groups[slug][1].unlink()
+    _delete_group_layout(layout, slug)
     write_index(quiet=True)
     return moved
 
@@ -1539,7 +1705,7 @@ def cmd_check(args):
             problems.append("%s is not named after its id %s" % (rel, t.id))
         said = t.meta.get(OUTCOME_FIELD, "")
         if said:
-            why = outcome_problem(said, t.id)
+            why = outcome_problem(said, t.id, is_finished(t.state, t.status))
             if why:
                 problems.append("%s: %s - run: %s outcome %s \"<what now works or what was "
                                 "found>\"" % (rel, why, P.cli, t.id))
@@ -1760,15 +1926,35 @@ def cmd_move(args):
             return 2
         for ident in args.ids:
             t = find(tickets, ident)
-            why = outcome_problem(said, t.id) if t is not None else ""
+            why = outcome_problem(said, t.id, is_finished(state, args.status)) \
+                if t is not None else ""
             if why:
                 print("Error: %s: %s." % (t.id, why), file=sys.stderr)
                 return 2
-        if not args.dry_run:
-            for ident in args.ids:
-                t = find(tickets, ident)
-                if t is not None:
-                    set_outcome(t, said)
+    if is_finished(state, args.status):
+        for t in ([t for t in tickets if t.epic == args.epic] if args.epic else
+                  [find(tickets, i) for i in args.ids]):
+            if t is None or t.repeat == MANAGER:
+                continue
+            why = finished_problem(t, said)
+            if why:
+                for line in (
+                    "Error: %s cannot go to %s: %s." % (t.id, P.STATE_LABEL[state], why),
+                    "  A ticket is done, or wrong, or it asks the owner; never two of them.",
+                    "  Done: write the text again, so that it says only what works or what was "
+                    "found.",
+                    "  Wrong: keep the ticket and fix it, or send it back to %s from a verify "
+                    "session." % lane("start"),
+                    "  Not sure what to call wrong: ask the owner, and keep the ticket where "
+                    "it is.",
+                ):
+                    print(line, file=sys.stderr)
+                return 2
+    if said is not None and not args.dry_run:
+        for ident in args.ids:
+            t = find(tickets, ident)
+            if t is not None:
+                set_outcome(t, said)
     moved = []
     targets = ([t for t in tickets if t.epic == args.epic] if args.epic else
                [t for t in (find(tickets, i) for i in args.ids) if t is not None])
@@ -2769,7 +2955,7 @@ def launch_new(tid, args):
 
 # ── notices to Octopus AI ───────────────────────────────────────────────────
 # A defect of an Octopus AI tool is no ticket of the project that found it. `notify` writes a
-# notice into the Octopus AI project, `TODO/.notices/N####.md`; its manager's 10-minute check
+# notice into the Octopus AI project, `TODO/.notices/N####.md`; its manager's check
 # lists every open notice, and `notice` records the manager's decision on it.
 
 NOTICES_DIR = ".notices"
@@ -3478,14 +3664,15 @@ def build_brief(t, mode="work", note="", provider="claude"):
                 return _fill(_read(files[n]).replace("\r\n", "\n"), vals)
         return ""
 
-    # The commit policy of each mode, only where the project has a VCS: `vcs.<kind>.<mode>`
-    # from the pack of that VCS, and for git `vcs.<mode>`: the core supplies `vcs.work` and
-    # `vcs.verify`, the git pack the others.
-    has_vcs = P.vcs != "none"
+    # The commit policy of each mode, only where the project uses a VCS: `vcs.<kind>.<mode>`
+    # from the pack of that kind. For git, the core supplies `vcs.work` and `vcs.verify`, and
+    # the git pack the others, as `vcs.<mode>`.
+    kind = P.vcs
 
     def vcs_sec(m):
-        return sec("vcs.%s.%s" % (P.vcs, m), *(["vcs.%s" % m] if P.vcs == "git" else []))
-
+        if kind == "none":
+            return ""
+        return sec("vcs.%s.%s" % (kind, m), *(["vcs.%s" % m] if kind == "git" else []))
     permits = [sec("permits.granted") if granted else sec("permits.none")]
     if vals["extra_dirs"]:
         permits.append(sec("dirs"))
@@ -3504,8 +3691,7 @@ def build_brief(t, mode="work", note="", provider="claude"):
         out = [sec("header"), sec("messages"), other,
                sec("where") if vals["project_line"] else "",
                sec("repeat.%s" % MANAGER)] + permits + [sec("before")]
-        if has_vcs:
-            out.append(vcs_sec(MANAGER))
+        out.append(vcs_sec(MANAGER))
         if note:
             out.append(sec("note"))
         out.append(sec("ticket"))
@@ -3524,8 +3710,7 @@ def build_brief(t, mode="work", note="", provider="claude"):
     out += permits
     out.append(sec("before.%s" % mode, "before"))
     out.append(sec("finish.%s" % mode))
-    if has_vcs:
-        out.append(vcs_sec(mode))
+    out.append(vcs_sec(mode))
     out.append(sec("finish"))
     out.append(sec("close.%s" % mode))
     if note:
@@ -3882,7 +4067,8 @@ def _launch_argv(t, mode="work", model=None, no_fable=False, auto=False, effort=
         "verify": "prove the work landed, or send the ticket back with what is still wrong.",
     }.get(mode, "get on with it.")
     if t.repeat == MANAGER:
-        tail = "wait for the owner's orders. Never exit."
+        tail = ("end this turn and wait for the owner's orders in this open session. "
+                "Never use sleep or a polling loop to wait. Do not close the session.")
     verb = {"review": "Re-evaluate", "verify": "Verify"}.get(mode, "Work")
     prompt = ("%s ticket %s. Read %s/.briefs/%s.md first and in full - it carries the "
               "ticket, what you may and may not use, and what to do when you finish. "
@@ -4431,6 +4617,11 @@ def live_sessions(tickets=None, recheck=False):
     the recurring jobs the session scheduled; the blockers and children of its ticket that
     are not yet in Verification or Done.
 
+    Each scan also kills leftover shells (`reap_shells`): a tool shell that runs no process
+    for `session_state.IDLE_SHELL_SECONDS`, and every tool shell of a `finished` session,
+    with their process trees. `killed_shells` lists them. A recorded background shell with
+    no tool shell left under the Claude is dropped, so it never makes the session working.
+
     Each entry also carries `signals` from `wait_signals`: every signal above with its
     value, and the rule that decided, so the owner can tell a wrong decision from a signal
     that never came.
@@ -4622,8 +4813,17 @@ def live_sessions(tickets=None, recheck=False):
         # The tickets this one waits for: its blockers and its children that are not yet
         # in Verification or Done.
         s["waits_for"] = [] if t is None else waits_for(t, tickets)
+        try:
+            reap_shells(s, procs)
+        except Exception:                               # noqa: BLE001 - the scan goes on
+            s.setdefault("killed_shells", [])
         read_turn(s, recheck)
         s["wait"], s["why"] = wait_state(s, t)
+        if s["wait"] == "finished" and s.get("claude"):
+            try:
+                reap_shells(s, procs, finished=True)
+            except Exception:                           # noqa: BLE001 - the scan goes on
+                pass
         s["running"] = s["wait"] is None
         s["signals"] = wait_signals(s, t)
     return found + hand
@@ -4663,6 +4863,48 @@ def _read_marks(s):
     s["reported_why"] = session_state.reported_why(sid, shell)
     s["jobs"] = session_state.all_jobs(sid, shell, session_transcript(sid))
     s["tasks"] = session_state.background_tasks(sid, shell)
+
+
+def _ancestors(procs):
+    """This process and every process above it."""
+    out, pid = set(), os.getpid()
+    while pid in procs and pid not in out and len(out) < 64:
+        out.add(pid)
+        pid = procs[pid][0]
+    return out
+
+
+def reap_shells(s, procs, finished=False, now=None):
+    """Kill by force, with its whole process tree, each tool shell of the session that runs
+    no process with the same tree for `session_state.IDLE_SHELL_SECONDS`, and with
+    `finished` every tool shell of the session. A shell that runs this process is never
+    killed. With no tool shell left under the session's Claude, the shells of its recorded
+    background tasks are dropped, so a shell that does not run never makes it `working`.
+    `s["killed_shells"]` collects the pids killed; returns those of this call."""
+    import time
+    import session_state
+    import winproc
+    now = time.time() if now is None else now
+    s.setdefault("killed_shells", [])
+    claude = s.get("claude")
+    if not claude or s.get("provider", "claude") != "claude" or claude not in procs:
+        return []
+    sid, shell = s["session"], s.get("mark_shell") or 0
+    cand = [p for p, (ppid, name) in procs.items()
+            if ppid == claude and name in session_state.SHELL_IMAGES]
+    roots = session_state.tool_shells(procs, claude, winproc.command_lines(cand) if cand
+                                      else {})
+    mine = _ancestors(procs)
+    free = [r for r in roots if r not in mine]
+    kill = free if finished else session_state.idle_shells(sid, shell, procs, free, now)
+    killed = [r for r in kill if winproc.taskkill(r, force=True, tree=True) in (0, 128)]
+    s["killed_shells"] += [r for r in killed if r not in s["killed_shells"]]
+    left = [r for r in roots if r not in killed]
+    tasks = session_state.background_tasks(sid, shell)
+    if not left and any(str(x.get("type") or "").lower() in session_state.SHELL_TASK_TYPES
+                        for x in tasks):
+        s["tasks"] = session_state.drop_shell_tasks(sid, shell)
+    return killed
 
 
 def _judge_needed(s):
@@ -4976,7 +5218,7 @@ def wait_state(s, t, now=None):
              tickets and it holds a recurring job          row 3
         2  the turn ended, and its last line asks          input
         3  it holds a recurring job, or its own subagent
-             or background shell runs                      blocker when its ticket waits for
+             runs, or its background shell runs a process  blocker when its ticket waits for
                                                            other tickets, else subagent
         4  the turn runs and wrote within `STALE_SECONDS`,
              or a tool call of the turn has no result yet  None
@@ -5164,6 +5406,9 @@ def wait_signals(s, t):
     else:
         out.append(["recap", "not needed"])
     out.append(["background work", _tasks_text(s["tasks"]) if s.get("tasks") else "none"])
+    if s.get("killed_shells"):
+        out.append(["shells killed", "pid %s: ran no process, or the session is finished"
+                    % ", ".join(str(p) for p in s["killed_shells"])])
     out.append(["jobs", ", ".join(s["jobs"]) if s.get("jobs") else "none"])
     if t is None:
         out.append(["ticket", "none"])
@@ -5390,6 +5635,38 @@ def relaunch_args(t, terminal=None, dry_run=False):
     return argparse.Namespace(id=t.id, mode="work", terminal=terminal, note="", model=None,
                               effort=None, no_fable=False, auto=False, dry_run=dry_run,
                               provider=ticket_provider(t) or None)
+
+
+def manager_brief_stale(t):
+    """Whether a brief section file changed after the brief of manager `t` was written, so
+    its running session reads instructions older than the engine's. False with no brief."""
+    try:
+        written = (P.BRIEFS / ("%s.md" % t.id)).stat().st_mtime_ns
+    except OSError:
+        return False
+    for p in P.brief_layers().values():
+        try:
+            if p.stat().st_mtime_ns > written:
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def rewrite_manager_brief(t):
+    """Write the brief of manager `t` again, as its launch writes it. Returns its path."""
+    f = P.BRIEFS / ("%s.md" % t.id)
+    P.BRIEFS.mkdir(parents=True, exist_ok=True)
+    _write(f, build_brief(t, "work", "", launch_provider(t, ticket_provider(t) or None)))
+    return f
+
+
+def manager_brief_text(path):
+    """What the board types into a manager session whose brief changed."""
+    return ("Manager brief: the engine changed your instructions. Read %s again, first and "
+            "in full, and follow it from now on in place of the text you read before. Do "
+            "what it orders at the start of a session. Write nothing about it. Then end "
+            "this turn and keep the session open for the owner." % Path(path).as_posix())
 
 
 def cmd_remote_control(args):

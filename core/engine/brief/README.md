@@ -21,15 +21,15 @@ files in this directory, in this order:
 | 10a | `projects` | the launch holds the `projects` permit: carry the change into every project, launch each follow-up; a ticket in the `ai` lane is no follow-up |
 | 11 | `before.<mode>`, else `before` | always |
 | 12 | `finish.<mode>` | always |
-| 13 | `vcs.<kind>.<mode>`, and for git `vcs.<mode>` | the project has a `vcs` other than `none`. For `vcs: git` the core supplies `vcs.work` (commit the work before the move) and `vcs.verify` (push it when it holds), and the `git` pack supplies `vcs.plan`, `vcs.review` and `vcs.manager`. For `vcs: svn` and `vcs: perforce` the `svn` and the `perforce` pack supply `vcs.svn.<mode>` and `vcs.perforce.<mode>`. It continues the list of `finish.<mode>` |
+| 13 | `vcs.<kind>.<mode>` | the project's `vcs` is not `none`. The pack of the kind supplies it: `perforce`, `diversion`, `svn`, `mercurial` or `plastic`. For git, `vcs.git.<mode>` falls back to `vcs.<mode>`: the core supplies `vcs.work` (commit the work before the move) and `vcs.verify` (push it when it holds), and the `git` pack supplies `vcs.plan`, `vcs.review` and `vcs.manager`. It continues the list of `finish.<mode>` |
 | 14 | `finish` | always |
 | 15 | `close.<mode>` | always: `plan`, `work`, `review` and `verify` each have one |
 | 16 | `note` | the launch carries a note |
 | 17 | `ticket` | always |
 
 A `manager` ticket never finishes and never moves its own ticket, so its brief is only
-`header`, `messages`, `provider`, `where`, `repeat.manager`, the `permits.*` sections and `dirs` (never `projects`: `repeat.manager` carries the projects), `before`, `vcs.manager` or `vcs.<kind>.manager` (on the
-same condition as `vcs.<mode>`), `note` and `ticket`.
+`header`, `messages`, `provider`, `where`, `repeat.manager`, the `permits.*` sections and `dirs` (never `projects`: `repeat.manager` carries the projects), `before`, `vcs.<kind>.manager` (on the
+same condition as `vcs.<kind>.<mode>`), `note` and `ticket`.
 It leaves out `boundary`, `blocked`, `repeat`, `job.*`, `readme.*`, `finish.*` and `close.*`.
 
 ## Where a section comes from
