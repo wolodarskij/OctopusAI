@@ -18,5 +18,5 @@
   found. It holds no measurement, no caveat and no other ticket; those go under
   `## Verified`. `move` refuses an outcome that breaks this, and a move to `{lane:closed}`
   of a ticket whose outcome, `## Result` or `## Verified` says that something is still
-  wrong. It is never a line of your last message: that message still ends with
+  wrong. It is never a line of your last message: when the measurement is made, that message ends with
   `WORK IS FINISHED`.

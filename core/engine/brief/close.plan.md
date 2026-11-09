@@ -5,7 +5,8 @@ question for the owner, close this terminal. Always: a finished planner never st
 
 1. When the owner ordered the work too, `{cli} work {id}` first.
 2. `{cli} close {id} --mode plan --self`
-3. End your last message with `WORK IS FINISHED`. This terminal closes when the turn ends.
+3. The plan is finished: end your last message with `WORK IS FINISHED`. This terminal
+   closes when the turn ends.
 
 A plan that leaves a decision, a name or a value open (a line that asks, `TBD`, an open
 question, a difficulty still `unknown`) is not finished: ask the owner, and never write

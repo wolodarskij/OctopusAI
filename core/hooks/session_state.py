@@ -1033,8 +1033,9 @@ Answer with ONE JSON object and nothing else:
 "quote": "<see below>"}
 
 input = the session ITSELF asks the owner a question in this message, or says that IT \
-cannot go on until the owner answers, decides, approves or gives an order. Nothing else is \
-input.
+cannot go on until the owner answers, decides, approves, gives an order, gives what it \
+cannot find (an asset, a file, a value), grants a permit or does an outside action. Nothing \
+else is input.
 Never input, whatever words it uses:
 - a report: a summary, a status table, a list of tickets, sessions or results;
 - questions, plan approvals or decisions that OTHER tickets or OTHER sessions wait for, which \
@@ -1042,8 +1043,10 @@ this message only lists or relays, under headings such as "Waiting for you" or "
 you": the owner answers them in those sessions, not here. A line of a list that names \
 another ticket and its question ("T0035 ... - asks: ...") is such a relayed question;
 - an offer the session does not wait for, such as "I can also do X".
-finished = it did the work of this turn, asks the owner nothing itself, and runs no \
-recurring task.
+finished = the work of its ticket is done, it asks the owner nothing itself, and it runs \
+no recurring task. A session that says its work stopped (it cannot find what the work \
+needs, it lacks a permit, it waits for an outside action, another ticket or the owner) is \
+never finished, whatever else it did in this turn.
 working = it still waits for work that is not the owner's: its subagent, a build, a \
 background job, a session it launched, another ticket or a child ticket to land, a scheduled \
 check. A session whose message or recap says it runs a recurring or scheduled task (a cron \

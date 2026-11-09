@@ -252,9 +252,14 @@ ticket in Verification, a plan `ready to implement` that leaves nothing open, a 
 verdict given, a `verify` measurement made. A session that cannot do its work (a missing
 asset or file, an ungranted permit, an outside action, another ticket, a decision of the
 owner) never writes it, and no plan, note or brief step makes it do so. It writes on its
-ticket what stops it, reports what it waits for (`report <id> event`, `report <id> input`
-and the question dialog, or the steps for a blocker), ends the turn without the line, and
-stays open.
+ticket what stops it, reports what it waits for, ends the turn without the line, and stays
+open. A session that cannot find what its work needs (an asset, a file, a value) asks the
+owner with `report <id> input` and the question dialog, and waits for the answer; a note
+that forbids questions or the dialog only moves the question to the last line of its
+message. An ungranted permit or an outside action is `report <id> event`; another ticket is
+the steps for a blocker. **A session whose work is finished never leaves the line out:** in
+every launch mode, also in the turn after the owner's answer, after a message of the owner,
+after a resume, and after the event or the background job it waited for.
 
 **The engine decides the state in this order, and the first step that matches wins:**
 

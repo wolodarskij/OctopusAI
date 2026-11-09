@@ -94,16 +94,20 @@ _AGENT = re.compile(r"\s*([A-Za-z]*\d{3,}|[0-9a-fA-F]{8})\b")
 # What each launch brief asks the last message for.
 LAUNCH_ASKS = {
     "work": "the files this ticket changed; a problem only if one stopped the ticket, in one "
-            "sentence; then a question for the owner as the last line, or the last line "
-            "WORK IS FINISHED. The outcome of the ticket stands on the ticket, not in the "
-            "message.",
+            "sentence; then a question for the owner as the last line, or, only when the work "
+            "is finished, the last line WORK IS FINISHED. Stopped work says what it waits for "
+            "and has no finished line. The outcome of the ticket stands on the ticket, not in "
+            "the message.",
     "plan": "that the plan is on the ticket; a decision only the owner can make, as a "
-            "question on the last line, or the last line WORK IS FINISHED.",
+            "question on the last line, or, only when the plan is finished, the last line "
+            "WORK IS FINISHED. A stopped plan says what it waits for and has no finished line.",
     "review": "the verdict on the ticket and where it left it; a question for the owner as "
-              "the last line, or the last line WORK IS FINISHED.",
+              "the last line, or, only when the verdict is given, the last line WORK IS "
+              "FINISHED. A stopped review says what it waits for and has no finished line.",
     "verify": "whether the work holds and where the ticket is now; a problem that stopped "
               "the verification, in one sentence; a question for the owner as the last line, "
-              "or the last line WORK IS FINISHED.",
+              "or, only when the measurement is made, the last line WORK IS FINISHED. A "
+              "stopped verification says what it waits for and has no finished line.",
 }
 
 PROMPT = """You check one message that an AI agent wrote to its owner, against one rule.

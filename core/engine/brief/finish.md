@@ -19,16 +19,27 @@
 - **`WORK IS FINISHED` only when the work is finished.** The engine trusts the line and
   checks nothing else: it closes this terminal for good. Never write it while any part of the
   ticket is undone, while you wait for an event (an editor restart, a build, a background
-  job), while a question to the owner is open, or in an answer to a message the owner wrote
-  to you in this session. Saying it early is the worst fault a session can make: the owner
-  loses the agent in the middle of the work.
+  job), or while a question to the owner is open. Saying it early is the worst fault a
+  session can make: the owner loses the agent in the middle of the work.
+- **Never leave out `WORK IS FINISHED` when the work is finished.** This holds in every
+  launch mode, also in a turn after the owner's answer, after a message of the owner, after
+  a resume of this session, and after the event or the background job you waited for. The
+  last message of the turn that finishes the work ends with the line.
 - **A session that cannot do its work never writes `WORK IS FINISHED`.** A missing asset or
   file, an ungranted permit, an outside action, another ticket or a decision of the owner
   stops the work, and stopped work is not finished. Write on the ticket what stops it. Then
-  report what you wait for: `report ... event` for a thing outside the project or an action
-  of the owner, `report ... input` and the question dialog for an answer of the owner, the
-  steps under **When another ticket blocks this one** for a ticket. End the turn without the
-  line, and keep this terminal open.
+  report what you wait for, end the turn without the line, and keep this terminal open:
+  - **You cannot find what the work needs** (an asset, a file, a value, a name): ask the
+    owner where it is or for it, with `report ... input` and the question dialog, and wait
+    for the answer.
+  - A decision of the owner: `report ... input` and the question dialog.
+  - An ungranted permit or an action outside the project, such as an editor restart:
+    `report ... event`.
+  - Another ticket: the steps under **When another ticket blocks this one**.
+- **A launch note never makes stopped work finished.** A note that tells you to ask the
+  owner nothing, or not to use the question dialog, does not permit the line on stopped
+  work. Write the question on the ticket, run `report ... input` with it, end your last
+  message with the question as its last line, and keep this terminal open.
 - **Work is never finished while a question is open.** When you cannot do the work without
   the owner (a value only the owner can give, a decision, a word), that is a question, not a
   finish: report `input`, ask it with the `AskUserQuestion` tool, and keep this terminal open.

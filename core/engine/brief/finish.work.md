@@ -13,7 +13,7 @@
   measurement, no caveat and no other ticket; those go into the ticket's body. `move`
   refuses an outcome that breaks this, and a ticket whose outcome or `## Result` says that
   something is still wrong. `octopus sessions` shows the outcome to the owner,
-  so it is never a line of your last message: that message still ends with
+  so it is never a line of your last message: when the work is finished, that message ends with
   `WORK IS FINISHED`.
 - **You may not close this ticket.** Only a verification session moves a
   ticket to `{lane:closed}`, and `move ... {lane:closed}` refuses you.
