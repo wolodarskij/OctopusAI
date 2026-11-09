@@ -33,6 +33,7 @@ origin. `artifactAdd` takes a path too, under the same guard.
 from __future__ import annotations
 
 import argparse
+import base64
 import copy
 import difflib
 import json
@@ -1634,6 +1635,15 @@ def act_new(body):
     if bad:
         raise ValueError("not a permit: %s" % ", ".join(bad))
     group = (body.get("group") or "").strip()
+    attached = []
+    for item in body.get("attachments") or []:
+        name = (item.get("name") or "").strip()
+        if not name:
+            raise ValueError("an attached file needs a name")
+        try:
+            attached.append((name, base64.b64decode(item.get("data") or "", validate=True)))
+        except ValueError:
+            raise ValueError("%s is not valid base64" % name) from None
 
     tid = "T%04d" % T.next_id()
     args = argparse.Namespace(
@@ -1644,7 +1654,8 @@ def act_new(body):
         description=(body.get("description") or "").strip(),
         evidence=(body.get("evidence") or "").strip(),
         state=T.lane("start"), epic="", parent=(body.get("parent") or "").strip() or None,
-        group=group if P.groups_store == "files" else None, requested=True, by_owner=True)
+        group=group if P.groups_store == "files" else None, requested=True, by_owner=True,
+        attach=None, attach_data=attached)
     repeat = (body.get("repeat") or "").strip()
     if repeat and repeat not in T.REPEAT_ROLES:
         raise ValueError("%r is not a role" % repeat)
@@ -1657,7 +1668,8 @@ def act_new(body):
         raise ValueError("the ticket was written and cannot be read back")
     if group and P.groups_store == "map":
         T.group_assign([tid], group)
-    return {"id": tid, "path": t.path.relative_to(P.ROOT).as_posix(), "group": group}
+    return {"id": tid, "path": t.path.relative_to(P.ROOT).as_posix(), "group": group,
+            "attached": len(attached)}
 
 
 def act_ticket(body):

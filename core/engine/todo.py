@@ -1652,6 +1652,8 @@ def cmd_check(args):
             continue
         if d.name == "groups" and P.groups_store == "files":
             continue
+        if d.name == ATTACH_DIR:
+            continue
         if any(d.rglob("*.md")):
             problems.append("%s/%s holds tickets and is not a lane" % (P.todo_dir, d.name))
     seen = {}
@@ -2386,6 +2388,19 @@ def cmd_new(args):
         print("Error: --not-duplicate needs --why \"<why the new ticket differs from each of "
               "them>\"", file=sys.stderr)
         return 2
+    items = []
+    for path in getattr(args, "attach", None) or []:
+        if not Path(path).is_file():
+            print("Error: --attach %s is not a file" % path, file=sys.stderr)
+            return 2
+        items.append((Path(path).name, Path(path)))
+    items.extend(getattr(args, "attach_data", None) or [])
+    total = sum(len(x) if isinstance(x, bytes) else x.stat().st_size for _n, x in items)
+    if total > ATTACH_MAX_BYTES:
+        print("Error: the attached files hold %d MB; a ticket takes at most %d MB"
+              % (math.ceil(total / (1024 * 1024)), ATTACH_MAX_BYTES // (1024 * 1024)),
+              file=sys.stderr)
+        return 2
     if _in_ai_session():
         tickets = load_all()
         text = args.description or ""
@@ -2465,6 +2480,9 @@ def cmd_new(args):
                                 args.description or PLACEHOLDER)
     if args.evidence:
         body += "\n## Evidence\n\n%s\n" % args.evidence
+    if items:
+        rels = store_attachments(tid, items)
+        body += "\n## %s\n\n%s\n" % (ATTACH_SECTION, "\n".join("- `%s`" % r for r in rels))
     if differs:
         body += "\n## %s\n\n%s\n" % (NOT_DUP_SECTION, _not_dup_line(sorted(set(differs)),
                                                                     why_differs))
@@ -2496,6 +2514,11 @@ NOT_DUP_SECTION = "Not a duplicate"
 # never does.
 # The first section of a ticket that `new` filed with no description.
 PLACEHOLDER = "TODO: describe it."
+# The files attached to a new ticket: `<todoDir>/attachments/<id>/`, listed under
+# `## Attachments` by their paths from the project root.
+ATTACH_DIR = "attachments"
+ATTACH_SECTION = "Attachments"
+ATTACH_MAX_BYTES = 100 * 1024 * 1024
 DUP_SCORE = 0.3
 DUP_CANDIDATES = 5
 DUP_PAIRS = 40
@@ -2532,6 +2555,42 @@ DUP_TASK_PAIRS = ("Decide, for each PAIR of open tickets below, whether its two 
                   "same defect or the same request.")
 DUP_ANSWER_PAIRS = ('Answer with one JSON object and nothing else: {"pairs": [{"a": "<id>", '
                     '"b": "<id>", "same": true or false}]}, one entry for each pair.')
+
+
+def attach_name(name: str, taken: set[str]) -> str:
+    """A safe file name for an attached file: its base name with every character that a
+    Windows file name refuses replaced by `_`, made unique against `taken` (lower case)."""
+    base = re.split(r"[/\\]", name)[-1]
+    base = "".join("_" if c in '<>:"/\\|?*' or ord(c) < 32 else c for c in base)
+    base = base.strip(". ") or "file"
+    stem, dot, suffix = base.rpartition(".")
+    if not dot or not stem:
+        stem, suffix = base, ""
+    else:
+        suffix = "." + suffix
+    out, n = base, 1
+    while out.lower() in taken:
+        n += 1
+        out = "%s-%d%s" % (stem, n, suffix)
+    taken.add(out.lower())
+    return out
+
+
+def store_attachments(tid: str, items: list[tuple[str, bytes | Path]]) -> list[str]:
+    """Write each `(name, bytes or source path)` into `<todoDir>/attachments/<tid>/`, and
+    return the paths from the project root, as posix strings, in the given order."""
+    folder = P.TODO / ATTACH_DIR / tid
+    folder.mkdir(parents=True, exist_ok=True)
+    taken = {p.name.lower() for p in folder.iterdir()}
+    rels = []
+    for name, data in items:
+        dest = folder / attach_name(name, taken)
+        if isinstance(data, bytes):
+            dest.write_bytes(data)
+        else:
+            shutil.copyfile(data, dest)
+        rels.append(dest.relative_to(P.ROOT).as_posix())
+    return rels
 
 
 def first_section(body):
@@ -6946,6 +7005,9 @@ def _main(argv):
                    "What it should do for a Feature: title, or What the documentation "
                    "should say for a Documentation: title")
     p.add_argument("--evidence")
+    p.add_argument("--attach", nargs="+", action="extend", metavar="FILE",
+                   help="files to attach; new copies each into %s/%s/<id>/ and lists it under "
+                        "## Attachments" % (P.todo_dir, ATTACH_DIR))
     p.add_argument("--state", choices=list(P.STATES),
                    help="absent: %s for a requested ticket, %s for one an AI files on its own"
                         % (lane("start"), lane("ai")))

@@ -511,6 +511,14 @@ button.danger:hover{background:#3a1c1f!important;color:#ffb3b3!important}
 #nTabs button{max-width:190px;overflow:hidden;text-overflow:ellipsis}
 #nTabs button .dx{margin-left:6px;color:var(--faint)}
 #nTabs button .dx:hover{color:#dd7b7b}
+/* the files attached to a new ticket */
+#nFilesRow{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:8px}
+#nFilesRow[hidden]{display:none}
+#ndlg label#nAttach{flex-direction:row;align-items:center;cursor:pointer}
+#nFileList{display:flex;flex-wrap:wrap;gap:6px}
+#nFileList > span{font-size:11px;color:var(--dim)}
+#nFileList .dx{margin-left:4px;color:var(--faint);cursor:pointer}
+#nFileList .dx:hover{color:#dd7b7b}
 /* the model and the effort of a launch */
 #dlg .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px 10px;margin-top:10px}
 #dlg .grid2.off,#dlg .grid2 label.off{display:none}
@@ -1335,6 +1343,7 @@ a.icon{display:inline-flex;align-items:center;text-decoration:none}
     <label><span>Permits</span><input id="nPermits" placeholder=""></label>
     <label class="wide"><span>Tags</span><input id="nTags" placeholder="parser ui"></label>
   </div>
+  <div id="nFilesRow"><label class="icon" id="nAttach">Attach files<input type="file" id="nFiles" multiple hidden></label><span id="nFileList"></span></div>
   <div class="row">
     <span id="nSay" class="grow" style="font-size:11px;color:var(--faint);align-self:center"></span>
     <button class="icon" id="nX">Cancel</button>
@@ -2702,6 +2711,32 @@ $("#pdlgC").addEventListener("click", () => copy($("#pdlgB").textContent));
    the Results stay, and Save rewrites it. Every further tab is a new ticket split off it,
    filed by the same Save. */
 let FORM = {mode: "new", drafts: [], cur: 0};
+/* The files attached to the tab shown; each tab of a new ticket keeps its own list. */
+let FILES = [];
+const fileSize = n => n >= 1024 * 1024 ? (n / 1024 / 1024).toFixed(1) + " MB"
+  : Math.max(1, Math.round(n / 1024)) + " KB";
+function drawFiles() {
+  const box = $("#nFileList");
+  box.innerHTML = "";
+  FILES.forEach((f, i) => {
+    const item = el("span", null, `${f.name} · ${fileSize(f.size)}`);
+    const x = el("span", "dx", "✕");
+    x.title = "remove this file";
+    x.addEventListener("click", e => { e.preventDefault(); FILES.splice(i, 1); drawFiles(); });
+    item.append(x);
+    box.append(item);
+  });
+}
+/* The ticket fields with each attached file read as base64, for `/api/new`. */
+async function withFiles(b) {
+  const read = f => new Promise((ok, fail) => {
+    const r = new FileReader();
+    r.onload = () => ok({name: f.name, data: String(r.result).split(",").slice(1).join(",")});
+    r.onerror = () => fail(new Error(`${f.name} cannot be read`));
+    r.readAsDataURL(f);
+  });
+  return {...b, attachments: await Promise.all((b.files || []).map(read)), files: undefined};
+}
 const STALE_TEXT = "the board server runs older code than this page · restart the board";
 const STALE_RESTART = "the engine code changed · the board server starts again with it";
 let STALE = STALE_TEXT;
@@ -2746,6 +2781,8 @@ function formFields(f) {
   $("#nPermits").value = f.permits || "";
   $("#nTags").value = f.tags || "";
   $("#nText").value = f.description || "";
+  FILES = (f.files || []).slice();
+  drawFiles();
 }
 function formMode(mode, head) {
   const offered = (DATA.providers || ["claude"]).filter(p => DATA.providerChoices[p].headless);
@@ -2807,6 +2844,7 @@ function taskBody() {
     permits: $("#nPermits").value.trim(),
     tags: $("#nTags").value.trim(),
     description: $("#nText").value.trim(),
+    files: FILES.slice(),
   };
 }
 /* A draft from the server as form fields. Group, repeat and permits come from the form. */
@@ -2824,6 +2862,7 @@ function drawTabs() {
   box.innerHTML = "";
   box.classList.toggle("on", n > 1);
   $("#nAsk").hidden = !isEdited(FORM.cur);
+  $("#nFilesRow").hidden = isEdited(FORM.cur);
   $("#nOK").textContent = FORM.mode === "edit" ? (n > 1 ? `Save + create ${n - 1}` : "Save")
     : n > 1 ? `Create ${n} tickets` : "Create ticket";
   if (n < 2) return;
@@ -2889,6 +2928,7 @@ async function draftTask() {
     const rows = (r.drafts || []).map((d, i) => rewrite && i === 0
       ? {...draftFields(d, keep), description: d.body} : draftFields(d, keep));
     if (!rows.length) throw new Error("the AI returned no ticket");
+    rows.forEach((x, i) => { x.files = i === 0 ? keep.files : []; });
     const all = FORM.drafts.length > 1 ? FORM.drafts : [keep];
     all.splice(FORM.cur, 1, ...rows);
     FORM.drafts = all.length > 1 ? all : [];
@@ -2944,7 +2984,7 @@ async function submitTask() {
         last = saved = await api("/api/edit", editBody(b));
         FORM.mode = "new";                 // the ticket is saved; what remains is new tickets
       } else {
-        last = await api("/api/new", b);
+        last = await api("/api/new", await withFiles(b));
         made.push(last.id);
       }
       if (rows.length > 1) FORM.drafts.shift();
@@ -2968,7 +3008,8 @@ async function submitTask() {
   render(); scrollToSelected();
   const filed = made.length > 1 ? `${made.join(", ")} filed in ${labelOf("start")}`
     : made.length ? `${last.id} filed in ${labelOf("start")}`
-      + (last.group ? " · " + groupShown(last.group) : "") : "";
+      + (last.group ? " · " + groupShown(last.group) : "")
+      + (last.attached > 0 ? ` · ${last.attached} file(s) attached` : "") : "";
   toast(edit ? `${saved.id} saved` + (filed ? " · " + filed : "") : filed);
 }
 
@@ -5160,6 +5201,11 @@ $("#nAsk").addEventListener("keydown", e => {
   if (e.key === "Enter" && !e.ctrlKey && !e.metaKey) { e.preventDefault(); draftTask(); }
 });
 $("#nOK").addEventListener("click", submitTask);
+$("#nFiles").addEventListener("change", e => {
+  FILES.push(...e.target.files);
+  e.target.value = "";
+  drawFiles();
+});
 $("#ndlg").addEventListener("keydown", e => {
   if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) submitTask();
   if (e.key === "Escape") closeNote();
