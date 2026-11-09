@@ -5732,12 +5732,17 @@ def rewrite_manager_brief(t):
     return f
 
 
+MANAGER_BRIEF_ANSWER = "The new manager instructions are read and in force."
+
+
 def manager_brief_text(path):
-    """What the board types into a manager session whose brief changed."""
+    """What the board types into a manager session whose brief changed. It names the one
+    line the manager answers with, so the answer is never empty."""
     return ("Manager brief: the engine changed your instructions. Read %s again, first and "
             "in full, and follow it from now on in place of the text you read before. Do "
-            "what it orders at the start of a session. Write nothing about it. Then end "
-            "this turn and keep the session open for the owner." % Path(path).as_posix())
+            "what it orders at the start of a session. Then answer with this one line: "
+            "`%s` End this turn and keep the session open for the owner."
+            % (Path(path).as_posix(), MANAGER_BRIEF_ANSWER))
 
 
 def cmd_remote_control(args):

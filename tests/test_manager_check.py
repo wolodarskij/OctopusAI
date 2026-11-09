@@ -365,6 +365,8 @@ class Wake(FixtureCase):
         text = self.send.call_args[0][1]
         self.assertIn(brief.as_posix(), text)
         self.assertIn("Manager brief", text)
+        self.assertIn(T.MANAGER_BRIEF_ANSWER, text)
+        self.assertNotIn("write nothing", text.lower())
         self.assertFalse(T.manager_brief_stale(t))
         self.send.reset_mock()
         todo_server._wake_project(self.root, 1e9 + 30)
