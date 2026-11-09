@@ -4990,7 +4990,9 @@ def read_turn(s, recheck=False, now=None):
     `STALE_SECONDS` is stale and goes to the judge, unless a tool call of it has no result
     yet (`calling`, `calling_since`): that call runs. An ended turn that no rule reads goes
     to the judge too. A verdict `unsure` on an ended turn types `/recap` into the session
-    once, and the judge reads the recap.
+    once, and the judge reads the recap. A verdict `blocked` on an ended turn moves the
+    ticket to the blocked lane once per turn (`session_state.auto_block`), when the judge
+    itself could not.
 
     `recheck` is the owner's re-evaluation: a judge that died without a verdict, and a recap
     that never came, are tried again (`session_state.rejudge`)."""
@@ -5053,6 +5055,14 @@ def read_turn(s, recheck=False, now=None):
     s["stale"] = quiet and not s["calling"]
     s["judging"] = s["rejudged"] = s["judge_dead"] = False
     s["recap"] = ""
+    # The judge found that an outside cause stops the work of the ended turn: the ticket
+    # goes to the blocked lane, once per turn, also when the judge could not move it.
+    if live and s["ended"] and s.get("judge") == "blocked":
+        try:
+            if session_state.auto_block(sid, shell):
+                _read_marks(s)
+        except Exception:                               # noqa: BLE001 - the scan goes on
+            pass
     if not (live and (s["ended"] or s["stale"]) and _judge_needed(s)):
         return s
     try:
@@ -5223,10 +5233,13 @@ def _working(s, t, why):
 
 
 def _verdict(s, t, judge, why, source):
-    """The state a judge's verdict `input`, `finished` or `working` gives, `source` naming
-    what it read."""
+    """The state a judge's verdict `input`, `blocked`, `finished` or `working` gives,
+    `source` naming what it read."""
     if judge == "input":
         return "input", "%s: %s" % (source, why or "waits for the owner")
+    if judge == "blocked" and not (t is not None and t.repeat == MANAGER):
+        return "event", "%s: an outside cause stops its work: %s" % (
+            source, why or "not named")
     if judge == "working":
         return _working(s, t, "%s: still works: %s" % (source, why or "its own work"))
     if t is not None and t.repeat == MANAGER:
@@ -5284,10 +5297,12 @@ def wait_state(s, t, now=None):
         4  the turn runs and wrote within `STALE_SECONDS`,
              or a tool call of the turn has no result yet  None
         5  the judge's verdict on the last message of the
-             ended turn, or of the stale one               input, finished, subagent/blocker
+             ended turn, or of the stale one               input, event (blocked), finished,
+                                                           subagent/blocker
            no verdict yet                                  idle (a stale turn: None)
         6  the judge is unsure: its verdict on the recap
-             the board asked for                           input, finished, subagent/blocker
+             the board asked for                           input, event (blocked), finished,
+                                                           subagent/blocker
            no recap, or unsure again                       idle
 
     Where the ticket stands decides nothing: the judge reads it with the last message, and
@@ -6650,7 +6665,6 @@ def _report_blocked(t, sid, mode, why, tried):
     """Move `t` to the blocked lane as `blocked by outside cause`, write the cause and every
     way the session tried under `## Blocked`, and report the session as `event`, so its
     terminal stays open while it waits for the cause to go."""
-    import datetime
     import session_state
     why, tried = " ".join((why or "").split()), " ".join((tried or "").split())
     if not why:
@@ -6667,6 +6681,18 @@ def _report_blocked(t, sid, mode, why, tried):
     if problem:
         print("Error: %s." % problem, file=sys.stderr)
         return 2
+    _to_blocked(t, sid, session_state.owning_shell(), why, "Tried: %s" % tried)
+    print("%s  %s -> %s / %s; %s/%s reported event: %s"
+          % (t.id, P.STATE_LABEL[t.state], P.STATE_LABEL[state], status, t.id, mode, why))
+    return 0
+
+
+def _to_blocked(t, sid, shell, why, how):
+    """Move `t` to the blocked lane as `blocked by outside cause`, write the cause `why` and
+    `how` under `## Blocked`, and report the session `sid` on terminal `shell` as `event`."""
+    import datetime
+    import session_state
+    state, status = lane("blocked"), S("blocked by outside cause")
     path = t.path
     if t.state != state:
         path = _dest_dir(state, t.epic) / t.path.name
@@ -6677,14 +6703,32 @@ def _report_blocked(t, sid, mode, why, tried):
     meta, body = parse(_read(path))
     stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     body = add_section_line(body, BLOCKED_SECTION,
-                            "- %s: %s Tried: %s" % (stamp, why.rstrip(".") + ".", tried))
+                            "- %s: %s %s" % (stamp, why.rstrip(".") + ".", how))
     _write(path, render(meta, body))
-    session_state.report(sid, session_state.owning_shell(), "event",
-                         "%s: %s" % (status, why))
+    session_state.report(sid, shell, "event", "%s: %s" % (status, why))
     write_index(quiet=True)
-    print("%s  %s -> %s / %s; %s/%s reported event: %s"
-          % (t.id, P.STATE_LABEL[t.state], P.STATE_LABEL[state], status, t.id, mode, why))
-    return 0
+
+
+# What `## Blocked` says of a ticket that the engine moved for its session.
+AUTO_BLOCKED = ("Found by the judge: the session ended its turn stopped by this cause, and "
+                "did not run `report %s blocked`.")
+
+
+def auto_block(tid, mode, sid, shell, why):
+    """Move the ticket `tid` of a session whose judge found that an outside cause stops its
+    work, `why`, to the blocked lane as `blocked by outside cause`, as `report blocked`
+    would: the cause goes under `## Blocked`, and the session is reported as `event`.
+    A manager, a ticket in the blocked or the closed lane, and a ticket in the verify lane
+    whose `verify` session it is not stay where they are. Returns whether it moved."""
+    t = find(load_all(), tid)
+    if t is None or t.repeat == MANAGER or mode not in MODES:
+        return False
+    if t.state in (lane("blocked"), lane("closed")) or (
+            t.state == lane("verify") and mode != "verify"):
+        return False
+    why = " ".join((why or "").split()) or "an outside cause that the session did not name"
+    _to_blocked(t, sid, shell, why, AUTO_BLOCKED % t.id)
+    return True
 
 
 def _blocked_cycles(tickets):

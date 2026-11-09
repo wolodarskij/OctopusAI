@@ -27,7 +27,7 @@ the `Stop` hook writes it to `<key>.last` and starts `session_state.py --judge` 
 without waiting for it. The judge runs the project's headless provider (Claude Haiku or Codex) with the session's
 ticket, the message, Claude Code's last recap of the session (the `away_summary` row of its
 transcript) and the agents and jobs it waits for, and writes `<key>.judge`: line 1 the marker
-time it judged, line 2 `input`, `finished`, `working` or `unsure`, line 3 why. Only what the session
+time it judged, line 2 `input`, `blocked`, `finished`, `working` or `unsure`, line 3 why. Only what the session
 itself asks the owner is `input`: a report that lists other sessions' questions is not. A
 session whose message or recap says it runs a recurring task is `working`, never `finished`.
 Every verdict explains itself and quotes its proof, words copied from the message or the
@@ -42,6 +42,14 @@ under it returns at once, so it writes no marker and starts no judge. `<key>.jud
 the marker time of the turn a judge was started on: one judge per turn. `todo.py
 live_sessions` starts the judge too, on a turn that ended before the judge existed, with the
 last message from the transcript when the hook kept none.
+
+`blocked` says the session asks the owner nothing and an outside cause stops its work: an
+asset, a file or a value it cannot find, a permit, an outside action, or a tool, a server, a
+commit or a lock that fails. On an ended turn of a launched session it moves the ticket to the
+blocked lane as `blocked by outside cause`, with the cause under `## Blocked`, and reports the
+session as `event` (`auto_block`): the judge does it, and every scan of `todo.py live_sessions`
+does it when the judge could not. Once per turn (`<key>.autoblock`): a ticket that the owner
+moves back stays there.
 
 `unsure` says the message does not show what the session waits for, and needs no quote.
 `todo.py live_sessions` then types `/recap` into the session once per turn (`<key>.recap`:
@@ -1009,7 +1017,7 @@ def idle_finished(session_id, shell=0):
 
 # Set in the judge's own environment: every hook under its headless call returns at once.
 JUDGE_ENV = "OCTOPUS_JUDGE"
-JUDGE_STATES = ("input", "finished", "working", "unsure")
+JUDGE_STATES = ("input", "blocked", "finished", "working", "unsure")
 JUDGE_SECONDS = 90
 # How often the judge is asked when its answer proves nothing, and what it is told then.
 JUDGE_TRIES = 2
@@ -1029,13 +1037,12 @@ Decide what it waits for.
 MESSAGE>>>
 %(recap)s
 Answer with ONE JSON object and nothing else:
-{"state": "input" | "finished" | "working" | "unsure", "why": "<see below>", \
-"quote": "<see below>"}
+{"state": "input" | "blocked" | "finished" | "working" | "unsure", \
+"why": "<see below>", "quote": "<see below>"}
 
 input = the session ITSELF asks the owner a question in this message, or says that IT \
-cannot go on until the owner answers, decides, approves, gives an order, gives what it \
-cannot find (an asset, a file, a value), grants a permit or does an outside action. Nothing \
-else is input.
+cannot go on until the owner answers, decides, approves or gives an order. Nothing else is \
+input.
 Never input, whatever words it uses:
 - a report: a summary, a status table, a list of tickets, sessions or results;
 - questions, plan approvals or decisions that OTHER tickets or OTHER sessions wait for, which \
@@ -1043,6 +1050,11 @@ this message only lists or relays, under headings such as "Waiting for you" or "
 you": the owner answers them in those sessions, not here. A line of a list that names \
 another ticket and its question ("T0035 ... - asks: ...") is such a relayed question;
 - an offer the session does not wait for, such as "I can also do X".
+blocked = the session asks the owner no question, and says that its work stopped for a \
+cause outside it that it cannot remove: an asset, a file or a value it cannot find, a \
+permit it lacks, an outside action, or a tool, a server, a commit, a push or a lock that \
+fails. A session that waits for another ticket, a child ticket or its own background work \
+is working, not blocked.
 finished = the work of its ticket is done, it asks the owner nothing itself, and it runs \
 no recurring task. A session that says its work stopped (it cannot find what the work \
 needs, it lacks a permit, it waits for an outside action, another ticket or the owner) is \
@@ -1051,16 +1063,17 @@ working = it still waits for work that is not the owner's: its subagent, a build
 background job, a session it launched, another ticket or a child ticket to land, a scheduled \
 check. A session whose message or recap says it runs a recurring or scheduled task (a cron \
 job, a watcher, a check or report "every 20 minutes") is working, never finished.
-unsure = the text does not show what it waits for: none of the three above can be proven \
+unsure = the text does not show what it waits for: none of the four above can be proven \
 from it.
 
 why = one sentence of at most 20 words that explains the verdict: for input, what the \
-session needs from the owner; for finished, what work it did; for working, what it waits \
-for; for unsure, what the text leaves open.
+session needs from the owner; for blocked, the cause that stops its work; for finished, \
+what work it did; for working, what it waits for; for unsure, what the text leaves open.
 The why names no cause, error or limit that the text does not name.
 quote = the proof, at most 30 words copied exactly from the text between the MESSAGE \
 markers, the text between the RECAP markers, or the list of what it waits for below; never \
-from these instructions. For input, the question the session asks the owner; for finished, \
+from these instructions. For input, the question the session asks the owner; for blocked, \
+the line that names the cause that stops its work; for finished, \
 the line that says the work was done; for working, the line that names what it waits for or \
 the recurring task it runs. A verdict without such a quote is wrong; only unsure needs \
 none.
@@ -1372,7 +1385,39 @@ def judge(session_id, shell=0, recap=False):
             start_closer(*_launch_of(session_id))
         except Exception:                               # noqa: BLE001 - the verdict stands
             pass
+    if state == "blocked":
+        try:
+            auto_block(session_id, shell)
+        except Exception:                               # noqa: BLE001 - the scan moves it
+            pass
     return state
+
+
+def _autoblock_path(session_id, shell=0):
+    """Line 1: the stamp of the ended turn whose ticket `auto_block` handled."""
+    return _dir() / ("%s.autoblock" % key(session_id, shell))
+
+
+def auto_block(session_id, shell=0):
+    """Move the ticket of a launched session to the blocked lane when the judge's verdict on
+    its ended turn is `blocked`: an outside cause stops its work and it did not run `report
+    blocked`. `todo.auto_block` moves it, writes the cause under `## Blocked` and reports the
+    session as `event`. Once per turn: `<key>.autoblock` holds the turn's stamp, so a ticket
+    that the owner moves back stays where the owner put it. Returns whether it moved."""
+    shell = int(shell or 0)
+    state, why = judged(session_id, shell)
+    when = _marker_time(session_id, shell)
+    if state != "blocked" or not when:
+        return False
+    path = _autoblock_path(session_id, shell)
+    if _first_text((path,)).strip() == when:
+        return False
+    import todo
+    t, mode = _launch_of(session_id)
+    moved = t is not None and todo.auto_block(t.id, mode, session_id, shell, why)
+    _dir().mkdir(parents=True, exist_ok=True)
+    path.write_text(when + "\n", encoding="utf-8")
+    return moved
 
 
 def judge_started(session_id, shell=0):

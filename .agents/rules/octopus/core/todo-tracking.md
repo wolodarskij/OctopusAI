@@ -149,6 +149,15 @@ without `WORK IS FINISHED`, stays open and waits. When the cause is gone, it mov
 to InProgress `implementing` and continues. A session that an outside cause stops is in Blocked,
 and nowhere else.
 
+**The engine moves the ticket of a session that did not.** When the judge reads in the last
+message of an ended turn that an outside cause stops the work, and the session asks the owner
+nothing, its verdict is `blocked`. The engine then moves the ticket to Blocked `blocked by
+outside cause`, writes the cause under `## Blocked`, and reports the session as `event`. The
+judge does it at once, and each scan of the sessions (the board, `sessions`, the manager's
+check) does it when the judge could not. It moves a ticket once per turn, so a ticket that the
+owner moves back stays there. It never moves a manager, a ticket in Blocked or Done, or a
+ticket in Verification whose `verify` session it is not.
+
 **No agent offers, proposes or asks to do only a part of the work,** and no agent asks
 whether a part is enough. Only the owner, on the owner's own order, says that a part is
 enough. A part of the order that cannot be done sends the ticket to Blocked with its cause.
@@ -294,7 +303,7 @@ after a resume, and after the event or the background job it waited for.
 | 2 | its turn ended, and the last line of its last message is a question | `input` |
 | 3 | it holds a recurring job, its own subagent runs, or its background shell runs a process | `blocker` when its ticket waits for other tickets, else `working` |
 | 4 | its turn runs and wrote to its transcript within 5 minutes, or a tool call of its turn has no result yet | `running` |
-| 5 | its turn ended, or it wrote nothing for 5 minutes and no tool call runs: the judge reads its last message and its ticket | the verdict: `input`, `finished`, `working` or `blocker` |
+| 5 | its turn ended, or it wrote nothing for 5 minutes and no tool call runs: the judge reads its last message and its ticket | the verdict: `input`, `event` (`blocked`), `finished`, `working` or `blocker` |
 | 6 | the judge is unsure: the engine types `/recap` into the session once, and the judge reads the recap | the verdict on the recap; `idle` when it is unsure again or no recap comes within 2 minutes |
 
 Where its ticket stands is never a question to the owner, and it decides no state: the judge
@@ -342,15 +351,17 @@ line, no `WORK IS FINISHED`, no statement that the ticket is in Verification or 
 that has written nothing for 5 minutes and runs no tool call, with its last action. A turn that
 wrote no message at all gives it nothing to read: it stays `running`. It uses the project's
 default provider once per turn: `claude -p` on Haiku for Claude Code, or `codex exec` with the
-project's Codex model and effort. It answers `input`, `finished`, `working` or `unsure`. Only a question the
-session itself asks the owner, or an answer it says it cannot go on without, is `input`: a
-report, a status table, and other sessions' questions that it lists are not. It also reads
+project's Codex model and effort. It answers `input`, `blocked`, `finished`, `working` or
+`unsure`. Only a question the session itself asks the owner, or an answer or a decision it
+says it cannot go on without, is `input`: a report, a status table, and other sessions'
+questions that it lists are not. An outside cause that stops the work, with no question to
+the owner, is `blocked`. It also reads
 Claude Code's last recap of the session and the jobs and agents it waits for: a session whose
 message or recap says it runs a recurring task is `working`, never `finished`. `unsure` says
 the text does not show what the session waits for; the engine then asks the session for its
 recap. **Every verdict but `unsure` explains itself and quotes its proof**, words copied from
 the message, the recap or the list of what it waits for: for `input` the open question, for
-`finished` the line that said the work was done, for `working` the line that names what it
+`blocked` the line that names the cause, for `finished` the line that said the work was done, for `working` the line that names what it
 waits for. A verdict whose quote stands nowhere, or an `input` that quotes another ticket's
 question from a list, is rejected; the judge is asked once more and told why. The hover on
 `waits for input` names the question: the dialog's, with the options of each question, the

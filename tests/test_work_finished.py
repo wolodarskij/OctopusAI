@@ -259,7 +259,9 @@ class WorkFinished(FixtureCase):
         self.assertIn("A session that says its work stopped (it cannot find what the work "
                       "needs, it lacks a permit, it waits for an outside action, another "
                       "ticket or the owner) is never finished", judge)
-        self.assertIn("gives what it cannot find (an asset, a file, a value)", judge)
+        self.assertIn("blocked = the session asks the owner no question, and says that its "
+                      "work stopped for a cause outside it that it cannot remove: an asset, a "
+                      "file or a value it cannot find", judge)
 
     def test_20_no_instruction_demands_the_line_without_finished_work(self):
         order = re.compile(r"\bend(?:s)?\b[^.]{0,40}\b(?:message|with)\b", re.I)
