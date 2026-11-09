@@ -246,12 +246,22 @@ its whole process tree, a background shell of a session that runs no process for
 and every background shell of a `finished` session. A background shell that no longer runs
 never makes a session `working`.
 
+**`WORK IS FINISHED` means that the work of the session is finished.** The engine trusts the
+line and checks nothing else, so a session writes it only when its work is done: a `work`
+ticket in Verification, a plan `ready to implement` that leaves nothing open, a `review`
+verdict given, a `verify` measurement made. A session that cannot do its work (a missing
+asset or file, an ungranted permit, an outside action, another ticket, a decision of the
+owner) never writes it, and no plan, note or brief step makes it do so. It writes on its
+ticket what stops it, reports what it waits for (`report <id> event`, `report <id> input`
+and the question dialog, or the steps for a blocker), ends the turn without the line, and
+stays open.
+
 **The engine decides the state in this order, and the first step that matches wins:**
 
 | Step | The session | State |
 |---|---|---|
 | 0 | its Claude exited | `finished` |
-| 0 | its turn ended, and the last line of its last message is `WORK IS FINISHED` (every brief asks for it when the session has no question). The engine reads nothing else: no report, no ticket, no plan, no job, no background work, no judge and no recap | `finished`; a manager `idle` |
+| 0 | its turn ended, and the last line of its last message is `WORK IS FINISHED` (every brief asks for it when the work is finished and the session has no question). The engine reads nothing else: no report, no ticket, no plan, no job, no background work, no judge and no recap | `finished`; a manager `idle` |
 | 0 | no hook ran and it has no transcript: a question before its first turn, such as folder trust | `input` |
 | 0 | a dialog waits (a permission, a question, a plan to approve), or its turn ended in an API error (a rate limit, an overload, a network fault) | `input` |
 | 0 | it reported `event`, and its last lines do not say its ticket is in Verification or Done | `event` |

@@ -13,14 +13,22 @@
   editor restart: run `{cli} report {id} event --why "<what you wait for>" --mode {mode}`,
   say what you wait for, and end the turn without a question. The board shows the session
   as waiting for that event and keeps this terminal open.
-- **When you finish and have no question for the owner,** end your last message with this
-  exact line, alone, with nothing after it: `WORK IS FINISHED`. The board then shows this
-  session as finished, and this terminal closes at once.
-- **`WORK IS FINISHED` only when the work is finished.** It closes this terminal for good.
-  Never write it while any part of the ticket is undone, while you wait for an event (an
-  editor restart, a build, a background job), while a question to the owner is open, or in
-  an answer to a message the owner wrote to you in this session. Saying it early is the
-  worst fault a session can make: the owner loses the agent in the middle of the work.
+- **When the work of this ticket is finished and you have no question for the owner,** end
+  your last message with this exact line, alone, with nothing after it: `WORK IS FINISHED`.
+  The board then shows this session as finished, and this terminal closes at once.
+- **`WORK IS FINISHED` only when the work is finished.** The engine trusts the line and
+  checks nothing else: it closes this terminal for good. Never write it while any part of the
+  ticket is undone, while you wait for an event (an editor restart, a build, a background
+  job), while a question to the owner is open, or in an answer to a message the owner wrote
+  to you in this session. Saying it early is the worst fault a session can make: the owner
+  loses the agent in the middle of the work.
+- **A session that cannot do its work never writes `WORK IS FINISHED`.** A missing asset or
+  file, an ungranted permit, an outside action, another ticket or a decision of the owner
+  stops the work, and stopped work is not finished. Write on the ticket what stops it. Then
+  report what you wait for: `report ... event` for a thing outside the project or an action
+  of the owner, `report ... input` and the question dialog for an answer of the owner, the
+  steps under **When another ticket blocks this one** for a ticket. End the turn without the
+  line, and keep this terminal open.
 - **Work is never finished while a question is open.** When you cannot do the work without
   the owner (a value only the owner can give, a decision, a word), that is a question, not a
   finish: report `input`, ask it with the `AskUserQuestion` tool, and keep this terminal open.

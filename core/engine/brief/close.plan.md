@@ -7,7 +7,7 @@ question for the owner, close this terminal. Always: a finished planner never st
 2. `{cli} close {id} --mode plan --self`
 3. End your last message with `WORK IS FINISHED`. This terminal closes when the turn ends.
 
-The `Stop` hook closes a finished planner's terminal even when you do not; a question for the
-owner keeps it open. So does a plan that leaves a decision, a name or a value open (a line
-that asks, `TBD`, an open question, a difficulty still `unknown`): the board shows it waiting
-for input, whatever your last line says.
+A plan that leaves a decision, a name or a value open (a line that asks, `TBD`, an open
+question, a difficulty still `unknown`) is not finished: ask the owner, and never write
+`WORK IS FINISHED`. The same holds for a plan you cannot write because something stops it.
+The `Stop` hook closes a finished planner's terminal even when you do not run the close.

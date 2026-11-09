@@ -157,10 +157,9 @@ ticket that nobody can size.
   it waits for) and `finished` (waits for nothing). The first step that matches decides: Claude
   has exited, `finished`; no hook has run and no transcript exists (a question before the first
   turn, such as folder trust), a dialog, an API error, or a reported `input`, `input`; a
-  reported `event`, `event`; a `plan` turn that leaves a decision open, `input`; the turn ended
-  with `WORK IS FINISHED`, `finished` (a manager `idle`), or `input` while its ticket says the
-  work is undone; the turn ended with a question on its last line, `input`; a recurring job or its own
-  background work, `working` or `blocker`; the turn runs and wrote within 5 minutes, or a tool
+  reported `event`, `event`; the turn ended with `WORK IS FINISHED`, `finished` (a manager
+  `idle`), whatever its ticket says; the turn ended with a question on its last line, `input`;
+  a recurring job or its own background work, `working` or `blocker`; the turn runs and wrote within 5 minutes, or a tool
   call of it has no result yet, `running`;
   else the judge reads the last message and the ticket, and when it is unsure the engine types
   `/recap` into the session and the judge reads the recap. The ticket's board decides nothing
