@@ -52,10 +52,7 @@ does it when the judge could not. Once per turn (`<key>.autoblock`): a ticket th
 moves back stays there.
 
 `unsure` says the message does not show what the session waits for, and needs no quote.
-`todo.py live_sessions` then types `/recap` into the session once per turn (`<key>.recap`:
-the turn, when it was sent, when its judge started, the recap), and when the output row of
-the command stands in the transcript (`recap_after`) it starts the judge on the recap
-(`--judge ... --recap`), whose verdict carries `recap` on line 4 (`judge_source`).
+The session is then `idle`: nothing is typed into it.
 
 A STALE TURN. A turn that has not ended and wrote nothing to its transcript for
 `todo.STALE_SECONDS` goes to the judge too (`ensure_judged_stale`): `<key>.stale` holds the
@@ -149,8 +146,7 @@ finished too. The hook resolves its own terminal by walking up the process table
     python core/hooks/session_state.py --live      every session with a live record
     python core/hooks/session_state.py --prune     drop markers older than 7 days
     python core/hooks/session_state.py --judge <session> <shell> --project <root>
-                                              judge the message the Stop hook kept;
-                                              with --recap, the recap the board asked for
+                                              judge the message the Stop hook kept
     python core/hooks/session_state.py --reset-terminal
                                               turn off the terminal modes a crashed Claude
                                               leaves on: mouse tracking, win32-input-mode
@@ -1085,20 +1081,7 @@ JUDGE_LEAD = ("The session ended its turn with the message below and now sits at
 # ... for a turn that has not ended and has written nothing for a while.
 JUDGE_LEAD_STALE = ("The session has not ended its turn, and it has written nothing for "
                     "%(minutes)d min; its last action: %(doing)s.")
-# ... for the recap the board asked for, when the last message did not show it.
-JUDGE_LEAD_RECAP = ("The session ended its turn and sits at its prompt. Its last message "
-                    "did not show what it waits for, so it was asked for its recap: the "
-                    "text below is that recap.")
 JUDGE_WHAT = "The last message of the session"
-JUDGE_WHAT_RECAP = "The recap of the session"
-
-# The part of the prompt that carries the last message, when the recap is judged.
-JUDGE_LAST = """
-The last message of the session, between the markers:
-<<<RECAP
-%(recap)s
-RECAP>>>
-"""
 
 # The part of the prompt that carries Claude Code's own recap of the session.
 JUDGE_RECAP = """
@@ -1148,22 +1131,16 @@ def needs_judge(text, ticket=""):
         says_finished(text) or says_done(text, ticket) or asks_last(text))
 
 
-def start_judge(session_id, shell, text, root, recap=False):
+def start_judge(session_id, shell, text, root):
     """Keep the message in `<key>.last` and start the judge on it, detached. Returns at
-    once: a `Stop` hook must not hold the prompt back. With `recap`, `text` is the recap the
-    board asked for: it goes into the recap record, and the judge reads it there."""
+    once: a `Stop` hook must not hold the prompt back."""
     import subprocess
     _dir().mkdir(parents=True, exist_ok=True)
-    if recap:
-        rec = recap_record(session_id, shell)
-        rec.update(text=text, judging=time.time())
-        _recap_path(session_id, shell).write_text(json.dumps(rec), encoding="utf-8")
-    else:
-        _last_path(session_id, shell).write_text(text, encoding="utf-8")
-        _judging_path(session_id, shell).write_text(turn_stamp(session_id, shell) + "\n",
-                                                    encoding="utf-8")
+    _last_path(session_id, shell).write_text(text, encoding="utf-8")
+    _judging_path(session_id, shell).write_text(turn_stamp(session_id, shell) + "\n",
+                                                encoding="utf-8")
     argv = [sys.executable, str(Path(__file__).resolve()), "--judge", session_id,
-            str(int(shell or 0)), "--project", str(root)] + (["--recap"] if recap else [])
+            str(int(shell or 0)), "--project", str(root)]
     flags = (getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
              | getattr(subprocess, "CREATE_NO_WINDOW", 0))
     kw = dict(stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
@@ -1314,15 +1291,13 @@ def last_recap(session_id, path):
     return str(recap.get("text") or ""), str(recap.get("when") or "")
 
 
-def judge(session_id, shell=0, recap=False):
+def judge(session_id, shell=0):
     """Judge the message the `Stop` hook kept for this terminal, or the last message of its
     stale turn, and write `<key>.judge` when the turn still carries the stamp it judged
-    (`turn_stamp`). With `recap`, judge the recap the board asked for instead, and mark the
-    verdict `recap` on line 4. Returns the state written, or ""."""
+    (`turn_stamp`). Returns the state written, or ""."""
     shell = int(shell or 0)
     when = turn_stamp(session_id, shell)
-    last = _first_text((_last_path(session_id, shell),))
-    text = (recap_record(session_id, shell).get("text") or "") if recap else last
+    text = _first_text((_last_path(session_id, shell),))
     if not when or not str(text).strip():
         return ""
     os.environ[JUDGE_ENV] = "1"
@@ -1338,22 +1313,18 @@ def judge(session_id, shell=0, recap=False):
     except Exception:                                   # noqa: BLE001 - judge without it
         waits = ""
     stamp, doing = stale_turn(session_id, shell)
-    if recap:
-        lead, what = JUDGE_LEAD_RECAP, JUDGE_WHAT_RECAP
-        recap, when_recap, block = last[-JUDGE_CHARS:], "", JUDGE_LAST
-    else:
+    try:
+        import todo
+        recap, when_recap = last_recap(session_id, todo.session_transcript(session_id))
+    except Exception:                                   # noqa: BLE001 - judge without it
+        recap, when_recap = "", ""
+    lead, what, block = JUDGE_LEAD, JUDGE_WHAT, JUDGE_RECAP
+    if not _marker_time(session_id, shell) and stamp == when:
         try:
-            import todo
-            recap, when_recap = last_recap(session_id, todo.session_transcript(session_id))
-        except Exception:                               # noqa: BLE001 - judge without it
-            recap, when_recap = "", ""
-        lead, what, block = JUDGE_LEAD, JUDGE_WHAT, JUDGE_RECAP
-        if not _marker_time(session_id, shell) and stamp == when:
-            try:
-                minutes = int(max(0, time.time() - float(stamp)) // 60)
-            except ValueError:
-                minutes = 0
-            lead = JUDGE_LEAD_STALE % {"minutes": minutes, "doing": doing or "unknown"}
+            minutes = int(max(0, time.time() - float(stamp)) // 60)
+        except ValueError:
+            minutes = 0
+        lead = JUDGE_LEAD_STALE % {"minutes": minutes, "doing": doing or "unknown"}
     message = str(text)[-JUDGE_CHARS:]
     prompt = JUDGE_PROMPT % {
         "project": p.name, "lead": lead, "what": what, "ticket": ticket, "message": message,
@@ -1376,8 +1347,8 @@ def judge(session_id, shell=0, recap=False):
     if verdict is None or turn_stamp(session_id, shell) != when:
         return ""
     state, why = verdict
-    _judge_path(session_id, shell).write_text("%s\n%s\n%s\n%s" % (
-        when, state, why, "recap\n" if lead is JUDGE_LEAD_RECAP else ""), encoding="utf-8")
+    _judge_path(session_id, shell).write_text("%s\n%s\n%s\n" % (when, state, why),
+                                              encoding="utf-8")
     # A launched session the judge reads as finished closes its terminal without the board,
     # unless the owner talks to it: then only its own `WORK IS FINISHED` closes it.
     if state == "finished" and not owner_talks(session_id, shell):
@@ -1444,30 +1415,17 @@ def judge_started_at(session_id, shell=0):
 def rejudge(session_id, shell=0, now=None):
     """Drop the start record of a judge that was started on this terminal's current turn
     and wrote no verdict `JUDGE_STALE` seconds later, so `ensure_judged` starts it again.
-    Returns whether it was dropped. Only a re-evaluation calls it: the poll never retries.
-
-    A `/recap` that brought no recap within `RECAP_WAIT` seconds, or whose judge wrote no
-    verdict `JUDGE_STALE` seconds later, is dropped too, so the board asks for it again."""
+    Returns whether it was dropped. Only a re-evaluation calls it: the poll never retries."""
     now = time.time() if now is None else now
-    dropped = False
-    rec = recap_record(session_id, shell)
-    if rec and judge_source(session_id, shell) != "recap":
-        try:
-            sent, judging = float(rec.get("sent") or 0), float(rec.get("judging") or 0)
-        except (TypeError, ValueError):
-            sent = judging = 0
-        if (judging and now - judging >= JUDGE_STALE) or (
-                not judging and now - sent >= RECAP_WAIT):
-            dropped = drop_recap(session_id, shell)
     started = judge_started_at(session_id, shell)
     if not started or judged(session_id, shell)[0]:
-        return dropped
+        return False
     if now - started < JUDGE_STALE:
-        return dropped
+        return False
     try:
         _judging_path(session_id, shell).unlink()
     except OSError:
-        return dropped
+        return False
     return True
 
 
@@ -1759,8 +1717,8 @@ def recover(session_id, shell, text, when, error=""):
 
 def mark_stale(session_id, shell, text, when, error="", ticket=None):
     """Write the marker of a turn that ended by its transcript while no `Stop` marker
-    exists: the hook missed it, or the owner's slash command (the board's `/recap`) took the
-    prompt and removed it. The same words the `Stop` hook writes, at the time of the turn's
+    exists: the hook missed it, or the owner's slash command took the prompt and removed
+    it. The same words the `Stop` hook writes, at the time of the turn's
     last row, so the judge reads it as it reads any ended turn, and the message the judge
     reads is this one, not the one a stale turn kept. A turn that ended in an API error
     (`error`) gets the marker `StopFailure` would have written, and no judge: a verdict that
@@ -1824,76 +1782,6 @@ def ensure_judged_stale(session_id, shell, root, activity):
     return True
 
 
-# -- the recap -------------------------------------------------------------------
-
-# The `commandRun` of the transcript row the `/recap` command writes its output into.
-RECAP_COMMAND = "recap"
-# Seconds the board waits for the recap after it typed `/recap`. The command answers in
-# a few seconds.
-RECAP_WAIT = 120
-
-
-def _recap_path(session_id, shell=0):
-    """JSON: `turn`, the turn the board asked `/recap` for; `sent`, when; `judging`, when the
-    judge on the recap was started; `text`, the recap it reads."""
-    return _dir() / ("%s.recap" % key(session_id, shell))
-
-
-def recap_record(session_id, shell=0):
-    """The record of the `/recap` the board sent this terminal, `{}` when none."""
-    try:
-        d = json.loads(_first_text((_recap_path(session_id, shell),)) or "{}")
-    except ValueError:
-        return {}
-    return d if isinstance(d, dict) else {}
-
-
-def mark_recap_sent(session_id, shell, turn, now=None):
-    """Record that the board typed `/recap` into this terminal for this turn: one per turn."""
-    _dir().mkdir(parents=True, exist_ok=True)
-    _recap_path(session_id, shell).write_text(json.dumps(
-        {"turn": turn, "sent": time.time() if now is None else now}), encoding="utf-8")
-
-
-def recap_after(session_id, path, t):
-    """The recap the session's transcript holds written at `t` or later: the output row of
-    the `/recap` command, or Claude Code's own `away_summary` row. "" when none came."""
-    try:
-        size = path.stat().st_size
-        with open(path, "rb") as f:
-            f.seek(max(0, size - TAIL_BYTES))
-            raw = f.read().decode("utf-8", "replace")
-    except (OSError, AttributeError):
-        return ""
-    found = ""
-    for ln in raw.splitlines():
-        if "local_command" not in ln and "away_summary" not in ln:
-            continue
-        try:
-            d = json.loads(ln)
-        except ValueError:
-            continue
-        if not isinstance(d, dict) or d.get("type") != "system" \
-                or _stamp(d.get("timestamp")) < t - 1:
-            continue
-        run = d.get("commandRun") if isinstance(d.get("commandRun"), dict) else {}
-        if d.get("subtype") == "away_summary" or (
-                d.get("subtype") == "local_command" and run.get("command") == RECAP_COMMAND):
-            text = re.sub(r"</?local-command-std(?:out|err)>", "", str(d.get("content") or ""))
-            text = re.sub(r"\s*\(disable recaps in /config\)\s*$", "", text).strip()
-            found = text or found
-    return found
-
-
-def drop_recap(session_id, shell=0):
-    """Forget the `/recap` of this terminal, so the board asks for it again."""
-    try:
-        _recap_path(session_id, shell).unlink()
-        return True
-    except OSError:
-        return False
-
-
 def ensure_judged(session_id, shell, root, transcript=None, ticket=None):
     """Start the judge on this terminal's last message when no rule read it, no verdict
     exists, and no judge was started on this turn. The message is the one the `Stop` hook
@@ -1936,19 +1824,12 @@ def _verdict_lines(session_id, shell=0):
 
 def judged(session_id, shell=0):
     """`(state, why)` of the judge's verdict on this terminal's current turn: its last
-    message, the last message of its stale turn, or its recap; `("", "")` when there is
+    message or the last message of its stale turn; `("", "")` when there is
     none, or the marker was written again after the message the judge read."""
     lines = _verdict_lines(session_id, shell)
     if not lines:
         return "", ""
     return lines[1].strip(), lines[2].strip() if len(lines) > 2 else ""
-
-
-def judge_source(session_id, shell=0):
-    """`recap` when the judge's verdict on the current turn read the recap the board asked
-    for, else ""."""
-    lines = _verdict_lines(session_id, shell)
-    return "recap" if len(lines) > 3 and lines[3].strip() == "recap" else ""
 
 
 def _when(p):
@@ -2299,7 +2180,7 @@ def main(argv=None, payload=None, started=None):
         if i + 2 >= len(argv):
             return 2
         try:
-            judge(argv[i + 1], int(argv[i + 2]), recap="--recap" in argv)
+            judge(argv[i + 1], int(argv[i + 2]))
         except Exception:                               # noqa: BLE001 - nobody reads its output
             return 1
         return 0

@@ -809,19 +809,6 @@ class Activity(FixtureCase):
         self.write(self.said("Changed it."))
         self.assertEqual(session_state.transcript_activity(self.path)["error"], "")
 
-    def test_the_recap_row_after_the_command(self):
-        self.write({"type": "system", "subtype": "local_command", "commandRun": {
-            "command": "recap", "args": ""}, "timestamp": "2026-10-18T20:25:57Z",
-            "content": "<local-command-stdout>You're working T0004. It's in Verification."
-                       "</local-command-stdout>"},
-            {"type": "system", "subtype": "local_command", "commandRun": {"command": "model"},
-             "timestamp": "2026-10-18T20:26:00Z", "content": "<local-command-stdout>x"
-                                                             "</local-command-stdout>"})
-        t = session_state._stamp("2026-10-18T20:25:51Z")
-        self.assertEqual(session_state.recap_after(SID, self.path, t),
-                         "You're working T0004. It's in Verification.")
-        self.assertEqual(session_state.recap_after(SID, self.path, t + 3600), "")
-
 
 class FinishBrief(FixtureCase):
     def test_every_brief_asks_for_the_finished_line_but_a_managers(self):
@@ -1173,7 +1160,7 @@ class OwnShell(unittest.TestCase):
 def session(mode="work", running=False, claude=1234, asks=False, reported="", tid="T0001",
             hooked=True, says_finished=False, dialog=False, jobs=(), why="", tasks=(),
             unsure=False, judge="", judge_why="", waits_for=(), judging=False, error="",
-            judge_dead=False, stale=False, judge_from="", recap="", doing="", updated=None,
+            judge_dead=False, stale=False, doing="", updated=None,
             starting=False):
     """A session entry as `live_sessions` gives it: its turn ended, unless it is `running`
     (wrote lately) or `stale` (wrote nothing for `STALE_SECONDS`)."""
@@ -1182,7 +1169,7 @@ def session(mode="work", running=False, claude=1234, asks=False, reported="", ti
             "error": error, "hooked": hooked, "starting": starting,
             "says_finished": says_finished, "dialog": dialog, "jobs": list(jobs),
             "tasks": list(tasks), "unsure": unsure, "judge": judge, "judge_why": judge_why,
-            "judge_from": judge_from, "recap": recap, "waits_for": list(waits_for),
+            "waits_for": list(waits_for),
             "judging": judging, "judge_dead": judge_dead, "doing": doing,
             "updated": time.time() - 360 if updated is None and stale else updated}
 
@@ -1200,7 +1187,7 @@ SHELL = {"id": "b7", "type": "shell", "description": "python -c sleep"}
 class WaitState(FixtureCase):
     """The owner's order (2026-10-18): exit, dialog, error, report; the finished line; a
     question on the last line; a job or own background work; a turn that wrote within 5
-    minutes; the judge; the judge on the recap."""
+    minutes; the judge."""
 
     def setUp(self):
         super().setUp()
@@ -1461,25 +1448,12 @@ class WaitState(FixtureCase):
         self.assertEqual(todo.wait_state(session(stale=True, judge="unsure", judge_why="w"), t),
                          ("idle", "no update for 6 min; the judge is unsure: w"))
 
-    # -- step 6: the recap -----------------------------------------------------------
+    # -- step 6: the judge is unsure --------------------------------------------------
 
-    def test_an_unsure_judge_reads_the_recap(self):
+    def test_an_unsure_judge_is_idle(self):
         t = self.ticket("active", "implementing")
-        for recap in ("sent", "reading"):
-            self.assertEqual(todo.wait_state(session(judge="unsure", recap=recap), t),
-                             ("idle", "the judge is unsure of its last message; it reads the "
-                                      "recap"))
-        self.assertEqual(todo.wait_state(session(judge="unsure", judge_why="w",
-                                                 recap="missing"), t),
-                         ("idle", "the judge is unsure; no recap came: w"))
-        self.assertEqual(self.wait(session(judge="unsure", recap="dead"), t), "idle")
-        self.assertEqual(todo.wait_state(session(judge="finished", judge_why="all done",
-                                                 judge_from="recap"), t),
-                         ("finished", "recap judge: all done"))
-        self.assertEqual(self.wait(session(judge="input", judge_from="recap"), t), "input")
-        self.assertEqual(todo.wait_state(session(judge="unsure", judge_why="w",
-                                                 judge_from="recap"), t),
-                         ("idle", "the judge is unsure, of its recap too: w"))
+        self.assertEqual(todo.wait_state(session(judge="unsure", judge_why="w"), t),
+                         ("idle", "the judge is unsure: w"))
 
     def test_close_never_ends_the_process_that_asks(self):
         s = {"key": "board", "running": False, "shell": os.getpid(), "claude": None}
@@ -1585,8 +1559,8 @@ class WaitState(FixtureCase):
 
 
 class ReadTurn(FixtureCase):
-    """`read_turn`: the transcript and the hook files of one session, the judge and the
-    recap. No process starts: `Popen` and `send_session` are mocks."""
+    """`read_turn`: the transcript and the hook files of one session, and the judge. No
+    process starts: `Popen` and `send_session` are mocks."""
 
     def setUp(self):
         super().setUp()
@@ -1724,56 +1698,18 @@ class ReadTurn(FixtureCase):
                          ("idle", "asked nothing; the judge reads its last message"))
         self.assertEqual(self.popen.call_count, 1)
 
-    def test_an_unsure_judge_types_recap_once_and_judges_the_recap(self):
-        last = self.said("I changed the parser.", 5)
-        self.write([last], age=5)
-        session_state.mark_stop(SID, 42, "I changed the parser.")
-        stamp = session_state.turn_stamp(SID, 42)
-        session_state._judge_path(SID, 42).write_text("%s\nunsure\nopen\n" % stamp,
-                                                      encoding="utf-8")
-        s = self.decide()
-        self.assertEqual((s["recap"], s["wait"]), ("sent", "idle"))
-        self.send.assert_called_once()
-        self.assertEqual(self.send.call_args[0][1:], ("/recap", ["Enter"]))
-        self.decide()
-        self.assertEqual(self.send.call_count, 1)
-        # The recap stands in the transcript: the judge reads it, once.
-        sent = session_state.recap_record(SID, 42)["sent"]
-        self.write([last,
-                    {"type": "system", "subtype": "local_command", "timestamp": self.iso(sent + 1),
-                     "commandRun": {"command": "recap"},
-                     "content": "<local-command-stdout>It waits for T0002."
-                                "</local-command-stdout>"}],
-                   age=5)
-        s = self.decide()
-        self.assertEqual(s["recap"], "reading")
-        self.assertIn("--recap", self.judge_argv()[-1])
-        self.assertEqual(session_state.recap_record(SID, 42)["text"], "It waits for T0002.")
-        self.decide()
-        self.assertEqual(sum("--recap" in a for a in self.judge_argv()), 1)
-        # Its verdict decides.
-        session_state._judge_path(SID, 42).write_text(
-            "%s\nworking\nwaits for T0002\nrecap\n" % stamp, encoding="utf-8")
-        s = self.decide()
-        self.assertEqual((s["wait"], s["why"], s["recap"]),
-                         ("subagent", "recap judge: still works: waits for T0002", ""))
-
-    def test_no_recap_within_its_wait_is_idle_and_reload_asks_again(self):
+    def test_an_unsure_judge_types_nothing_into_the_session(self):
         self.write([self.said("I changed the parser.", 5)], age=5)
         session_state.mark_stop(SID, 42, "I changed the parser.")
         stamp = session_state.turn_stamp(SID, 42)
         session_state._judge_path(SID, 42).write_text("%s\nunsure\nopen\n" % stamp,
                                                       encoding="utf-8")
+        for _scan in range(3):
+            s = self.decide()
+            self.assertEqual((s["wait"], s["why"]), ("idle", "the judge is unsure: open"))
+        session_state.rejudge(SID, 42)
         self.decide()
-        rec = session_state.recap_record(SID, 42)
-        rec["sent"] -= session_state.RECAP_WAIT + 1
-        session_state._recap_path(SID, 42).write_text(json.dumps(rec), encoding="utf-8")
-        s = self.decide()
-        self.assertEqual((s["recap"], s["wait"], s["why"]),
-                         ("missing", "idle", "the judge is unsure; no recap came: open"))
-        self.assertTrue(session_state.rejudge(SID, 42))
-        self.decide()
-        self.assertEqual(self.send.call_count, 2)
+        self.assertFalse(self.send.called)
 
     def test_a_turn_that_began_without_a_prompt_drops_the_old_marker(self):
         # A scheduled prompt fired after the turn the marker ended: no hook removed it.
@@ -1874,11 +1810,11 @@ class Reevaluate(FixtureCase):
         s["judging"], s["rejudged"] = True, True
         self.assertEqual(self.signals(s, self.ticket("active", "implementing"))["judge"],
                          "the last one left no verdict: started again")
-        s = session(stale=True, judge="unsure", judge_why="open", recap="missing")
+        s = session(stale=True, judge="unsure", judge_why="open")
         sig = self.signals(s, self.ticket("active", "implementing"))
         self.assertEqual(sig["turn"], "runs, no update for 6 min: stale")
         self.assertEqual(sig["judge"], "unsure: open")
-        self.assertEqual(sig["recap"], "sent, none came")
+        self.assertNotIn("recap", sig)
 
     def test_each_rule_names_what_it_read(self):
         s = session(says_finished="WORK IS FINISHED", reported="event", why="an editor restart",
@@ -1887,7 +1823,6 @@ class Reevaluate(FixtureCase):
         sig = self.signals(s, self.ticket("verify", "waiting"))
         self.assertEqual(sig["last message"], "says WORK IS FINISHED")
         self.assertEqual(sig["judge"], "not needed: a rule decides")
-        self.assertEqual(sig["recap"], "not needed")
         self.assertEqual(sig["report"], "event: an editor restart")
         self.assertEqual(sig["jobs"], "j1")
         self.assertEqual(sig["background work"], "1 subagent: Probe B2 deliberate wait")

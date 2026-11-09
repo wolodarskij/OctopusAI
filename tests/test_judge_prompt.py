@@ -76,7 +76,6 @@ class Prompt(unittest.TestCase):
         self.assertIn("is working, never finished", self.text())
 
     def test_unsure_is_an_answer(self):
-        # The owner (2026-10-18): an unsure judge sends /recap and judges the recap.
         p = self.text()
         self.assertIn('"input" | "finished" | "working" | "unsure"', p)
         self.assertIn("unsure = the text does not show what it waits for", p)

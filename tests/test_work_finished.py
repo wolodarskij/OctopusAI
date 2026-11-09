@@ -30,7 +30,7 @@ def session(mode="work", says_finished=False, reported="", why="", asks=False, j
          "asks": asks, "reported": reported, "reported_why": why, "error": "", "hooked": True,
          "starting": False, "says_finished": says_finished, "dialog": False,
          "jobs": list(jobs), "tasks": list(tasks), "unsure": False, "judge": "",
-         "judge_why": "", "judge_from": "", "recap": "", "waits_for": [], "judging": False,
+         "judge_why": "", "waits_for": [], "judging": False,
          "judge_dead": False, "doing": "", "updated": time.time()}
     if provider != "claude":
         s["provider"] = provider

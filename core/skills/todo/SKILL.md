@@ -164,9 +164,8 @@ ticket that nobody can size.
   `idle`), whatever its ticket says; the turn ended with a question on its last line, `input`;
   a recurring job or its own background work, `working` or `blocker`; the turn runs and wrote within 5 minutes, or a tool
   call of it has no result yet, `running`;
-  else the judge reads the last message and the ticket, and when it is unsure the engine types
-  `/recap` into the session and the judge reads the recap. The ticket's board decides nothing
-  else.
+  else the judge reads the last message and the ticket, and when it is unsure the session is
+  `idle`. The ticket's board decides nothing else.
 - **Only an open session in the `input` state waits for the owner.** `sessions --input` and
   the manager's "Waiting for your input" list nothing else. A finished or closed session never
   waits for input, even when its ticket's result names a decision for the owner.

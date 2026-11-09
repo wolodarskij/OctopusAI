@@ -4968,8 +4968,7 @@ function drawLive() {
 }
 
 /* Reload decides again what every session of every project waits for (`reevaluate`: the
-   poll's detection, and a judge that died without a verdict or a recap that never came
-   is tried again) and redraws the board in place. It opens nothing: the signals behind
+   poll's detection, and a judge that died without a verdict is tried again) and redraws the board in place. It opens nothing: the signals behind
    each state stand on the hover of its marker. */
 const reload = async () => {
   if (VIEW === "artifacts") ART = null;

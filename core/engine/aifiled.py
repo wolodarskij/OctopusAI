@@ -91,7 +91,7 @@ def prompt_kind(rec):
         return None
     if text.startswith("<command-name>"):
         # A slash command opens the owner's turn when it carries words; a bare one such as
-        # `/recap` or `/remote-control` is also what the engine types.
+        # `/remote-control` is also what the engine types.
         args = re.search(r"<command-args>(.*?)</command-args>", text, re.S)
         return "owner" if args and args.group(1).strip() else None
     origin = rec.get("turnOrigin")

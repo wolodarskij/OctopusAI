@@ -294,7 +294,7 @@ after a resume, and after the event or the background job it waited for.
 | Step | The session | State |
 |---|---|---|
 | 0 | its Claude exited | `finished` |
-| 0 | its turn ended, and the last line of its last message is `WORK IS FINISHED` (every brief asks for it when the work is finished and the session has no question). The engine reads nothing else: no report, no ticket, no plan, no job, no background work, no judge and no recap | `finished`; a manager `idle` |
+| 0 | its turn ended, and the last line of its last message is `WORK IS FINISHED` (every brief asks for it when the work is finished and the session has no question). The engine reads nothing else: no report, no ticket, no plan, no job, no background work and no judge | `finished`; a manager `idle` |
 | 0 | no hook ran and it has no transcript: a question before its first turn, such as folder trust | `input` |
 | 0 | a dialog waits (a permission, a question, a plan to approve), or its turn ended in an API error (a rate limit, an overload, a network fault) | `input` |
 | 0 | it reported `event`, and its last lines do not say its ticket is in Verification or Done | `event` |
@@ -304,7 +304,7 @@ after a resume, and after the event or the background job it waited for.
 | 3 | it holds a recurring job, its own subagent runs, or its background shell runs a process | `blocker` when its ticket waits for other tickets, else `working` |
 | 4 | its turn runs and wrote to its transcript within 5 minutes, or a tool call of its turn has no result yet | `running` |
 | 5 | its turn ended, or it wrote nothing for 5 minutes and no tool call runs: the judge reads its last message and its ticket | the verdict: `input`, `event` (`blocked`), `finished`, `working` or `blocker` |
-| 6 | the judge is unsure: the engine types `/recap` into the session once, and the judge reads the recap | the verdict on the recap; `idle` when it is unsure again or no recap comes within 2 minutes |
+| 6 | the judge is unsure | `idle`; the engine types nothing into the session |
 
 Where its ticket stands is never a question to the owner, and it decides no state: the judge
 reads it with the last message. A ticket that does not show the work done (a `work` ticket not
@@ -329,8 +329,8 @@ that ended by its transcript and has no `Stop` marker gets the one the hook woul
 `sessions` and the board show the state, and for a running or working session what it does now:
 its last tool call, `running · Bash: run the tests`. `sessions --input` and the board's
 `Waits for input` filter show only the sessions that wait for `input`. `sessions --why` and the
-board's `Reload` decide every session again, start again a judge that left no verdict or a recap
-that never came, and show each signal behind the state: a signal that never came is a missed
+board's `Reload` decide every session again, start again a judge that left no verdict, and
+show each signal behind the state: a signal that never came is a missed
 trigger. `Reload` opens no window: the board redraws in place, and the hover on a session's
 marker lists its signals. `close --finished` and the board's `Close finished` close only
 `finished`.
@@ -358,8 +358,8 @@ questions that it lists are not. An outside cause that stops the work, with no q
 the owner, is `blocked`. It also reads
 Claude Code's last recap of the session and the jobs and agents it waits for: a session whose
 message or recap says it runs a recurring task is `working`, never `finished`. `unsure` says
-the text does not show what the session waits for; the engine then asks the session for its
-recap. **Every verdict but `unsure` explains itself and quotes its proof**, words copied from
+the text does not show what the session waits for; the session is then `idle`, and the
+engine types nothing into it. **Every verdict but `unsure` explains itself and quotes its proof**, words copied from
 the message, the recap or the list of what it waits for: for `input` the open question, for
 `blocked` the line that names the cause, for `finished` the line that said the work was done, for `working` the line that names what it
 waits for. A verdict whose quote stands nowhere, or an `input` that quotes another ticket's

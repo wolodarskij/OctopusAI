@@ -4667,7 +4667,7 @@ def live_sessions(tickets=None, recheck=False):
     Each entry also carries `wait` and `why` from `wait_state`: `None` while its turn runs,
     else `input`, `event`, `subagent`, `blocker`, `idle` or `finished`; `running` is
     `wait is None`. `read_turn` gives `ended`, `stale`, `updated`, `doing` (what it does
-    now, its last tool call), `judge_from` and `recap`. `asks`, `unsure`,
+    now, its last tool call). `asks`, `unsure`,
     `dialog`, `says_finished`, `judge`, `judge_why`, `judging`, `reported`, `reported_why`,
     `tasks`, `jobs` and `waits_for` are the signals that `wait_state` reads: the `Stop`
     marker says the last line asks a question, a `?` stands only higher up, or the message
@@ -4690,12 +4690,11 @@ def live_sessions(tickets=None, recheck=False):
     Two things happen on the way. A launched Claude that no hook file names, long after its
     start, has lost its files: when its transcript holds a message, its live record and its
     marker are written back from the transcript. And `read_turn` reads every session's
-    turn: the judge on what no rule reads, once per turn, and the recap when the judge is
-    unsure.
+    turn: the judge on what no rule reads, once per turn.
 
     `recheck` is the owner's re-evaluation: a judge that was started on the current turn
-    and died without a verdict, and a recap that never came, are tried again
-    (`session_state.rejudge`), and the entry carries `rejudged`."""
+    and died without a verdict is tried again (`session_state.rejudge`), and the entry
+    carries `rejudged`."""
     import session_state
     import winproc
 
@@ -4919,7 +4918,6 @@ def _read_marks(s):
     s["unsure"] = session_state.idle_unsure(sid, shell)
     s["question"] = session_state.idle_question(sid, shell)
     s["judge"], s["judge_why"] = session_state.judged(sid, shell)
-    s["judge_from"] = session_state.judge_source(sid, shell)
     s["reported"] = session_state.reported(sid, shell)
     s["reported_why"] = session_state.reported_why(sid, shell)
     s["jobs"] = session_state.all_jobs(sid, shell, session_transcript(sid))
@@ -4979,7 +4977,7 @@ def _judge_needed(s):
 def read_turn(s, recheck=False, now=None):
     """Read the session's turn into the entry `s`: whether it `ended`, its last update
     (`updated`), what it does now (`doing`, `doing_since`), whether it is `stale`, the hook
-    files' signals, the judge (`judging`, `judge_dead`, `rejudged`) and the recap (`recap`).
+    files' signals and the judge (`judging`, `judge_dead`, `rejudged`).
 
     The transcript corrects the hook files. A `dialog` marker goes when the transcript shows
     the dialog closed (`session_state.dialog_closed`). A row after the `Stop` marker that starts a turn
@@ -4989,13 +4987,13 @@ def read_turn(s, recheck=False, now=None):
     hook would have written. A turn that has not ended and wrote nothing for
     `STALE_SECONDS` is stale and goes to the judge, unless a tool call of it has no result
     yet (`calling`, `calling_since`): that call runs. An ended turn that no rule reads goes
-    to the judge too. A verdict `unsure` on an ended turn types `/recap` into the session
-    once, and the judge reads the recap. A verdict `blocked` on an ended turn moves the
+    to the judge too. A verdict `unsure` types nothing into the session: the session is
+    `idle`. A verdict `blocked` on an ended turn moves the
     ticket to the blocked lane once per turn (`session_state.auto_block`), when the judge
     itself could not.
 
-    `recheck` is the owner's re-evaluation: a judge that died without a verdict, and a recap
-    that never came, are tried again (`session_state.rejudge`)."""
+    `recheck` is the owner's re-evaluation: a judge that died without a verdict is tried
+    again (`session_state.rejudge`)."""
     import session_state
     import time
     now = time.time() if now is None else now
@@ -5005,7 +5003,7 @@ def read_turn(s, recheck=False, now=None):
         _read_marks(s)
         s.update(ended=not s.get("claude"), updated=None, doing="", doing_since=0,
                  stale=False, calling="", calling_since=0, judging=False, rejudged=False,
-                 judge_dead=False, recap="")
+                 judge_dead=False)
         return s
     path = session_transcript(sid) if sid else None
     act = session_state.transcript_activity(path) if path is not None else None
@@ -5054,7 +5052,6 @@ def read_turn(s, recheck=False, now=None):
     s["calling_since"] = (act.get("call_since") or 0) if quiet else 0
     s["stale"] = quiet and not s["calling"]
     s["judging"] = s["rejudged"] = s["judge_dead"] = False
-    s["recap"] = ""
     # The judge found that an outside cause stops the work of the ended turn: the ticket
     # goes to the blocked lane, once per turn, also when the judge could not move it.
     if live and s["ended"] and s.get("judge") == "blocked":
@@ -5075,47 +5072,12 @@ def read_turn(s, recheck=False, now=None):
             started = session_state.ensure_judged_stale(sid, shell, P.ROOT, act)
         s["judging"] = started or session_state.judge_started(sid, shell)
         s["judge"], s["judge_why"] = session_state.judged(sid, shell)
-        s["judge_from"] = session_state.judge_source(sid, shell)
         at = session_state.judge_started_at(sid, shell)
         s["judge_dead"] = bool(at) and not s["judge"] \
             and now - at >= session_state.JUDGE_STALE
-        if s["ended"] and s["judge"] == "unsure" and s["judge_from"] != "recap":
-            s["recap"] = _recap(s, act, path, now)
     except Exception:                                   # noqa: BLE001 - the scan goes on
         pass
     return s
-
-
-def _recap(s, act, path, now):
-    """Ask the session for its recap when the judge is unsure of its last message: type
-    `/recap` into its terminal once per turn, then start the judge on the recap once it
-    stands in the transcript. Returns the recap's state for the signals: `sent`, `missing`
-    (none came within `RECAP_WAIT`), `reading`, `dead` (the judge on it left no verdict) or
-    `unsent` (no transcript, or the terminal took no keys)."""
-    import session_state
-    sid, shell = s["session"], s.get("mark_shell") or 0
-    if not act or not act.get("since"):
-        return "unsent"
-    turn = "%.3f" % act["since"]
-    rec = session_state.recap_record(sid, shell)
-    if rec.get("turn") != turn:
-        try:
-            send_session(s, "/recap", ["Enter"])
-        except Exception:                               # noqa: BLE001 - no terminal, no recap
-            return "unsent"
-        session_state.mark_recap_sent(sid, shell, turn, now)
-        return "sent"
-    try:
-        sent, judging = float(rec.get("sent") or 0), float(rec.get("judging") or 0)
-    except (TypeError, ValueError):
-        sent = judging = 0
-    if judging:
-        return "dead" if now - judging >= session_state.JUDGE_STALE else "reading"
-    text = session_state.recap_after(sid, path, sent)
-    if text:
-        session_state.start_judge(sid, shell, text, P.ROOT, recap=True)
-        return "reading"
-    return "missing" if now - sent >= session_state.RECAP_WAIT else "sent"
 
 
 # Seconds a new Claude may take to reach its first hook before the board shows it as
@@ -5300,10 +5262,7 @@ def wait_state(s, t, now=None):
              ended turn, or of the stale one               input, event (blocked), finished,
                                                            subagent/blocker
            no verdict yet                                  idle (a stale turn: None)
-        6  the judge is unsure: its verdict on the recap
-             the board asked for                           input, event (blocked), finished,
-                                                           subagent/blocker
-           no recap, or unsure again                       idle
+        6  the judge is unsure                             idle
 
     Where the ticket stands decides nothing: the judge reads it with the last message, and
     `finish_undone` and `plan_open` are only notes in `wait_signals`. The finished line
@@ -5341,7 +5300,7 @@ def wait_state(s, t, now=None):
     ended = bool(s.get("ended"))
     said = s.get("says_finished")
     said = session_state.FINISHED_LINE if said is True else said or ""
-    # The finished line ends the session: no report, ticket, job, judge or recap is read.
+    # The finished line ends the session: no report, ticket, job or judge is read.
     if ended and said in session_state.FINISHED_LINES:
         if manager:
             return "idle", "manager: waits for the owner's orders"
@@ -5375,19 +5334,9 @@ def wait_state(s, t, now=None):
     judge, judge_why = s.get("judge") or "", s.get("judge_why") or ""
     quiet = "" if ended else _quiet(s, now) + "; "
     if judge == "unsure":
-        if s.get("judge_from") == "recap":
-            return "idle", "%sthe judge is unsure, of its recap too: %s" % (quiet, judge_why or "-")
-        recap = s.get("recap") or ""
-        if recap in ("sent", "reading"):
-            return "idle", "the judge is unsure of its last message; it reads the recap"
-        if recap == "missing":
-            return "idle", "the judge is unsure; no recap came: %s" % (judge_why or "-")
-        if recap == "dead":
-            return "idle", "the judge is unsure; the judge on the recap left no verdict"
         return "idle", "%sthe judge is unsure: %s" % (quiet, judge_why or "-")
     if judge:
-        return _verdict(s, t, judge, judge_why,
-                        "recap judge" if s.get("judge_from") == "recap" else "judge")
+        return _verdict(s, t, judge, judge_why, "judge")
     if s.get("judge_dead"):
         return "idle", "%sthe judge left no verdict" % quiet
     if ended:
@@ -5452,8 +5401,7 @@ def wait_signals(s, t):
                                     else "") if rep else "none"])
     judge, judge_why = s.get("judge") or "", s.get("judge_why") or ""
     if judge:
-        jv = "%s%s: %s" % (judge, " (of the recap)" if s.get("judge_from") == "recap" else "",
-                           judge_why) if judge_why else judge
+        jv = "%s: %s" % (judge, judge_why) if judge_why else judge
     elif s.get("rejudged"):
         jv = "the last one left no verdict: started again"
     elif s.get("judge_dead"):
@@ -5468,19 +5416,6 @@ def wait_signals(s, t):
     else:
         jv = "not run"
     out.append(["judge", jv])
-    recap = s.get("recap") or ""
-    if recap:
-        rec = session_state.recap_record(sid, shell) if sid else {}
-        sent = " " + _ago(rec.get("sent")) if rec.get("sent") else ""
-        out.append(["recap", {"sent": "sent%s, not yet in the transcript" % sent,
-                              "missing": "sent%s, none came" % sent,
-                              "reading": "read; the judge reads it",
-                              "dead": "read; its judge left no verdict",
-                              "unsent": "could not be sent"}.get(recap, recap)])
-    elif s.get("judge_from") == "recap":
-        out.append(["recap", "read"])
-    else:
-        out.append(["recap", "not needed"])
     out.append(["background work", _tasks_text(s["tasks"]) if s.get("tasks") else "none"])
     if s.get("killed_shells"):
         out.append(["shells killed", "pid %s: ran no process, or the session is finished"
