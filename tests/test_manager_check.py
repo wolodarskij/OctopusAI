@@ -123,6 +123,7 @@ class ManagerText(unittest.TestCase):
     def test_no_shipped_manager_text_offers_a_no_change_line(self):
         from support import OCTOPUS
         for rel in ("core/engine/brief/repeat.manager.md", "core/skills/octopusmanager/SKILL.md",
+                    "core/skills/manager-check/SKILL.md", "core/skills/manager-brief/SKILL.md",
                     "core/engine/managercheck.py", "core/engine/sessionreport.py"):
             text = (OCTOPUS / rel).read_text(encoding="utf-8").lower()
             self.assertNotIn("only when an agent changed", text, rel)
@@ -369,14 +370,31 @@ class Wake(FixtureCase):
         t, brief = self.stale_brief()
         self.assertEqual(todo_server._wake_project(self.root, 1e9), [])
         text = self.send.call_args[0][1]
-        self.assertIn(brief.as_posix(), text)
-        self.assertIn("Manager brief", text)
-        self.assertIn(T.MANAGER_BRIEF_ANSWER, text)
-        self.assertNotIn("write nothing", text.lower())
+        self.assertEqual(text, '/manager-brief "%s"' % brief.as_posix())
         self.assertFalse(T.manager_brief_stale(t))
         self.send.reset_mock()
         todo_server._wake_project(self.root, 1e9 + 30)
         self.assertFalse(self.send.called)
+
+    def test_a_session_with_no_brief_skill_gets_the_full_brief_text(self):
+        _t, brief = self.stale_brief()
+        self.live = [sess(SID_A, self.mid, None, provider="codex")]
+        todo_server._wake_project(self.root, 1e9)
+        text = self.send.call_args[0][1]
+        self.assertIn(brief.as_posix(), text)
+        self.assertIn("Manager brief", text)
+        self.assertIn(T.MANAGER_BRIEF_ANSWER, text)
+        self.assertNotIn("write nothing", text.lower())
+
+    def test_a_claude_manager_gets_the_check_as_a_skill_call(self):
+        todo_server._wake_project(self.root, 1e9)
+        todo_server._wake_project(self.root, 1e9 + C.INTERVAL)
+        self.assertEqual(self.send.call_args[0][1], "/manager-check")
+
+    def test_a_session_with_no_check_skill_gets_the_full_check_text(self):
+        for s in (sess(SID_A, self.mid, None, provider="codex"),
+                  sess(SID_A, self.mid, None, cwd=str(self.tmp / "no project"))):
+            self.assertTrue(C.wake_text(s).startswith("Manager check: run python"))
 
     def test_a_manager_waiting_for_the_owner_gets_no_new_brief(self):
         t, _brief = self.stale_brief()

@@ -44,9 +44,11 @@ full update every 10 minutes while any ticket runs, and a finished ticket within
    `CronDelete`. Start no watcher: the engine starts it. Launch, resume or send
    an order to no ticket whose session did not run when this session stopped,
    also a blocker or a watched ticket. Then wait for the owner's orders.
-2. **When the check is typed into this session** (`Manager check: run
-   {octopus} check`), run it. Print its output as it is and nothing else. When it
-   prints nothing, write nothing at all. Then end the turn.
+2. **When the check is typed into this session** (the skill call
+   `/manager-check`, or `Manager check: run {octopus} check`), run it. Print its
+   output as it is and nothing else. When it prints nothing, write nothing at all.
+   Then end the turn. The skill call `/manager-brief <path>` tells you to read
+   this brief again: follow that skill.
 3. **Each check** prints the full update in the format below whenever any agent
    finished since the last update, waits for your input, works, or waits for
    something else. Every waiting question stands in it word for word, on every

@@ -57,6 +57,9 @@ _FILED = re.compile(r"^(T\d{3,})  (\S[^\r\n]*?\.md)\s*$", re.M)
 _ENGINE_PROMPT = re.compile(r"^(?:(?:Work|Re-evaluate|Verify) ticket T\d+\. Read \S*\.briefs[\\/]"
                             r"|Run the 10-minute check:|Manager check: run |<task-notification>|You judge one Claude "
                             r"Code session)")
+# The skill calls the engine types into a manager session (`managercheck.wake_text`,
+# `todo.manager_brief_text`).
+_ENGINE_COMMAND = re.compile(r"<command-name>/(?:manager-check|manager-brief)</command-name>")
 # The launch prompt of a ticket session, and the brief it names.
 _LAUNCH = re.compile(r"(?:Work|Re-evaluate|Verify) ticket T\d+\. Read (\S*\.briefs[\\/]T\d+\.md)")
 _KEEP_TURN = ("This session is being continued", "[Request interrupted", "<local-command",
@@ -89,6 +92,8 @@ def prompt_kind(rec):
     text = text.lstrip()
     if "turnCompanion" in rec or text.startswith(_KEEP_TURN):
         return None
+    if text.startswith("<command-") and _ENGINE_COMMAND.search(text):
+        return "engine"
     if text.startswith("<command-name>"):
         # A slash command opens the owner's turn when it carries words; a bare one such as
         # `/remote-control` is also what the engine types.

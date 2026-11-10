@@ -634,9 +634,12 @@ the owner. It grants `projects`, so the session reaches every registered project
   fails a Waiting line about any other agent.
 - **The manager's check is always on, and it gives the full update every 10 minutes while
   any ticket runs.** The board's watchdog runs the check in Python every 10 minutes for each
-  manager session, of every AI provider. It types `octopus check` into the session while any
+  manager session, of every AI provider. It types the check into the session while any
   agent finished since the last update, waits for the owner, works or waits for something
-  else, and when a notice that was not reported yet arrived. A finished ticket reaches the
+  else, and when a notice that was not reported yet arrived. A Claude Code session gets the
+  skill call `/manager-check`, and `/manager-brief <path>` when its brief changed; a session
+  whose project holds no such skill, or of another AI provider, gets the full text of each.
+  A finished ticket reaches the
   owner within one interval. The manager makes no `CronCreate` job for the check. While the
   board does not run, the engine's watcher, `octopus check --watch`, does the same. The
   engine starts it with the manager and at each end of the manager's turn when it does not

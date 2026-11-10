@@ -20,7 +20,8 @@ context with the next prompt (`NOTE`):
 THE REQUEST is the owner's last prompt. A scheduled prompt (the manager's routine) is the
 request it holds. A launch prompt ("Work ticket T0001. Read TODO/.briefs/...") is the request
 of its brief: what the brief asks the last message for (`LAUNCH_ASKS`), and the owner's note
-of the launch.
+of the launch. A skill call is the request of the skill it calls: the text of the
+skill that its pointer names, with the arguments of the call (`skill_text`).
 
 THE VERDICT. The project's headless provider (Claude Haiku or Codex) reads the request, lists its parts,
 and names each failing sentence with a quote (`PROMPT`). A sentence that says a part of the
@@ -248,8 +249,36 @@ def request_of(path):
         text = _text_of(msg.get("content")).strip()
         # Claude Code's own lines: a command's caveat or output, a system reminder.
         if text and not text.startswith("<"):
-            return text
+            return skill_text(text)
     return ""
+
+
+_SKILL_ROW = re.compile(r"\ABase directory for this skill: ([^\r\n]+)")
+_POINTER_SOURCE = re.compile(r"Read `([^`]+/SKILL\.md)` now and follow it")
+_ARGUMENTS = re.compile(r"^Arguments: (.*)$", re.M)
+_FRONTMATTER = re.compile(r"\A---\r?\n.*?\r?\n---[ \t]*(?:\r?\n|\Z)", re.S)
+
+
+def skill_text(text):
+    """The request of a skill call: the text of the skill that a skill pointer
+    (`agents.skill_pointer`) names, with the arguments of the call, in place of the pointer.
+    Any other text is returned as it is."""
+    row = _SKILL_ROW.match(text)
+    src = _POINTER_SOURCE.search(text) if row else None
+    if not src:
+        return text
+    # The pointer sits in `<project>/.claude/skills/<name>/`; its source path is relative to
+    # the project.
+    try:
+        root = Path(row.group(1).strip()).parent.parent.parent
+        body = (root / src.group(1)).read_text(encoding="utf-8")
+    except (OSError, ValueError):
+        return text
+    body = _FRONTMATTER.sub("", body, count=1).strip()
+    args = _ARGUMENTS.search(text)
+    if args and args.group(1).strip():
+        body += "\n\nArguments: %s" % args.group(1).strip()
+    return body
 
 
 def note_of(brief):

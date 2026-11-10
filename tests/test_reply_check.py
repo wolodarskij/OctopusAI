@@ -71,6 +71,21 @@ class ReplyCheck(support.FixtureCase):
         rc.write_note(note, [("x.", "")], now=0)
         self.assertEqual(rc.take_note(note), "")
 
+    def test_a_skill_call_asks_for_what_its_skill_says(self):
+        root = self.make("Skill reply")
+        row = ("Base directory for this skill: %s
+
+"
+               % (root / ".claude" / "skills" / "manager-brief")
+               + (root / ".claude/skills/manager-brief/SKILL.md").read_text(encoding="utf-8")
+               .split("---
+", 2)[2].replace("$ARGUMENTS", '"TODO/.briefs/T0001.md"'))
+        req = rc.skill_text(row)
+        self.assertIn("The new manager instructions are read and in force.", req)
+        self.assertIn('Arguments: "TODO/.briefs/T0001.md"', req)
+        self.assertNotIn("skill-pointer", req)
+        self.assertEqual(rc.skill_text("Fix the greeting."), "Fix the greeting.")
+
     def test_a_launch_prompt_asks_for_what_its_brief_asks(self):
         req = rc.launch_request("Work ticket T0001. Read TODO/.briefs/T0001.md first.")
         self.assertIn("WORK IS FINISHED", req)

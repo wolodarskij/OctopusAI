@@ -5028,6 +5028,7 @@ def live_sessions(tickets=None, recheck=False):
             "goal": "",
             "mark_shell": pid,
             "starting": not hooked and claude is not None and not waiting,
+            "cwd": rec.get("cwd") or "",
         })
 
     # A shell inside a pseudoconsole `session_pty.py` holds has no window: the page reads
@@ -5083,6 +5084,7 @@ def live_sessions(tickets=None, recheck=False):
             "goal": " - ".join(x for x in (agent, goal) if x),
             "mark_shell": rec.get("shell") or 0,
             "starting": False,
+            "cwd": rec.get("cwd") or "",
         })
 
     found.sort(key=lambda s: s["created"])
@@ -5906,16 +5908,35 @@ def rewrite_manager_brief(t):
 
 
 MANAGER_BRIEF_ANSWER = "The new manager instructions are read and in force."
+# The skills that hold what the engine types into a manager session.
+MANAGER_CHECK_SKILL = "manager-check"
+MANAGER_BRIEF_SKILL = "manager-brief"
 
 
-def manager_brief_text(path):
-    """What the board types into a manager session whose brief changed. It names the one
-    line the manager answers with, so the answer is never empty."""
-    return ("Manager brief: the engine changed your instructions. Read %s again, first and "
-            "in full, and follow it from now on in place of the text you read before. Do "
-            "what it orders at the start of a session. Then answer with this one line: "
-            "`%s` End this turn and keep the session open for the owner."
-            % (Path(path).as_posix(), MANAGER_BRIEF_ANSWER))
+def skill_call(s, name, args=""):
+    """The slash command that calls skill `name` in session `s`, or "" when the session runs
+    another AI provider than Claude Code, or its directory (`cwd`, else the current project's
+    root) holds no `.claude/skills/<name>/SKILL.md`."""
+    s = s or {}
+    if (s.get("provider") or "claude") != "claude":
+        return ""
+    root = Path(s.get("cwd") or P.ROOT)
+    if not (root / ".claude" / "skills" / name / "SKILL.md").is_file():
+        return ""
+    return ("/%s %s" % (name, args)).strip()
+
+
+def manager_brief_text(path, s=None):
+    """What the board types into a manager session `s` whose brief changed: the skill call
+    `/manager-brief <path>`, or the full text when the session cannot call the skill. Both
+    name the one line the manager answers with, so the answer is never empty."""
+    path = Path(path).as_posix()
+    return skill_call(s, MANAGER_BRIEF_SKILL, '"%s"' % path) or (
+        "Manager brief: the engine changed your instructions. Read %s again, first and "
+        "in full, and follow it from now on in place of the text you read before. Do "
+        "what it orders at the start of a session. Then answer with this one line: "
+        "`%s` End this turn and keep the session open for the owner."
+        % (path, MANAGER_BRIEF_ANSWER))
 
 
 def cmd_remote_control(args):

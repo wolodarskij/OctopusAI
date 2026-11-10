@@ -65,14 +65,17 @@ FOLLOWUPS = "Follow-ups"
 _TICKET = re.compile(r"\bT\d{4,}\b")
 
 
-def wake_text():
-    """What the board and the watcher type into a manager session on news."""
-    return ('Manager check: run python "%s" check. Print its output as it is; when it '
-            'prints nothing, write nothing. Decide each notice it lists with the command it '
-            'names, and write nothing about the notices. Then end this turn immediately. '
-            'Keep the session open for the owner. Do not call sleep, poll, close the '
-            'session, or schedule another check; the engine owns the timer.'
-            % (project.OCTOPUS / "octopus.py").as_posix())
+def wake_text(s=None):
+    """What the board and the watcher type into a manager session `s` on news: the skill
+    call `/manager-check`, or the full text when the session cannot call the skill."""
+    import todo as T
+    return T.skill_call(s, T.MANAGER_CHECK_SKILL) or (
+        'Manager check: run python "%s" check. Print its output as it is; when it '
+        'prints nothing, write nothing. Decide each notice it lists with the command it '
+        'names, and write nothing about the notices. Then end this turn immediately. '
+        'Keep the session open for the owner. Do not call sleep, poll, close the '
+        'session, or schedule another check; the engine owns the timer.'
+        % (project.OCTOPUS / "octopus.py").as_posix())
 
 
 def claim_wake(key, now, interval=INTERVAL):
@@ -127,7 +130,7 @@ def wake_home(now, note=None, mark=False):
         if T.manager_brief_stale(t):
             brief = T.rewrite_manager_brief(t)
             try:
-                T.send_session(s, T.manager_brief_text(brief), ["Enter"])
+                T.send_session(s, T.manager_brief_text(brief, s), ["Enter"])
             except (OSError, ValueError) as exc:
                 os.utime(str(brief), ns=(0, 0))         # stale again: the next tick tries again
                 print("watchdog: %s %s: the new brief could not be typed: %s"
@@ -139,7 +142,7 @@ def wake_home(now, note=None, mark=False):
         if not news:
             continue
         try:
-            T.send_session(s, wake_text(), ["Enter"])
+            T.send_session(s, wake_text(s), ["Enter"])
         except (OSError, ValueError) as exc:
             print("watchdog: %s %s: the check could not be typed: %s" % (root.name, s["id"], exc))
             continue
