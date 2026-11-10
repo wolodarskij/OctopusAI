@@ -181,9 +181,8 @@ since your last update, once. Print its output as it is. Each agent is one line:
   finished ticket's result or outcome names is not a question: that agent stands
   only under Finished. Never move a row from Finished, Working or Other into
   Waiting for your input.
-- **A session the engine calls `input` that in fact waits for another ticket or
-  a background job goes under Other.** The command does it; correct a row it got
-  wrong before you send it, from the `screen` of that session.
+- **Every agent the engine calls `input` stands under Waiting for your input,**
+  also when its ticket waits for another ticket or it holds a background job.
 - **Never repeat** an agent under Finished: the command names each one in the
   update where it finished, and never again.
 - **Never write "no change"**, "nothing changed" or any line like it, in an

@@ -1229,15 +1229,14 @@ _RELAYS = re.compile(r"\s[-\u2013\u2014]\s*(?:asks?|question)\s*:", re.I)
 
 def relayed(quote, message, own=()):
     """Whether the quote of an `input` verdict is another ticket's question that the message
-    only relays: it names a ticket other than the session's `own`, and it reads `- asks:`
-    or stands on a list item of the message."""
-    others = set(_TICKET_ID.findall(quote or "")) - set(own)
-    if not others:
-        return False
-    if _RELAYS.search(quote):
+    only relays: it names a ticket other than the session's `own` and reads `- asks:`, or it
+    stands on a list item of the message that names a ticket other than `own`, whether the
+    quote names that ticket or not."""
+    if set(_TICKET_ID.findall(quote or "")) - set(own) and _RELAYS.search(quote):
         return True
-    head = _plain(re.split(r"\.\.\.|\u2026", quote)[0]).strip(" .,;:")
+    head = _plain(re.split(r"\.\.\.|\u2026", quote or "")[0]).strip(" .,;:")
     return any(head and head in _plain(ln) and _LIST_ITEM.match(ln)
+               and set(_TICKET_ID.findall(ln)) - set(own)
                for ln in (message or "").splitlines())
 
 

@@ -342,10 +342,16 @@ class Wake(FixtureCase):
         self.assertEqual(len(todo_server._wake_project(self.root, 1e9 + C.INTERVAL)), 1)
 
     def test_a_manager_waiting_for_the_owner_is_not_typed_into(self):
-        self.live = [sess(SID_A, self.mid, "input")]
+        self.live = [sess(SID_A, self.mid, "input", dialog=True)]
         todo_server._wake_project(self.root, 1e9)
         self.assertEqual(todo_server._wake_project(self.root, 1e9 + C.INTERVAL), [])
         self.assertFalse(self.send.called)
+
+    def test_a_manager_read_as_input_from_its_update_is_woken(self):
+        # The judge read the questions that the manager's update relays as its own.
+        self.live = [sess(SID_A, self.mid, "input", why="judge: input")]
+        todo_server._wake_project(self.root, 1e9)
+        self.assertEqual(len(todo_server._wake_project(self.root, 1e9 + C.INTERVAL)), 1)
 
     def test_the_board_writes_its_heartbeat(self):
         todo_server._wake_project(self.root, 1e9)
@@ -374,13 +380,13 @@ class Wake(FixtureCase):
 
     def test_a_manager_waiting_for_the_owner_gets_no_new_brief(self):
         t, _brief = self.stale_brief()
-        self.live = [sess(SID_A, self.mid, "input")]
+        self.live = [sess(SID_A, self.mid, "input", dialog=True)]
         todo_server._wake_project(self.root, 1e9)
         self.assertFalse(self.send.called)
         self.assertTrue(T.manager_brief_stale(t))
 
     def test_the_view_says_when_the_check_is_late_and_why(self):
-        self.live = [sess(SID_A, self.mid, "input")]
+        self.live = [sess(SID_A, self.mid, "input", dialog=True)]
         todo_server._wake_project(self.root, 1e9)
         late = 1e9 + C.INTERVAL + C.LATE_MARGIN + 1
         view = todo_server.manager_check_view(late)

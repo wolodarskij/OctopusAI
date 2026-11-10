@@ -117,7 +117,10 @@ def wake_home(now, note=None, mark=False):
             if s.get("id") in managers and s.get("mode") == "work" and s.get("claude")]
     note(now, managers, "" if live else "no manager session runs")
     for s in live:
-        if s.get("wait") == "input":
+        # Keys typed into an open dialog, or into a question before the first turn, would
+        # answer it. Any other `input` word comes from the manager's own update, which lists
+        # the questions of other agents: the check goes on.
+        if s.get("dialog") or s.get("hooked") is False:
             note(now, managers, "the manager waits for your answer")
             continue
         t = managers[s["id"]]

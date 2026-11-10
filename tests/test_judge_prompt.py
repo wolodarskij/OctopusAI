@@ -134,6 +134,13 @@ class Verdict(unittest.TestCase):
                 '{"state": "input", "why": "w", "quote": "%s"}' % quote, sources)
             self.assertIsNone(verdict)
             self.assertIn("only relays", fault)
+        # Haiku, 2026-11-10, on the manager's update: input, quoting another ticket's question
+        # without its ticket id.
+        verdict, fault = session_state.check_verdict(
+            '{"state": "input", "why": "w", "quote": "keep the old column order or sort by '
+            'severity?"}', sources)
+        self.assertIsNone(verdict)
+        self.assertIn("only relays", fault)
         # The same line is a fine proof that it waits for those sessions.
         self.assertIsNotNone(session_state.parse_verdict(
             '{"state": "working", "why": "w", "quote": "T0034 \\"Enemies: bandits\\" - '

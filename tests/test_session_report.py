@@ -75,9 +75,9 @@ class Report(FixtureCase):
         own = sess(SID_OWN, None, None, mode="cli")
         rows, text = self.run_report(False, self.sessions + [own])
         self.assertEqual(self.section(rows, "working"), [self.work])
-        self.assertEqual(self.section(rows, "input"), [self.ask])
-        # `input` with a scheduled job still does its own work: Other.
-        self.assertEqual(self.section(rows, "other"), [self.wait])
+        # Every open session in the `input` state waits for the owner, also one with a job.
+        self.assertEqual(self.section(rows, "input"), sorted([self.ask, self.wait]))
+        self.assertEqual(self.section(rows, "other"), [])
         # The manager and the session that runs the report are left out.
         self.assertNotIn(self.mid, [r.get("id") for r in rows])
         self.assertNotIn(SID_OWN, [r.get("session") for r in rows])

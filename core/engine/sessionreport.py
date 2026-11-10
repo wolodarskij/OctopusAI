@@ -25,9 +25,9 @@ investigation (`asks_answer`) carries the lines of the ticket's last `## Result`
 sub-line each, under its line (`answer_lines`). A session with no ticket is
 `<project> <session> (<mode>)`. Waiting for your input holds only an open session whose agent
 runs and whose state is `input`; a finished or closed one is under Finished, whatever its
-ticket's result names for the owner. A session the engine calls `input` whose ticket waits for
-other tickets, or that still holds a background task or a scheduled job, is under Other. The
-manager sessions and the session that runs the command are left out.
+ticket's result names for the owner. Every open session the engine calls `input` is there,
+also when its ticket waits for other tickets or it holds a background task or a scheduled
+job. The manager sessions and the session that runs the command are left out.
 
 SINCE THE LAST CALL. `--since-last` reads the snapshot of the last call
 (`sessions-snapshot.json` beside the registry, outside every repository) and writes it again.
@@ -231,8 +231,6 @@ def classify(T, s, t):
         # Only an open session whose agent still runs waits for the owner.
         if not s.get("claude"):
             return "finished", finished_text(T, t, why)
-        if T._waits_on_tickets(s, t) or s.get("tasks") or s.get("jobs"):
-            return "other", why
         return "input", _question(s)
     return "other", ("%s: %s" % (word, why) if why else word)
 
