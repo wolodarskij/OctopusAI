@@ -1547,7 +1547,7 @@ const sessOf = id => (DATA.sessions || []).filter(s => s.id === id);
 const CAT_CODE = "project code";
 const slugOf = x => String(x || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 
-/* The lanes are the project's data. A role (ai, start, active, blocked, verify, closed) names
+/* The lanes are the project's data. A role (ai, start, active, blocked, paused, verify, closed) names
    the lane the code needs; the label is what the page writes; the colour is a custom
    property per lane directory, set from the snapshot. */
 const laneOf = role => (DATA.roles || {})[role] || role;

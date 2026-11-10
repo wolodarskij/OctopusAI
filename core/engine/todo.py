@@ -249,11 +249,12 @@ def manager_lane_problem(t, state, status=None):
     """Why a manager ticket may not sit in `state` with `status`, or empty when it may.
 
     A manager runs in the active lane or waits in the start lane. It never finishes, so it
-    never enters the verify lane, never waits on a blocker, and leaves the closed lane to the
-    owner's `cancelled` or `closed by other task`."""
+    never enters the verify lane, never waits on a blocker, is never paused (the owner stops
+    it with `restart --no-launch`), and leaves the closed lane to the owner's `cancelled` or
+    `closed by other task`."""
     if t.repeat != MANAGER:
         return ""
-    if state in (lane("verify"), lane("blocked")):
+    if state in (lane("verify"), lane("blocked"), lane("paused")):
         return ("%s is a manager ticket: it never enters %s. It runs in %s or waits in %s"
                 % (t.id, state, lane("active"), lane("start")))
     if state == lane("closed") and (status or default_status(state)) not in P.OWNER_CLOSES:
@@ -1930,6 +1931,29 @@ def _refuse_block_by_user():
     return 2
 
 
+def _may_pause(args):
+    """Whether this caller may pause a ticket, or launch a session on a paused one.
+
+    Only the owner pauses a ticket and ends its pause: the owner's own shell, outside every
+    AI session, or a session the owner ordered in its chat, which passes `--owner-order` with
+    the order in neutral words. A ticket, a session or the engine never pauses a ticket on
+    its own."""
+    return bool(_owner_words(args)) or not _in_ai_session()
+
+
+def _refuse_pause(what="pauses a ticket"):
+    for line in (
+        "Error: only the owner's order %s." % what,
+        "  A paused ticket's agent is stopped and its work is not finished. A ticket that",
+        "  waits for another ticket or an outside cause goes to %s, and a question goes to"
+        % lane("blocked"),
+        "  the owner. When the owner ordered it in this session's chat, pass",
+        "    --owner-order \"<the order, in neutral words>\"",
+    ):
+        print(line, file=sys.stderr)
+    return 2
+
+
 def cmd_move(args):
     ensure_tree()
     state = args.state
@@ -1958,6 +1982,8 @@ def cmd_move(args):
         return 2
     if args.status == P.OWNER_BLOCKS and not _may_block_by_user(args):
         return _refuse_block_by_user()
+    if state == P.PAUSED and not _may_pause(args):
+        return _refuse_pause()
     ordered = _owner_words(args)
     tickets = load_all()
     said = getattr(args, "outcome", None)
@@ -2013,6 +2039,9 @@ def cmd_move(args):
         rc = _guard_take(taken, ordered)
         if rc:
             return rc
+    if state != P.PAUSED and any(t.state == P.PAUSED for t in targets) \
+            and not _may_pause(args):
+        return _refuse_pause("ends the pause of a ticket")
 
     if args.epic:
         epics = load_epics()
@@ -2034,6 +2063,9 @@ def cmd_move(args):
                 _restatus(f, state, args.status)
         moved.append("epic %s (%d ticket(s))"
                      % (args.epic, len(list(dst.glob("*.md"))) - 1))
+        if state == P.PAUSED:
+            for t in targets:
+                moved.extend(end_ticket_sessions(t.id, paused=True))
     else:
         for ident in args.ids:
             t = find(tickets, ident)
@@ -2071,6 +2103,8 @@ def cmd_move(args):
                 record_owner_order(dst, state, args.status or default_status(state), ordered)
             if state == lane("closed") and (args.status or "") in P.OWNER_CLOSES:
                 moved.extend(end_ticket_sessions(t.id))
+            if state == P.PAUSED:
+                moved.extend(end_ticket_sessions(t.id, paused=True))
 
     if args.dry_run:
         return 0
@@ -2132,10 +2166,12 @@ def record_owner_order(path, state, status, words):
     _write(path, render(meta, body))
 
 
-def end_ticket_sessions(tid):
+def end_ticket_sessions(tid, paused=False):
     """Close every open session of a ticket the owner cancelled or closed, so no agent
-    keeps waiting on it. The session this command runs in cannot end its own shell: it
-    gets the `--self` command instead. Returns one line per session."""
+    keeps waiting on it, or `paused`: every open session of a ticket the owner paused, so
+    its agent stops. The session this command runs in cannot end its own shell: it gets the
+    `--self` command instead, and a paused ticket's own session closes when its turn ends
+    (`close_when_finished`). Returns one line per session."""
     out = []
     try:
         sessions = [s for s in live_sessions() if s["id"] == tid]
@@ -2143,6 +2179,14 @@ def end_ticket_sessions(tid):
         return ["%s  its sessions were not read: %s" % (tid, exc)]
     for s in sessions:
         if _is_own_session(s):
+            if paused:
+                argv = [sys.executable, str(Path(__file__).resolve()), "--project",
+                        str(P.ROOT), "close", tid, "--when-finished"]
+                if s["mode"]:
+                    argv += ["--mode", s["mode"]]
+                spawn_detached(argv)
+                out.append("%s  runs this command: it closes when this turn ends" % s["key"])
+                continue
             out.append("%s  runs this command: %s close %s --mode %s --self closes it"
                        % (s["key"], P.cli, tid, s["mode"]))
             continue
@@ -2424,6 +2468,10 @@ def cmd_new(args):
         return 2
     if args.status == P.OWNER_BLOCKS and not _may_block_by_user(args):
         return _refuse_block_by_user()
+    if args.state == P.PAUSED:
+        print("Error: a new ticket does not go to %s: the owner pauses a ticket whose session "
+              "already did some of its work" % P.STATE_LABEL[P.PAUSED], file=sys.stderr)
+        return 2
     differs = [x.strip().upper() for x in getattr(args, "not_duplicate", None) or []
                if x.strip()]
     why_differs = " ".join((getattr(args, "why", None) or "").split())
@@ -4534,6 +4582,8 @@ def cmd_work(args):
         print("Error: %s is a manager ticket: it runs only as `work`. It has nothing to plan, "
               "review or verify." % t.id, file=sys.stderr)
         return 2
+    if t.state == P.PAUSED and not getattr(args, "dry_run", False) and not _may_pause(args):
+        return _refuse_pause("starts an agent on a paused ticket")
     try:
         provider = launch_provider(t, getattr(args, "provider", None))
         # A model or an effort the provider cannot run never reaches its command line.
@@ -4615,7 +4665,11 @@ def cmd_work(args):
     if _open_terminal(line, title, terminal, tab=tab, env=env, ticket=t.id, mode=mode) != 0:
         return 2
     record_launch(t, mode, provider)
+    was_paused = t.state == P.PAUSED
     moved = start_lane(t, mode)
+    if was_paused and _owner_words(args):
+        state, status = P.LAUNCH_LANE[mode]
+        record_owner_order(t.path, state, status, _owner_words(args))
     if t.repeat == MANAGER:
         _ensure_manager_watcher()
     print("%s  %s  launched in a new terminal%s"
@@ -6228,6 +6282,12 @@ def _is_own_session(s, procs=None):
     return False
 
 
+def _ticket_paused(tid):
+    """Whether the ticket `tid` sits in the paused lane."""
+    t = find(load_all(), tid) if tid else None
+    return t is not None and t.state == P.PAUSED
+
+
 def close_when_finished(ident, mode=None, wait=SELF_CLOSE_WAIT, poll=2, now=False):
     """Wait until the session's turn has ended, then close its terminal when it is
     `finished`. A session that waits for the owner, an event, a subagent or a blocker stays
@@ -6237,13 +6297,19 @@ def close_when_finished(ident, mode=None, wait=SELF_CLOSE_WAIT, poll=2, now=Fals
     `now` is the `Stop` hook's word that the turn ended with `WORK IS FINISHED`: the
     terminal closes at once, with no wait for the state word, while that turn
     is still the last one. A session found in a new turn, or whose last turn no longer says
-    it, gets the wait for `finished` instead."""
+    it, gets the wait for `finished` instead. A session whose ticket the owner paused closes
+    once its turn ends, whatever its state."""
     import time
     end = time.time() + wait
     while True:
         s = find_session(ident, mode, live_sessions())
         if s is None:
             return 0
+        if not s["running"] and _ticket_paused(s.get("id")):
+            try:
+                return close_session(s, force=True)
+            except ValueError:
+                return 1
         if now:
             now = False
             if not s["running"] and s.get("says_finished"):
@@ -6659,6 +6725,10 @@ def _report_blocked(t, sid, mode, why, tried):
     if problem:
         print("Error: %s." % problem, file=sys.stderr)
         return 2
+    if t.state == P.PAUSED:
+        print("Error: %s is paused: the owner stopped its agent, and only the owner's order "
+              "moves it out of %s." % (t.id, P.STATE_LABEL[P.PAUSED]), file=sys.stderr)
+        return 2
     _to_blocked(t, sid, session_state.owning_shell(), why, "Tried: %s" % tried)
     print("%s  %s -> %s / %s; %s/%s reported event: %s"
           % (t.id, P.STATE_LABEL[t.state], P.STATE_LABEL[state], status, t.id, mode, why))
@@ -6696,12 +6766,13 @@ def auto_block(tid, mode, sid, shell, why):
     """Move the ticket `tid` of a session whose judge found that an outside cause stops its
     work, `why`, to the blocked lane as `blocked by outside cause`, as `report blocked`
     would: the cause goes under `## Blocked`, and the session is reported as `event`.
-    A manager, a ticket in the blocked or the closed lane, and a ticket in the verify lane
-    whose `verify` session it is not stay where they are. Returns whether it moved."""
+    A manager, a ticket in the blocked, the paused or the closed lane, and a ticket in the
+    verify lane whose `verify` session it is not stay where they are. Returns whether it
+    moved."""
     t = find(load_all(), tid)
     if t is None or t.repeat == MANAGER or mode not in MODES:
         return False
-    if t.state in (lane("blocked"), lane("closed")) or (
+    if t.state in (lane("blocked"), P.PAUSED, lane("closed")) or (
             t.state == lane("verify") and mode != "verify"):
         return False
     why = " ".join((why or "").split()) or "an outside cause that the session did not name"
@@ -7289,6 +7360,9 @@ def _main(argv):
     p.add_argument("--provider", "--agent", dest="provider", choices=list(_project.PROVIDERS),
                    help="the AI provider to start; absent is the project's default. "
                         "--agent is its old name")
+    p.add_argument("--owner-order", dest="owner_order", metavar="WORDS",
+                   help="the owner ordered this launch in this session's chat, in "
+                        "neutral words: an AI session needs it to start a paused ticket")
     p.set_defaults(fn=cmd_work, mode="work")
 
     p = sub.add_parser("plan", help="launch a Claude session that only produces the plan")
@@ -7303,6 +7377,9 @@ def _main(argv):
     p.add_argument("--provider", "--agent", dest="provider", choices=list(_project.PROVIDERS),
                    help="the AI provider to start; absent is the project's default. "
                         "--agent is its old name")
+    p.add_argument("--owner-order", dest="owner_order", metavar="WORDS",
+                   help="the owner ordered this launch in this session's chat, in "
+                        "neutral words: an AI session needs it to start a paused ticket")
     p.set_defaults(fn=cmd_work, mode="plan")
 
     p = sub.add_parser("review", help="a session that re-evaluates the ticket, not the code")
@@ -7317,6 +7394,9 @@ def _main(argv):
     p.add_argument("--provider", "--agent", dest="provider", choices=list(_project.PROVIDERS),
                    help="the AI provider to start; absent is the project's default. "
                         "--agent is its old name")
+    p.add_argument("--owner-order", dest="owner_order", metavar="WORDS",
+                   help="the owner ordered this launch in this session's chat, in "
+                        "neutral words: an AI session needs it to start a paused ticket")
     p.set_defaults(fn=cmd_work, mode="review")
 
     p = sub.add_parser("verify", help="a session that proves a Verification ticket, and the "
@@ -7332,6 +7412,9 @@ def _main(argv):
     p.add_argument("--provider", "--agent", dest="provider", choices=list(_project.PROVIDERS),
                    help="the AI provider to start; absent is the project's default. "
                         "--agent is its old name")
+    p.add_argument("--owner-order", dest="owner_order", metavar="WORDS",
+                   help="the owner ordered this launch in this session's chat, in "
+                        "neutral words: an AI session needs it to start a paused ticket")
     p.set_defaults(fn=cmd_work, mode="verify")
 
     p = sub.add_parser("query", help="one call for a question asked in chat")

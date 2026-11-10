@@ -82,6 +82,7 @@ DASH = "—"
 ANSWER_LINES = 30
 # The text of an agent whose session ended while its ticket's order is not carried out.
 BLOCKED_TEXT = "blocked: its session ended, and the ticket's order is not carried out to the end"
+PAUSED_TEXT = "paused: the owner stopped its agent, and its work is not finished"
 # What in an order asks a question or an investigation.
 ASKS = re.compile(r"\?|\b(?:investigat\w*|analy[sz]\w*|finds? out|measur\w*|evaluat\w*|"
                   r"determin\w*|assess\w*|research\w*|compar\w*|root cause|whether|"
@@ -226,7 +227,10 @@ def answer_lines(T, t):
 def _ended(T, t, mode, sid, shell, text):
     """`(section, text)` of an agent whose session ended. Its ticket's order not carried out
     to the end (`todo.finish_undone`): `other`, as blocked, and the ticket goes to the blocked
-    lane (`todo.block_undone`). Else `finished` with `text`."""
+    lane (`todo.block_undone`). A ticket the owner paused: `other`, as paused. Else `finished`
+    with `text`."""
+    if t is not None and t.state == T.P.PAUSED:
+        return "other", "; ".join(x for x in (PAUSED_TEXT, _where(T, t)) if x)
     undone = T.block_undone(t, mode, sid, shell) if t is not None else ""
     if not undone:
         return "finished", text

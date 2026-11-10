@@ -321,6 +321,10 @@ def act_move(body):
             shutil.move(str(t.path), str(dst))
             T._restatus(dst, state, status)
             moved.append(tid)
+    # A ticket the owner paused stops its agent: every open session of it closes.
+    if state == P.PAUSED:
+        for t in targets:
+            T.end_ticket_sessions(t.id, paused=True)
     T._prune_empty_dirs()
     T.write_index(quiet=True)
     return {"moved": moved}
@@ -388,6 +392,10 @@ def _run(fn, args):
     return rc, (lines[-1] if lines else "")
 
 
+# The order a launch from the board on a paused ticket writes under `## Owner's orders`.
+PAUSED_LAUNCH = "The owner started a session on the paused ticket from the board."
+
+
 def act_launch(body):
     """Start a Claude session on the ticket, with its permits as that session's limits.
 
@@ -407,10 +415,12 @@ def act_launch(body):
         if live:
             return {"rc": 3, "running": True, "mode": mode, "key": live[-1]["key"],
                     "session": T.ticket_session_id(t, mode)}
+    # A launch from the board is the owner's, also on a paused ticket.
     args = argparse.Namespace(id=t.id, model=model, effort=effort,
                               terminal=board_terminal(body),
                               dry_run=bool(body.get("dryRun")),
-                              note=body.get("note", ""), mode=mode, provider=provider)
+                              note=body.get("note", ""), mode=mode, provider=provider,
+                              owner_order=PAUSED_LAUNCH if t.state == P.PAUSED else None)
     rc, error = _run(T.cmd_work, args)
     out = {"rc": rc, "mode": mode, "brief": "%s/.briefs/%s.md" % (P.todo_dir, t.id),
            "session": T.ticket_session_id(t, mode),

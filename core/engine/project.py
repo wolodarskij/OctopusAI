@@ -124,8 +124,9 @@ def _provider_value_ok(key, value):
 
 # The roles a lane can have. Each names exactly one lane; `none` is a lane the code has no
 # need of, and a project may add any number of those. `ai` holds the tickets that an AI filed
-# without an owner's request.
-LANE_ROLES = ("ai", "start", "active", "blocked", "verify", "closed")
+# without an owner's request. `paused` holds the tickets the owner paused: their agent is
+# stopped, and their work is not finished.
+LANE_ROLES = ("ai", "start", "active", "blocked", "paused", "verify", "closed")
 
 DEFAULT_LANES = [
     {"dir": "Pipeline", "label": "Pipeline", "role": "start", "color": "#c9a227",
@@ -161,11 +162,38 @@ def with_ai_lane(lanes, roles=None):
     out.insert(at[0] if at else 0, ai)
     return out
 
+
+# The lane of the role `paused`. Every project has it: `with_paused_lane` puts it after the
+# blocked lane of a project whose lanes name no `paused` lane. Only the owner moves a ticket
+# into it.
+PAUSED_LANE = {"dir": "Paused", "label": "Paused", "role": "paused", "color": "#7f8c9b",
+               "statuses": ["paused"]}
+
+
+def with_paused_lane(lanes, roles=None):
+    """`lanes` with the `paused` lane after the blocked lane, when no lane has the role
+    `paused`. Its status is the word of the status role `paused`. Returns a new list."""
+    out = [dict(x) if isinstance(x, dict) else x for x in lanes]         if isinstance(lanes, list) else []
+    if any(isinstance(x, dict) and x.get("role") == "paused" for x in out):
+        return out
+    word = (roles or {}).get("paused") or "paused"
+    lane = dict(PAUSED_LANE, statuses=[word])
+    if any(isinstance(x, dict) and x.get("dir") == lane["dir"] for x in out):
+        return out
+    at = [i for i, x in enumerate(out) if isinstance(x, dict) and x.get("role") == "blocked"]
+    out.insert(at[0] + 1 if at else len(out), lane)
+    return out
+
+
+def with_added_lanes(lanes, roles=None):
+    """`lanes` with every lane that each project has: the `ai` lane and the `paused` lane."""
+    return with_paused_lane(with_ai_lane(lanes, roles), roles)
+
 # The statuses the code acts on, by role. A project renames one by mapping the role to
 # another word; the word must be a status of the lane the role needs.
 STATUS_ROLES = ("pipeline", "waiting", "investigating", "planning", "ready to implement",
                 "implementing", "testing", "blocked by other task", "blocked by outside cause",
-                "blocked by user", "done", "closed by other task", "cancelled")
+                "blocked by user", "paused", "done", "closed by other task", "cancelled")
 # A status role that a project's own lanes may not list yet: the lane of its role gets it.
 ADDED_STATUSES = {"blocked by outside cause": "blocked"}
 
@@ -851,7 +879,7 @@ class Project:
             xd = []
         self.extra_dirs_cfg = [d.strip() for d in xd]
         roles = cfg.get("statusRoles") or {}
-        self._lanes(with_ai_lane(cfg.get("lanes") or DEFAULT_LANES, roles), roles)
+        self._lanes(with_added_lanes(cfg.get("lanes") or DEFAULT_LANES, roles), roles)
         cats = cfg.get("categories") or {}
         if not isinstance(cats, dict) or not all(isinstance(v, str) for v in cats.values()):
             self.problems.append("%s/%s: `categories` must map a category to its meaning"
@@ -1016,7 +1044,7 @@ class Project:
                 "investigating": "active", "ready to implement": "active",
                 "waiting": "active", "testing": "verify", "blocked by other task": "blocked",
                 "blocked by outside cause": "blocked", "blocked by user": "blocked",
-                "done": "closed",
+                "paused": "paused", "done": "closed",
                 "closed by other task": "closed", "cancelled": "closed"}
         for r, lane_role in need.items():
             lane = self.ROLE[lane_role]
@@ -1026,6 +1054,9 @@ class Project:
         active, verify, closed = self.ROLE["active"], self.ROLE["verify"], self.ROLE["closed"]
         self.OWNER_CLOSES = (self.S["closed by other task"], self.S["cancelled"])
         self.OWNER_BLOCKS = self.S["blocked by user"]
+        # Only the owner pauses a ticket: its lane, and its status there.
+        self.PAUSED = self.ROLE["paused"]
+        self.OWNER_PAUSES = self.S["paused"]
         # Open lanes: every lane before the verify lane, the added lanes included.
         vi = self.STATES.index(verify) if verify in self.STATES else len(self.STATES)
         self.OPEN_STATES = tuple(s for s in self.STATES[:vi] if s != closed)

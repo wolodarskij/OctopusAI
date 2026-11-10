@@ -17,12 +17,13 @@ TODO/
       T0002-....md
   InProgress/           somebody works on it now
   Blocked/              another ticket, or the owner, stops it
+  Paused/               the owner paused it: its agent is stopped, its work is not finished
   Verification/         the work landed and is not yet proven
   Done/                 proven
 ```
 
 **These are the default boards.** A project renames boards and adds boards in `lanes` in
-`.octopus/project.json`. The engine needs six roles, and each role names exactly one board:
+`.octopus/project.json`. The engine needs seven roles, and each role names exactly one board:
 
 | Role | Default board |
 |---|---|
@@ -30,12 +31,14 @@ TODO/
 | `start` | Pipeline |
 | `active` | InProgress |
 | `blocked` | Blocked |
+| `paused` | Paused |
 | `verify` | Verification |
 | `closed` | Done |
 
 This rule uses the default names. Read each name as its role. The open boards are every board
 before the verify board, except the closed board. A project whose `lanes` name no `ai` board gets
-AI-Pipeline before its start board from the engine.
+AI-Pipeline before its start board from the engine. A project whose `lanes` name no `paused`
+board gets Paused after its blocked board.
 
 ## AI-Pipeline holds the tickets nobody asked for
 
@@ -121,6 +124,7 @@ names no status lands on it.
 | Blocked | `blocked by other task` | a session that finds another ticket must land first. `blocked-by:` names that ticket |
 | Blocked | `blocked by outside cause` | a session that tried every way and found an outside cause that stops its work: `report <id> blocked`. `## Blocked` names the cause and the ways it tried |
 | Blocked | `blocked by user` | the owner's direct order only |
+| Paused | `paused` | the owner's order only |
 | Verification | `waiting` | a `work` session when it finishes, and any move to Verification |
 | Verification | `testing` | a `verify` session, at its start |
 | Done | `done` | a `verify` session, when the measurement holds |
@@ -134,6 +138,21 @@ A project can map a status role to another word (`statusRoles` in `project.json`
 **Only the owner's direct order sets `blocked by user`.** A session never infers it. A ticket that
 waits for an answer from the owner stays in its board, and the session asks the owner. `move` and
 `new` refuse the status to a Claude session that does not pass `--owner-order`.
+
+**Only the owner pauses a ticket.** A paused ticket is not blocked and not finished: its
+session did some of its work, and the owner stopped it. A ticket, a session or the engine
+never pauses a ticket, and never ends a pause, on its own.
+
+- `move <id> Paused`, and a move out of Paused, refuse an AI session that does not pass
+  `--owner-order "<the order, in neutral words>"`. `new` refuses Paused: a new ticket has no
+  work to pause. A drag on the board is the owner's hand.
+- The move closes every open session of the ticket, so its agent stops. The session that
+  runs the move closes when its turn ends. The ticket keeps its session ids.
+- `work`, `plan`, `review` and `verify` of a paused ticket refuse an AI session that does not
+  pass `--owner-order`. The launch resumes the session of that mode, and moves the ticket to
+  its launch board. A launch from the board is the owner's.
+- `report <id> blocked`, the judge and the engine leave a paused ticket in Paused. A manager
+  ticket is never paused.
 
 **A session that cannot do its job tries every way to remove the cause first.** It searches the
 project for what is missing, uses another tool or another route, corrects what fails inside its
@@ -155,7 +174,7 @@ nothing, its verdict is `blocked`. The engine then moves the ticket to Blocked `
 outside cause`, writes the cause under `## Blocked`, and reports the session as `event`. The
 judge does it at once, and each scan of the sessions (the board, `sessions`, the manager's
 check) does it when the judge could not. It moves a ticket once per turn, so a ticket that the
-owner moves back stays there. It never moves a manager, a ticket in Blocked or Done, or a
+owner moves back stays there. It never moves a manager, a ticket in Blocked, Paused or Done, or a
 ticket in Verification whose `verify` session it is not.
 
 **No agent offers, proposes or asks to do only a part of the work,** and no agent asks
@@ -558,7 +577,7 @@ the owner. It grants `projects`, so the session reaches every registered project
 `python "<octopus.py>" todo --project "<name>" <command>`; its brief lists them.
 
 - **It has two places.** Pipeline: not started. InProgress `implementing`: it runs. `move`, a
-  drag on the board and `new` refuse Verification and Blocked for it, and Done unless the status
+  drag on the board and `new` refuse Verification, Blocked and Paused for it, and Done unless the status
   is `cancelled` or `closed by other task`. `check` fails it in any of those.
 - **It runs only as `work`.** `plan`, `review` and `verify` refuse it.
 - **It ships with Octopus AI.** The ticket is `core/templates/manager.md`; its instructions,
@@ -608,7 +627,8 @@ the owner. It grants `projects`, so the session reaches every registered project
   10 words>`. A finished agent whose ticket's order asks a question or an investigation
   carries its answer: the lines of the ticket's `## Result`, one sub-line each, under its
   line. An agent whose session ended while its ticket does not show its work done stands
-  under Other as `blocked`, never under Finished. **Waiting for your input lists only an
+  under Other as `blocked`, never under Finished; one whose ticket the owner paused stands
+  under Other as `paused`. **Waiting for your input lists only an
   agent whose session is open and in the `input` state.** A finished, closed or idle agent never stands there, and nor does a decision
   that a finished ticket's result names: that agent stands only under Finished. The reply check
   fails a Waiting line about any other agent.

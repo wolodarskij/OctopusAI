@@ -110,7 +110,11 @@ These are the standing orders to every manager, in every project.
 
   `{status:closed by other task}` works the same way. The move writes the order
   on the ticket and closes the ticket's open sessions. The same holds for a
-  manager ticket and for `{status:blocked by user}`.
+  manager ticket and for `{status:blocked by user}`. "Pause <id>" is
+  `move <id> {lane:paused} --owner-order "<the order, in neutral words>"`: it
+  closes the ticket's open sessions. "Continue <id>" of a paused ticket is
+  `work <id> --owner-order "<the order, in neutral words>"`. Never pause a
+  ticket, and never end a pause, without such an order.
 - **Set every configuration a task needs yourself.** A missing permit, path or
   setting goes where the engine reads it: `project.json`, a project-local
   ruleset. Then launch the session again. Never end with "set X by hand".
