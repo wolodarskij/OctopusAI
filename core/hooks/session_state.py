@@ -1092,6 +1092,23 @@ RECAP>>>
 """
 
 
+# The part of the prompt that carries the owner's note to the launch of the session.
+JUDGE_NOTE = """The owner's note to the launch of this session, between the markers:
+<<<NOTE
+%(note)s
+NOTE>>>
+"""
+
+# The rule the judge applies to that note. It outranks the definitions of the states.
+JUDGE_NOTE_RULE = """
+THE OWNER'S NOTE. Add the key "owner_ends" to your JSON object: true when the text between \
+the NOTE markers says that the work ends only when the owner says so, else false. When it is \
+true, the session is never finished, whatever its message says it did: when it is not \
+blocked and not working, it waits for the owner's next word, which is input, and the quote \
+is the line of the note that leaves the end of the work to the owner.
+"""
+
+
 # The part of the prompt for a session that waits for other agents: what it waits for, and
 # how a question of theirs reads.
 JUDGE_OTHERS = """
@@ -1175,6 +1192,14 @@ def _ticket_of(session_id):
     return ""
 
 
+def _note_of(session_id):
+    """The owner's note to the last launch on the session's ticket, for the judge; "" when
+    the session has no ticket or the launch no note."""
+    import todo
+    t, _mode = _launch_of(session_id)
+    return todo.launch_note(t.id) if t is not None else ""
+
+
 def _others_of(session_id, shell=0):
     """The lines that name the other agents the session waits for, for the judge: the
     tickets its ticket waits for with their lanes, its background work, its jobs. "" when it
@@ -1240,12 +1265,15 @@ def relayed(quote, message, own=()):
                for ln in (message or "").splitlines())
 
 
-def check_verdict(answer, sources=None, own=()):
+def check_verdict(answer, sources=None, own=(), owner_note=False):
     """`((state, why), "")` from the judge's answer: the first `{...}` in it, read as JSON;
     `why` is its explanation and its quote. `(None, fault)` when the answer holds no
     verdict, and, with `sources` (the message first), when its quote stands in none of them
     or, for `input`, relays another ticket's question: a verdict must prove itself. `unsure`
-    proves nothing and needs no quote."""
+    proves nothing and needs no quote. With `owner_note` (the prompt carried the owner's
+    note to the launch, `JUDGE_NOTE_RULE`), the answer must say in `owner_ends` whether the
+    note leaves the end of the work to the owner, and `finished` with `owner_ends` true is
+    no verdict: such a session ends only on the owner's word."""
     m = re.search(r"\{.*\}", answer or "", re.S)
     if not m:
         return None, "it held no JSON object"
@@ -1260,6 +1288,15 @@ def check_verdict(answer, sources=None, own=()):
     state = str(d.get("state") or "").strip().lower() if isinstance(d, dict) else ""
     if state not in JUDGE_STATES:
         return None, "its state was none of %s" % ", ".join(JUDGE_STATES)
+    if owner_note:
+        ends = d.get("owner_ends")
+        if isinstance(ends, str):
+            ends = {"true": True, "false": False}.get(ends.strip().lower())
+        if not isinstance(ends, bool):
+            return None, "it held no owner_ends key with true or false"
+        if ends and state == "finished":
+            return None, ("the owner's note leaves the end of the work to the owner, so the "
+                          "session is never finished")
     why = " ".join(str(d.get("why") or "").split())
     quote = " ".join(str(d.get("quote") or "").split())
     if sources is not None and not (state == "unsure" and not quote):
@@ -1268,7 +1305,8 @@ def check_verdict(answer, sources=None, own=()):
                 quote = ""
             else:
                 return None, ("its quote %r stands neither in the message, nor in the recap, "
-                              "nor in the list of what it waits for" % quote)
+                              "nor in the list of what it waits for%s"
+                              % (quote, ", nor in the owner's note" if owner_note else ""))
         if state == "input" and relayed(quote, sources[0], own):
             return None, ("its quote %r is another ticket's question that the message only "
                           "relays, which is never input" % quote)
@@ -1324,11 +1362,18 @@ def judge(session_id, shell=0):
         except ValueError:
             minutes = 0
         lead = JUDGE_LEAD_STALE % {"minutes": minutes, "doing": doing or "unknown"}
+    try:
+        note = _note_of(session_id)
+    except Exception:                                   # noqa: BLE001 - judge without it
+        note = ""
     message = str(text)[-JUDGE_CHARS:]
     prompt = JUDGE_PROMPT % {
-        "project": p.name, "lead": lead, "what": what, "ticket": ticket, "message": message,
+        "project": p.name, "lead": lead, "what": what,
+        "ticket": ticket + (JUDGE_NOTE % {"note": note} if note else ""), "message": message,
         "recap": block % {"when": when_recap or "earlier", "recap": recap} if recap else "",
         "others": JUDGE_OTHERS % {"waits": waits} if waits else ""}
+    if note:
+        prompt += JUDGE_NOTE_RULE
     own = _TICKET_ID.findall(ticket)
     verdict, fault = None, ""
     for _try in range(JUDGE_TRIES):
@@ -1340,7 +1385,8 @@ def judge(session_id, shell=0):
             }, JUDGE_SECONDS)
         except ValueError:
             return ""
-        verdict, fault = check_verdict(answer, (message, recap, waits), own)
+        verdict, fault = check_verdict(answer, (message, recap, waits, note), own,
+                                       owner_note=bool(note))
         if verdict is not None:
             break
     if verdict is None or turn_stamp(session_id, shell) != when:

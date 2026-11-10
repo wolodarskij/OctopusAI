@@ -42,11 +42,13 @@ gone, since a finished session closes its terminal at once, and one whose launch
 ticket's `sessions:` is at or after that time and whose terminal is gone, so an agent that
 started and finished between two calls is there too. A launch is reported once.
 
-NEVER FINISHED WITH ITS ORDER UNMET. A session that ended (finished, its Claude exited, or
-its terminal gone) while its ticket does not show its work done (`todo.finish_undone`) did
-not carry out its order to the end: it stands under Other as `blocked`, never under
-Finished, and its ticket goes to the blocked lane as `blocked by outside cause`
-(`todo.block_undone`). Without `--since-last`, Finished holds the sessions that are finished and still open,
+NEVER FINISHED WITH ITS ORDER UNMET. A session that ended (it said `WORK IS FINISHED`, its
+Claude exited, or its terminal is gone; `todo.session_ended`) while its ticket does not show
+its work done (`todo.finish_undone`) did not carry out its order to the end: it stands under
+Other as `blocked`, never under Finished, and its ticket goes to the blocked lane as
+`blocked by outside cause` (`todo.block_undone`). A session that is `finished` while its
+Claude runs and that did not say the finished line did not end: with its ticket's work not
+done, it stands under Other as `finished`, and its ticket stays where it is. Without `--since-last`, Finished holds the sessions that are finished and still open,
 and no snapshot is read or written.
 
 ONLY WHEN AN AGENT IS THERE. `--if-any` is `--since-last` that prints nothing only when the
@@ -265,6 +267,11 @@ def classify(T, s, t):
     why = s.get("why") or ""
     if word == "finished":
         res = _last_result(T, s["session"]) if s.get("session") and t is None else ""
+        if not T.session_ended(s) and T.finish_undone(t, s.get("mode") or ""):
+            # Its Claude runs and it did not say the finished line: it did not end, so its
+            # ticket stays where it is.
+            return "other", "; ".join(x for x in ("%s: %s" % (word, why) if why else word,
+                                                  _where(T, t)) if x)
         return _ended(T, t, s.get("mode") or "", s.get("session") or "", s.get("shell") or 0,
                       finished_text(T, t, res or why))
     if word == "running":

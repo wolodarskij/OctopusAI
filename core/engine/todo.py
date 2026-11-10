@@ -3076,13 +3076,29 @@ def _launch_words(brief):
                            "when it carries the change of %s into %s."
                            % (P.name, tid, tid, P.name))
         break
-    m = re.search(r"^## The owner's order for this launch[ \t]*\n(.*?)(?=^## |\Z)", text,
-                  re.M | re.S)
-    note = m.group(1).replace("That outranks the generic instructions above.", "").strip() \
-        if m else ""
+    note = brief_note(text)
     if note:
         out.append("The owner's note to this launch:\n%s" % note)
     return out, note
+
+
+_LAUNCH_NOTE = re.compile(r"^## The owner's order for this launch[ \t]*\n(.*?)(?=^## |\Z)",
+                          re.M | re.S)
+
+
+def brief_note(text):
+    """The owner's note to a launch, from the text of its brief; "" when it has none."""
+    m = _LAUNCH_NOTE.search((text or "").replace("\r\n", "\n"))
+    return m.group(1).replace("That outranks the generic instructions above.", "").strip() \
+        if m else ""
+
+
+def launch_note(tid):
+    """The owner's note to the last launch on ticket `tid`, from its brief; "" when none."""
+    try:
+        return brief_note(_read(P.BRIEFS / ("%s.md" % tid)))
+    except OSError:
+        return ""
 
 
 def owner_text(parent=None):
@@ -6982,9 +6998,22 @@ def auto_block(tid, mode, sid, shell, why):
     return True
 
 
-# What `## Blocked` says of a ticket whose session ended with its order not met.
-UNDONE_BLOCKED = ("Found by the engine: the %s session ended, and the ticket's order is not "
-                  "carried out to the end.")
+# The cause that `## Blocked` names for a ticket whose session ended with its order not
+# met, and what the engine found then.
+UNDONE_CAUSE = "The %s session ended, and the ticket's order is not carried out to the end"
+UNDONE_FOUND = "Found by the engine when the session ended: %s."
+
+
+def session_ended(s):
+    """Whether the session `s` of a scan ended: its Claude exited, or its ended turn's last
+    line is the finished line. A judge's `finished` verdict or a `finished` report on a
+    session whose Claude still runs is no end: the session can still wait for the owner."""
+    import session_state
+    if not s.get("claude"):
+        return True
+    said = s.get("says_finished")
+    said = session_state.FINISHED_LINE if said is True else said or ""
+    return bool(s.get("ended")) and said in session_state.FINISHED_LINES
 
 
 def _undone_path(sid):
@@ -6996,8 +7025,10 @@ def block_undone(t, mode, sid, shell=0):
     """Move ticket `t` of the `mode` session `sid`, whose session ended (it said `WORK IS
     FINISHED`, its Claude exited, or its terminal is gone) while its ticket does not show its
     work done (`finish_undone`), to the blocked lane as `blocked by outside cause`: a ticket
-    whose session did not carry out its order to the end is blocked, never finished. Only a
-    ticket still in its launch lane, and only for its last launch; once per launch
+    whose session did not carry out its order to the end is blocked, never finished. The
+    cause is the end of the session; the note of `finish_undone` is only what the engine
+    found. A caller passes only a session that ended (`session_ended`). Only a ticket still
+    in its launch lane, and only for its last launch; once per launch
     (`<session>.undone`), so a ticket that the owner moves back stays there. A manager stays
     where it is. Returns why its work is not done ("" when it is), whether it moved or not."""
     undone = finish_undone(t, mode)
@@ -7012,7 +7043,7 @@ def block_undone(t, mode, sid, shell=0):
             return undone
     except OSError:
         pass
-    _to_blocked(t, sid, shell, undone, UNDONE_BLOCKED % mode)
+    _to_blocked(t, sid, shell, UNDONE_CAUSE % mode, UNDONE_FOUND % undone)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(stamp + "\n", encoding="utf-8")
     return undone

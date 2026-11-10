@@ -215,8 +215,11 @@ FINISHED`. It runs `report <id> blocked` with the cause, and it waits. The engin
   against the new one, do not count.
 - When a session ends (`WORK IS FINISHED`, its Claude exits, or its terminal closes) and its
   ticket does not show its work done, the engine moves the ticket from its launch board to
-  Blocked `blocked by outside cause`, with the cause under `## Blocked`. It does this once per
-  launch, so a ticket that the owner moves back stays there.
+  Blocked `blocked by outside cause`. The cause under `## Blocked` is the end of the session,
+  never where the ticket stands. It does this once per launch, so a ticket that the owner
+  moves back stays there. A session whose Claude still runs and that did not write
+  `WORK IS FINISHED` did not end, also when the judge calls it `finished`: its ticket stays
+  where it is.
 - The manager's update lists that agent under Other as `blocked`, never under Finished.
 
 **A launched session that meets a blocker:**
@@ -413,7 +416,9 @@ project's Codex model and effort. It answers `input`, `blocked`, `finished`, `wo
 `unsure`. Only a question the session itself asks the owner, or an answer or a decision it
 says it cannot go on without, is `input`: a report, a status table, and other sessions'
 questions that it lists are not. An outside cause that stops the work, with no question to
-the owner, is `blocked`. It also reads
+the owner, is `blocked`. A session whose launch note from the owner says that its work ends
+only when the owner says so is never `finished`: when it is not `blocked` or `working`, it
+waits for the owner, `input`. The judge reads that note from the ticket's brief. It also reads
 Claude Code's last recap of the session and the jobs and agents it waits for: a session whose
 message or recap says it runs a recurring task is `working`, never `finished`. `unsure` says
 the text does not show what the session waits for; the session is then `idle`, and the
