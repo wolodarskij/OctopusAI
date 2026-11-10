@@ -2018,27 +2018,62 @@ def _requested(args, parent=None):
     return parent is not None and not parent.ai_filed
 
 
-def _may_block_by_user(args):
-    """Whether this caller may set `blocked by user`.
+def _caller_session():
+    """The session id of the AI session that runs this command, lower case, or ""."""
+    return (os.environ.get("CLAUDE_CODE_SESSION_ID") or os.environ.get("OCTOPUS_SESSION")
+            or "").strip().lower()
 
-    Only the owner's direct order sets it: the owner's own shell, which Claude Code does not
-    mark with `CLAUDECODE`, or a session the owner ordered in that message, which passes
-    `--owner-order`. Waiting for the owner's answer is never a block.
+
+def _own_ticket(t, sid):
+    """Whether the session `sid` is one of the launches that `sessions:` of `t` records."""
+    return bool(sid) and any(e["session"].lower() == sid for e in t.sessions)
+
+
+def _guard_block(targets, status, ordered):
+    """Refuse an AI session's move of `targets` to the blocked lane with `status`, unless the
+    move is one of the two that the rules permit. Returns 0 when the move may go on, else
+    the exit code.
+
+    - The ticket's own session, which cannot reach the ticket's goal: `blocked by other
+      task` or `blocked by outside cause`, from a session that `sessions:` records.
+    - The owner's direct order in this session's chat: `--owner-order` with the order in
+      neutral words, and the owner's own words name each ticket. Only this sets `blocked by
+      user`. A project rule, a brief, a note and a defect found are no order of the owner.
     """
-    return bool(getattr(args, "owner_order", False)) or not os.environ.get("CLAUDECODE")
-
-
-def _refuse_block_by_user():
-    for line in (
-        "Error: only the owner's direct order sets `blocked by user`.",
-        "  A ticket that waits for an answer, a decision or an input from the owner is not",
-        "  blocked: it stays in its lane, and the session asks the owner. A ticket blocked by",
-        "  another ticket is `blocked by other task`, with `--blocked-by <id>` on the ticket.",
-        "  A session the owner ordered, in that message, to block this ticket passes",
-        "  --owner-order.",
-    ):
-        print(line, file=sys.stderr)
-    return 2
+    sid = _caller_session()
+    if status != P.OWNER_BLOCKS and all(_own_ticket(t, sid) for t in targets):
+        return 0
+    if not ordered:
+        others = [t.id for t in targets if not _own_ticket(t, sid)]
+        for line in (
+            ("Error: only the owner's direct order sets `%s`." % P.OWNER_BLOCKS)
+            if status == P.OWNER_BLOCKS else
+            ("Error: %s is not the ticket of this session. Only a ticket's own session moves "
+             "it to %s, when it tried every way and cannot reach its goal."
+             % (", ".join(others), lane("blocked"))),
+            "  A new ticket, a defect found, a project rule and a brief are no reason for %s:"
+            % lane("blocked"),
+            "  file a defect with `new`, and leave every other ticket where it is. A ticket",
+            "  that waits for the owner's answer stays in its lane, and its session asks.",
+            "  When the owner ordered this move in this session's chat, pass",
+            "    --owner-order \"<the order, in neutral words>\"",
+        ):
+            print(line, file=sys.stderr)
+        return 2
+    try:
+        named, why = owner_named([(t.id, t.title, first_section(t.body)) for t in targets],
+                                 ordered, *owner_text())
+    except ValueError as exc:
+        print("The check of the owner's words has no verdict, so the move goes on: %s" % exc,
+              file=sys.stderr)
+        return 0
+    left = [t.id for t in targets if t.id not in named]
+    if left:
+        print("Error: the owner's words do not name %s, so it does not go to %s: %s"
+              % (", ".join(left), lane("blocked"), why or "the model gave no reason"),
+              file=sys.stderr)
+        return 2
+    return 0
 
 
 def _may_pause(args):
@@ -2090,8 +2125,6 @@ def cmd_move(args):
         ):
             print(line, file=sys.stderr)
         return 2
-    if args.status == P.OWNER_BLOCKS and not _may_block_by_user(args):
-        return _refuse_block_by_user()
     if state == P.PAUSED and not _may_pause(args):
         return _refuse_pause()
     ordered = _owner_words(args)
@@ -2157,6 +2190,10 @@ def cmd_move(args):
         if why:
             print("Error: %s." % why, file=sys.stderr)
             return 1
+    if state == lane("blocked") and _in_ai_session():
+        rc = _guard_block(targets, args.status or default_status(state), ordered)
+        if rc:
+            return rc
     taken = [t for t in targets if t.state == lane("ai")] if state == lane("start") else []
     if taken and _in_ai_session():
         rc = _guard_take(taken, ordered)
@@ -2604,8 +2641,6 @@ def cmd_new(args):
         print("Error: status %r does not belong to %s. One of: %s"
               % (args.status, args.state, ", ".join(P.STATUSES[args.state])), file=sys.stderr)
         return 2
-    if args.status == P.OWNER_BLOCKS and not _may_block_by_user(args):
-        return _refuse_block_by_user()
     if args.state == P.PAUSED:
         print("Error: a new ticket does not go to %s: the owner pauses a ticket whose session "
               "already did some of its work" % P.STATE_LABEL[P.PAUSED], file=sys.stderr)
@@ -6850,6 +6885,11 @@ def cmd_report(args):
     sid = ticket_session_id(t, args.mode)
     why = (getattr(args, "why", None) or "").strip()
     if args.word == "blocked":
+        if _in_ai_session() and not _own_ticket(t, _caller_session()):
+            print("Error: %s is not the ticket of this session. A session reports only its "
+                  "own ticket blocked, when it tried every way and cannot reach its goal."
+                  % t.id, file=sys.stderr)
+            return 2
         return _report_blocked(t, sid, args.mode, why, getattr(args, "tried", None))
     if args.word == "event" and not why:
         print("Error: `event` needs --why: the outside event the session waits for",

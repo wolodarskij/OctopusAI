@@ -58,8 +58,8 @@ Bare words are an AND search over id, title, source, body, tags, permits and sta
 | The owner says | The call |
 |---|---|
 | "start T0001" | `move T0001 InProgress --status implementing` |
-| "park it, T0002 lands first" | `link T0001 --blocked-by T0002`, then `move T0001 Blocked` |
-| "block T0001, it waits for me" | `move T0001 Blocked --status "blocked by user" --owner-order "<the order, in neutral words>"`, only on the owner's order in that message |
+| "park it, T0002 lands first" | `link T0001 --blocked-by T0002`, then `move T0001 Blocked --owner-order "<the order, in neutral words>"` |
+| "block T0001" | `move T0001 Blocked --status "blocked by user" --owner-order "<the order, in neutral words>"`, only on the owner's order in that message. A ticket that waits for the owner's answer is not blocked: it stays in its board |
 | "pause T0001" | `move T0001 Paused --owner-order "<the order, in neutral words>"`, only on the owner's order in that message. It closes the ticket's open sessions |
 | "continue T0001" (a paused ticket) | `work T0001 --owner-order "<the order, in neutral words>"`. It resumes the ticket's session |
 | "cancel T0001" | `move T0001 Done --status cancelled --owner-order "<the order, in neutral words>"`. It also closes the ticket's open sessions |

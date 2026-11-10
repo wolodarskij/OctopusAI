@@ -16,7 +16,7 @@ TODO/
       _epic.md
       T0002-....md
   InProgress/           somebody works on it now
-  Blocked/              another ticket, or the owner, stops it
+  Blocked/              its own session cannot reach its goal, or the owner blocked it
   Paused/               the owner paused it: its agent is stopped, its work is not finished
   Verification/         the work landed and is not yet proven
   Done/                 proven
@@ -121,8 +121,8 @@ names no status lands on it.
 | InProgress | `planning` | a `plan` session, at its start |
 | InProgress | `ready to implement` | a `plan` session, when the plan is on the ticket |
 | InProgress | `implementing` | a `work` session, at its start, and the check of a blocked session when the blocker lands |
-| Blocked | `blocked by other task` | a session that finds another ticket must land first. `blocked-by:` names that ticket |
-| Blocked | `blocked by outside cause` | a session that tried every way and found an outside cause that stops its work: `report <id> blocked`. `## Blocked` names the cause and the ways it tried |
+| Blocked | `blocked by other task` | the ticket's own session, when another ticket must land first. `blocked-by:` names that ticket |
+| Blocked | `blocked by outside cause` | the ticket's own session, when it tried every way and an outside cause stops its work: `report <id> blocked`. `## Blocked` names the cause and the ways it tried |
 | Blocked | `blocked by user` | the owner's direct order only |
 | Paused | `paused` | the owner's order only |
 | Verification | `waiting` | a `work` session when it finishes, and any move to Verification |
@@ -135,14 +135,29 @@ A project can map a status role to another word (`statusRoles` in `project.json`
 
 **`blocked by other task` names its blocker in `blocked-by:`.** `check` fails when it does not.
 
-**Only the owner's direct order sets `blocked by user`.** A session never infers it. A ticket that
-waits for an answer from the owner stays in its board, and the session asks the owner. `move`
-refuses the status to a Claude session that does not pass `--owner-order`.
+**A ticket goes to Blocked only from its own session, when that session tried every way and
+cannot reach the ticket's goal.** The only other way is the owner's direct order.
 
-**A new ticket never goes to Blocked.** `new` refuses the blocked board for every caller: a
-session, a session with `--owner-order`, a project rule and the owner's shell. A ticket goes to
-Blocked only from its own session, when that session tried every way and cannot reach its goal:
-`report <id> blocked`, or the steps for a blocker.
+- **Its own session** is a launch that the ticket's `sessions:` records. It moves the ticket
+  as `blocked by other task` with the steps for a blocker, or as `blocked by outside cause`
+  with `report <id> blocked`. The engine does the same for a session that did not.
+- **The owner's direct order** is a drag on the board, the owner's own shell, or the owner's
+  order in a session's chat, which the session passes as `--owner-order "<the order, in
+  neutral words>"`. Only this sets `blocked by user`. A ticket that waits for an answer from
+  the owner is not blocked: it stays in its board, and the session asks the owner.
+- **A new ticket never goes to Blocked.** It goes to AI-Pipeline or Pipeline, also when the
+  owner ordered it, and its own session moves it later if it cannot reach its goal.
+- **A defect is never a reason for Blocked.** A game bug, a crash, a failed test or any other
+  defect that a session finds is filed with `new`, or added to an open ticket with
+  `evidence`. It blocks no ticket, and it moves no ticket to Blocked.
+- **A project rule, a brief, a plan and a note are no order of the owner.** None of them
+  makes a session file a ticket into Blocked or move another ticket there.
+
+**The engine enforces it.** `new` refuses the blocked board for every caller, the owner's shell
+too. In an AI session, `move` to Blocked and `report <id> blocked` refuse a ticket whose
+`sessions:` does not record the calling session. `move` lets the owner's order through only with
+`--owner-order "<the order, in neutral words>"`, and only when the owner's words name each
+ticket, as for a move out of AI-Pipeline. `blocked by user` always needs that order.
 
 **Only the owner pauses a ticket.** A paused ticket is not blocked and not finished: its
 session did some of its work, and the owner stopped it. A ticket, a session or the engine
@@ -825,7 +840,7 @@ When the user asks you to **analyze** code, at any scope:
 
 - Find inconsistencies, bugs, missing implementations, code smells and improvements.
 - **Create a ticket** for each finding: `new` with no flag. It goes to AI-Pipeline: an order to
-  analyze names no finding's subject.
+  analyze names no finding's subject. A finding never goes to Blocked.
 - Do **not** fix them. At the end, say "Added N ticket(s)."
 
 **Ask before you log an ambiguous finding.** A finding is ambiguous when the code, the comments
@@ -854,7 +869,7 @@ code around it makes obvious.
 |---|---|
 | add | `new --requested "<the order that names the subject, in neutral words>"` |
 | start | `move <id> InProgress` |
-| park | `move <id> Blocked`, and fill `blocked-by:` |
+| park | `link <id> --blocked-by <other id>`, then `move <id> Blocked --owner-order "<the order, in neutral words>"` |
 | finish | `move <id> Verification`, and stop. `verify <id>` closes it |
 | reprioritize | edit `severity:`, then run `index` |
 | remove | delete the file, only when the user asks. The id is not used again |
