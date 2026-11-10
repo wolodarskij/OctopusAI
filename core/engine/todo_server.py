@@ -1018,20 +1018,23 @@ DRAFT_PROMPT = """You turn a note into %s for the %s TODO tree.
 
 Answer with %s and no other text. The keys of a ticket are:
   title        one line, no ticket id, at most 90 characters. A bug starts with "Bug: "
-               and says what is wrong. A feature starts with "Feature: " and says what
-               the program should do, as a positive statement. A ticket whose work
-               changes only documentation (docs, doc pages, generated doc HTML) starts
-               with "Documentation: " and says what the documentation should state or
-               what in it is wrong. A ticket that changes code or content and also its
-               docs is a bug or a feature
+               and says what is wrong in code or content. A feature starts with
+               "Feature: " and says what the program should do, as a positive statement.
+               A defect in documentation (docs, doc pages, generated doc HTML, a README)
+               is always a documentation bug, never a bug: it starts with
+               "Documentation Bug: " and says what in the documentation is wrong. A
+               ticket that adds to the documentation starts with "Documentation: " and
+               says what the documentation should state. A ticket that changes code or
+               content and also its docs is a bug or a feature
   severity     %s - what the user, the saved data or another machine gets wrong
   difficulty   %s - what the fix costs; unknown when the note's own question is unanswered
   category     %s - %s
-  source       a file and line if the note names one, otherwise an empty string
+  source       the file and line that is wrong, if the note names one, otherwise an
+               empty string
   tags         a short space-separated list, or an empty string
-  description  one or two paragraphs: what is wrong for a bug, what the program should
-               do for a feature, what the documentation should say for a documentation
-               ticket. Only what the note asks for: add no part, step, test, check,
+  description  one or two paragraphs: what is wrong for a bug or a documentation bug,
+               what the program should do for a feature, what the documentation should
+               say for a documentation ticket. Only what the note asks for: add no part, step, test, check,
                proof or background that the note does not name
   evidence     the file and line read, or the command run, or an empty string
 %s
@@ -1062,20 +1065,23 @@ itself shows it is wrong.
 
 Answer with %s and no other text. The keys of a ticket are:
   title        one line, no ticket id, at most 90 characters. A bug starts with "Bug: "
-               and says what is wrong. A feature starts with "Feature: " and says what
-               the program should do, as a positive statement. A ticket whose work
-               changes only documentation (docs, doc pages, generated doc HTML) starts
-               with "Documentation: " and says what the documentation should state or
-               what in it is wrong. A ticket that changes code or content and also its
-               docs is a bug or a feature
+               and says what is wrong in code or content. A feature starts with
+               "Feature: " and says what the program should do, as a positive statement.
+               A defect in documentation (docs, doc pages, generated doc HTML, a README)
+               is always a documentation bug, never a bug: it starts with
+               "Documentation Bug: " and says what in the documentation is wrong. A
+               ticket that adds to the documentation starts with "Documentation: " and
+               says what the documentation should state. A ticket that changes code or
+               content and also its docs is a bug or a feature
   severity     %s - what the user, the saved data or another machine gets wrong
   difficulty   %s - what the fix costs; unknown when the ticket's own question is unanswered
   category     %s - %s
-  source       a file and line if the ticket names one, otherwise an empty string
+  source       the file and line that is wrong, if the ticket names one, otherwise an
+               empty string
   tags         a short space-separated list, or an empty string
   description  the new text of the first section, one or two paragraphs: what is wrong
-               for a bug, what the program should do for a feature, what the documentation
-               should say for a documentation ticket
+               for a bug or a documentation bug, what the program should do for a feature,
+               what the documentation should say for a documentation ticket
   evidence     the new text of the "Evidence" section, or an empty string
 %s
 Write every word in Simplified Technical English: short sentences, active voice, one
@@ -1099,8 +1105,9 @@ owner's instruction says, and change nothing that the instruction does not name.
 
 Answer with ONE JSON object and no other text. Give only the keys that you change:
   title        one line, no ticket id, at most 90 characters. A bug starts with "Bug: ",
-               a feature starts with "Feature: ", and a ticket whose work changes only
-               documentation starts with "Documentation: "
+               a feature starts with "Feature: ", a defect in documentation starts with
+               "Documentation Bug: ", and a ticket that adds to the documentation starts
+               with "Documentation: "
   severity     %s
   difficulty   %s
   category     %s
@@ -1355,8 +1362,9 @@ def act_draft(body):
 
     `text` is the note in New task. With `ticket` (the edit form's fields) it is the whole
     body of that ticket, and the session rewrites the ticket: the first draft's description
-    and evidence replace only the first section (What is wrong, What it should do for a
-    Feature: title, or What the documentation should say for a Documentation: title) and the
+    and evidence replace only the first section (What is wrong for a Bug: or a Documentation
+    Bug: title, What it should do for a Feature: title, or What the documentation should say
+    for a Documentation: title) and the
     Evidence section, so the Plan, the Runs
     and the Results stay, and that draft carries the new body in `body`. Any further draft is
     a new ticket split off it. `prior` is the body the text box held before the owner's

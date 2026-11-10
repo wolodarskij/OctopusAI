@@ -155,7 +155,8 @@ For script and C++ classes, read the whole file including commented-out blocks â
 
 Only **Orphaned** is a claim, and only when `_callindex.json` reports `sourcesNotSwept: []`. Every
 Deprecated / Orphaned finding also gets a ticket in AI-Pipeline: `python .octopus/todo.py new --title
-"..." --source <page>`. When an open ticket already names the finding, `python .octopus/todo.py
+"Bug: ..." --source <the asset> --evidence "<page>"`. A defect in a doc page is a `Documentation Bug: `
+with `--source <page>`. When an open ticket already names the finding, `python .octopus/todo.py
 evidence <id> "<page>"` adds to it, and you file nothing.
 
 ## Step 4 â€” Write the directory

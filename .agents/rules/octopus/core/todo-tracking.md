@@ -721,7 +721,7 @@ A group holds open tickets that one session can work together. `groups.store` in
 ```markdown
 ---
 id: T0001
-title: "Bug: <what is wrong>", "Feature: <what the program should do>" or "Documentation: <what the documentation should say>"
+title: "Bug: <what is wrong>", "Feature: <what the program should do>", "Documentation Bug: <what in the documentation is wrong>" or "Documentation: <what the documentation should say>"
 severity: High | Medium | Low
 difficulty: small | medium | large | unknown
 status: pipeline
@@ -748,20 +748,36 @@ a short list: the path of the deliverable and the facts the owner must know. Eac
 and holds now: a finding that a later fact disproves is deleted and replaced, never kept beside
 it as "superseded".
 
-**The title says whether the ticket is a bug, a feature or a documentation ticket.** A bug title
-starts with `Bug: ` and says what is wrong: "Bug: The board drops a ticket that has no severity". A
-feature title starts with `Feature: ` and says, as a positive statement, what the program should
-do: "Feature: Illness should mutate a person". Never write a feature as a negative. A feature
-ticket has the section `## What it should do` in place of `## What is wrong`.
+**The title starts with the ticket's kind: a bug, a feature, a documentation bug or a
+documentation ticket.**
 
-**A documentation ticket changes only documentation:** docs, doc pages, generated doc HTML, the
-comments of a doc tree. Its title starts with `Documentation: ` and says what the documentation
-should state, or what in it is wrong: "Documentation: The setup page names the board command". It
-has the section `## What the documentation should say` in place of `## What is wrong`. A ticket
-that changes code or content and also its docs is a bug or a feature.
+| Kind | The title | The first section |
+|---|---|---|
+| bug | `Bug: <what is wrong in code or content>`: "Bug: The board drops a ticket that has no severity" | `## What is wrong` |
+| feature | `Feature: <what the program should do>`, as a positive statement: "Feature: Illness should mutate a person". Never write a feature as a negative | `## What it should do` |
+| documentation bug | `Documentation Bug: <what in the documentation is wrong>`: "Documentation Bug: The setup page names a board command that does not exist" | `## What is wrong` |
+| documentation | `Documentation: <what the documentation should state>`: "Documentation: The setup page names the board command" | `## What the documentation should say` |
 
-`new`, the board's `New task` and its `Process with AI` write the section that the title names.
-`check` accepts the three kinds, and it renames no ticket.
+**Documentation** is docs, doc pages, generated doc HTML, a README file and the comments of a doc
+tree. The work of a documentation bug and of a documentation ticket changes only documentation.
+A ticket whose work changes code or content, and also its docs, is a bug or a feature.
+
+**A defect in documentation is always a documentation bug, never a bug.** This holds for every
+finding: in an analysis, a review, a check of records or a doc sweep. A documentation ticket
+adds or extends what the documentation states; it never names a defect.
+
+**`source:` names the file that is wrong.** A bug in code that a doc page shows names the code in
+`source:` and the doc page under `## Evidence`. A documentation bug names the doc file.
+
+**The engine enforces it.** A documentation file is a file in a directory named `docs`, `doc` or
+`documentation`, or a file whose name starts with `README` or `CHANGELOG`, in any case.
+
+- In an AI session, `new` refuses a title with no kind, and a `Bug: ` title whose `source` is a
+  documentation file. The board's `New task` is the owner's hand and is not refused.
+- `check` fails each ticket outside the closed board whose `source` is a documentation file and
+  whose title is `Bug: ` or has no kind. Correct the title, or the `source` when code or content
+  is wrong. `check` renames no ticket.
+- `new`, the board's `New task` and its `Process with AI` write the section that the title names.
 
 Other fields: `category`, `filed-by`, `parent`, `group`, `related`, `repeat`, `run`, `visual`.
 
@@ -845,7 +861,8 @@ When the user asks you to **analyze** code, at any scope:
 
 - Find inconsistencies, bugs, missing implementations, code smells and improvements.
 - **Create a ticket** for each finding: `new` with no flag. It goes to AI-Pipeline: an order to
-  analyze names no finding's subject. A finding never goes to Blocked.
+  analyze names no finding's subject. A finding never goes to Blocked. A finding in
+  documentation is a `Documentation Bug: `.
 - Do **not** fix them. At the end, say "Added N ticket(s)."
 
 **Ask before you log an ambiguous finding.** A finding is ambiguous when the code, the comments

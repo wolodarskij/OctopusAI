@@ -4,9 +4,12 @@
 
 ## The title says what kind of ticket it is
 
-- **A bug title** starts with `Bug: ` and says what is wrong: "Bug: The list drops an item that has no severity".
+- **A bug title** starts with `Bug: ` and says what is wrong in code or content: "Bug: The list drops an item that has no severity".
 - **A feature title** starts with `Feature: ` and says, as a positive statement, what the program should do: "Feature: Illness should mutate a person". Never write a feature as a negative. A feature ticket has the section `## What it should do` in place of `## What is wrong`.
-- **A documentation title** starts with `Documentation: ` and says what the documentation should state, or what in it is wrong: "Documentation: The setup page names the build command". A documentation ticket changes only documentation, and has the section `## What the documentation should say`. A ticket that changes code or content and also its docs is a bug or a feature.
+- **A documentation bug title** starts with `Documentation Bug: ` and says what in the documentation is wrong: "Documentation Bug: The setup page names a build command that does not exist". It has the section `## What is wrong`. A defect in documentation is always a documentation bug, never a bug.
+- **A documentation title** starts with `Documentation: ` and says what the documentation should state: "Documentation: The setup page names the build command". It has the section `## What the documentation should say`.
+- **Documentation** is docs, doc pages, generated doc HTML, a README file and the comments of a doc tree. The work of a documentation bug and of a documentation ticket changes only documentation. A ticket that changes code or content and also its docs is a bug or a feature.
+- **The source of a ticket names the file that is wrong.** A bug in code that a doc page shows names the code as its source, and the doc page as its evidence.
 
 ## The body states the order and nothing more
 

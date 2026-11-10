@@ -562,27 +562,94 @@ SEV_ORDER = {"High": 0, "Medium": 1, "Low": 2, "": 3}
 DIFFICULTIES = ("small", "medium", "large", "unknown")
 DIFF_ORDER = {"small": 0, "medium": 1, "large": 2, "unknown": 3}
 
-# A ticket is a bug, a feature or a documentation ticket, and its title says which. A bug
-# title starts with `Bug: ` and says what is wrong. A feature title starts with `Feature: `
-# and says what the program should do. A documentation title starts with `Documentation: `
-# and says what the documentation should state, or what in it is wrong; its work changes only
-# documentation. The first section of the body follows the title.
-BUG_PREFIX, FEATURE_PREFIX, DOC_PREFIX = "Bug:", "Feature:", "Documentation:"
+# A ticket is a bug, a feature, a documentation bug or a documentation ticket, and its title
+# says which. A bug title starts with `Bug: ` and says what is wrong in code or content. A
+# feature title starts with `Feature: ` and says what the program should do. A documentation
+# bug title starts with `Documentation Bug: ` and says what in the documentation is wrong. A
+# documentation title starts with `Documentation: ` and says what the documentation should
+# state. The work of the two documentation kinds changes only documentation. The first section
+# of the body follows the title.
+BUG_PREFIX, FEATURE_PREFIX = "Bug:", "Feature:"
+DOC_BUG_PREFIX, DOC_PREFIX = "Documentation Bug:", "Documentation:"
+KIND_PREFIXES = (DOC_BUG_PREFIX, DOC_PREFIX, BUG_PREFIX, FEATURE_PREFIX)
 SECTION_BUG, SECTION_FEATURE = "What is wrong", "What it should do"
 SECTION_DOC = "What the documentation should say"
 FIRST_SECTIONS = (SECTION_BUG, SECTION_FEATURE, SECTION_DOC)
+# A documentation file: a file in a directory with one of these names, or a file whose name
+# starts with one of these words. Case does not matter.
+DOC_DIRS = frozenset(("docs", "doc", "documentation"))
+DOC_FILE_WORDS = ("readme", "changelog")
+
+
+def title_kind(title):
+    """The kind prefix that `title` (str) starts with, one of `KIND_PREFIXES`, or "" for a
+    title with no kind. Case does not matter. Returns a str."""
+    head = (title or "").strip().lower()
+    for prefix in KIND_PREFIXES:
+        if head.startswith(prefix.lower()):
+            return prefix
+    return ""
 
 
 def body_section(title):
     """The heading of the first body section for a ticket with this `title` (str): `What it
     should do` for a feature, `What the documentation should say` for a documentation ticket,
-    `What is wrong` for every other ticket. Returns a str."""
-    head = (title or "").strip().lower()
-    if head.startswith(FEATURE_PREFIX.lower()):
+    `What is wrong` for a bug, a documentation bug and a title with no kind. Returns a str."""
+    kind = title_kind(title)
+    if kind == FEATURE_PREFIX:
         return SECTION_FEATURE
-    if head.startswith(DOC_PREFIX.lower()):
+    if kind == DOC_PREFIX:
         return SECTION_DOC
     return SECTION_BUG
+
+
+def is_doc_file(path):
+    """Whether `path` (str, a project path that may end in `:<line>`) is a documentation
+    file: a file in a directory named `docs`, `doc` or `documentation`, or a file whose name
+    starts with `README` or `CHANGELOG`. Returns a bool."""
+    p = re.sub(r":\d+(?:[-:]\d+)?$", "", (path or "").strip().strip("`").strip())
+    parts = [x for x in re.split(r"[\\/]+", p) if x and x != "."]
+    if not parts:
+        return False
+    if parts[-1].lower().startswith(DOC_FILE_WORDS):
+        return True
+    return any(x.lower() in DOC_DIRS for x in parts[:-1])
+
+
+def source_is_doc(source):
+    """Whether every file that `source` (str) names is a documentation file. A `source` lists
+    its files apart with `,` or `;`. Returns False for an empty `source`."""
+    files = [x for x in re.split(r"[,;]", source or "") if x.strip()]
+    return bool(files) and all(is_doc_file(x) for x in files)
+
+
+def _title_kind_problem(title, source):
+    """Why `new` in an AI session refuses a ticket with this `title` (str) and `source`
+    (str): a title with no kind, or a defect in documentation not titled as a documentation
+    bug. Returns "" when the title is correct."""
+    if not title_kind(title):
+        return ("the title starts with its kind: `%s ` <what is wrong in code or content>, "
+                "`%s ` <what the program should do>, `%s ` <what in the documentation is "
+                "wrong> or `%s ` <what the documentation should state>"
+                % (BUG_PREFIX, FEATURE_PREFIX, DOC_BUG_PREFIX, DOC_PREFIX)
+                + ("" if not source_is_doc(source) else
+                   ". Its source %s is documentation: a defect in it is a `%s `"
+                   % (source.strip(), DOC_BUG_PREFIX)))
+    why = doc_bug_problem(title, source)
+    return "a defect in documentation is a documentation bug: %s" % why if why else ""
+
+
+def doc_bug_problem(title, source):
+    """Why a ticket with this `title` (str) and `source` (str) breaks the rule that a defect
+    in documentation is a documentation bug, or "" when it does not. Only a `source` that is
+    documentation shows a defect in documentation; such a ticket titled `Bug: ` or with no
+    kind breaks the rule. Returns a str."""
+    if not source_is_doc(source) or title_kind(title) not in (BUG_PREFIX, ""):
+        return ""
+    return ("its source %s is documentation, so its title starts with `%s ` (a defect in "
+            "the documentation) or `%s ` (what the documentation should state), never `%s ` "
+            "and never with no kind. When code or content is wrong, `source` names that file"
+            % ((source or "").strip(), DOC_BUG_PREFIX, DOC_PREFIX, BUG_PREFIX))
 
 
 def priority(t):
@@ -1820,6 +1887,11 @@ def cmd_check(args):
             seen[t.id] = rel
         if not t.title:
             problems.append("%s has no title" % rel)
+        elif t.state != lane("closed"):
+            why = doc_bug_problem(t.title, t.source)
+            if why:
+                problems.append("%s is a defect in documentation filed as a bug: %s"
+                                % (rel, why))
         if t.severity and t.severity not in SEVERITIES:
             problems.append("%s has severity %r, not one of %s"
                             % (rel, t.severity, ", ".join(SEVERITIES)))
@@ -2637,6 +2709,11 @@ def cmd_new(args):
     tool = "" if _files_for_octopus() else octopus_tool_source(args.source)
     if tool:
         return _refuse_tool_ticket(args.source, tool)
+    if _in_ai_session() and not getattr(args, "by_owner", False):
+        why = _title_kind_problem(args.title, args.source)
+        if why:
+            print("Error: %s" % why, file=sys.stderr)
+            return 2
     if args.status and args.status not in P.STATUSES[args.state]:
         print("Error: status %r does not belong to %s. One of: %s"
               % (args.status, args.state, ", ".join(P.STATUSES[args.state])), file=sys.stderr)
@@ -2789,7 +2866,7 @@ DUP_PAIRS = 40
 DUP_SECONDS = 120
 DUP_TRIES = 2
 DUP_TEXT_CHARS = 1200
-_KIND_RE = re.compile(r"^\s*(?:bug|feature|documentation)\s*:\s*", re.I)
+_KIND_RE = re.compile(r"^\s*(?:bug|feature|documentation(?:\s+bug)?)\s*:\s*", re.I)
 _DUP_STOP = frozenset(
     "a an the of to in on for and or is are be been not no with by at as it its that this "
     "these those when from does do should every each into than then any all one has have "

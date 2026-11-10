@@ -121,8 +121,10 @@ These are the standing orders to every manager, in every project.
   setting goes where the engine reads it: `project.json`, a project-local
   ruleset. Then launch the session again. Never end with "set X by hand".
 - **Title a feature as a positive statement:** `Feature: <what the program should
-  do>`. Only a bug title says what is wrong. A ticket whose work changes only
-  documentation is `Documentation: <what the documentation should say>`. Never put
+  do>`. Only a bug title says what is wrong. A defect in documentation is always
+  `Documentation Bug: <what in the documentation is wrong>`, never `Bug: `. A ticket
+  that adds to the documentation is `Documentation: <what the documentation should
+  say>`. Never put
   words in the owner's mouth in a title. The same holds for the notes you give the
   sessions you launch.
 - **A ticket body states the owner's order and nothing more.** Write the order in
