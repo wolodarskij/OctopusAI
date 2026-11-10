@@ -8,6 +8,7 @@
   ],
   "gitignore": [
     "TODO/.briefs/",
+    "TODO/.renders/",
     "TODO/.board.json",
     "TODO/.sessions/",
     ".octopus/SESSIONS.md"

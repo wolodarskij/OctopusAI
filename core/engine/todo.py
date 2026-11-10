@@ -370,6 +370,115 @@ def finished_problem(t, said=None):
     return ""
 
 
+# VISUAL WORK DELIVERS RENDERS (`core/rules/renders-for-visual-work.md`). A ticket with visual
+# work on textures, 3D meshes or the materials that show them is finished only when its
+# `## Result` names a render that exists: an image or a video file (`renders_of`). `visual:`
+# says whether a ticket is visual work: `yes`, or `no` with its reason under `## Not visual
+# work`. With no `visual:`, its order names a texture, a mesh or a material (`VISUAL_WORDS`), or
+# a git commit `<id>:` changes such a file (`VISUAL_FILE`).
+VISUAL_FIELD = "visual"
+NOT_VISUAL_SECTION = "Not visual work"
+RENDER_DIR = ".renders"
+VISUAL_WORDS = re.compile(
+    r"\b(?:textur(?:e|es|ed|ing)|mesh(?:es)?|3d\s+(?:models?|assets?|objects?)|materials?|"
+    r"normal\s+maps?|albedo|uv\s*(?:maps?|layouts?|sets?|unwrap\w*)|"
+    r"(?-i:(?:T|SM|SK|M|MI|MF)_[A-Z0-9]\w*))\b"
+    r"|\.(?:fbx|obj|glb|gltf|blend)\b", re.I)
+VISUAL_FILE = re.compile(
+    r"\.(?:png|tga|dds|exr|hdr|tiff?|psd|jpe?g|bmp|webp|ktx2?|fbx|obj|mtl|glb|gltf|blend|dae|"
+    r"3ds|max|mb|ma|usd[acz]?|stl|ply|abc|sbsar|spp|mat)$"
+    r"|(?:^|/)(?-i:(?:T|SM|SK|M|MI|MF)_)[^/]*\.uasset$", re.I)
+RENDER_FILE = re.compile(r"[^\s`'\"()<>\[\]|*]+\.(?:png|jpe?g|webp|gif|bmp|mp4|webm|mov)\b", re.I)
+
+
+def _result_texts(t):
+    """The texts of the result sections of ticket `t`: `## Result` and `## Verified`, or of a
+    repeatable ticket the current run's `## Result (run <n>)`."""
+    own = re.compile(r"^Result \(run %d\)$" % t.run) if t.repeat else FINISHED_SECTIONS
+    return [m.group(2) for m in
+            re.finditer(r"^##\s+([^\n]*)\n(.*?)(?=^##\s|\Z)", t.body or "", re.M | re.S)
+            if own.match(m.group(1).strip())]
+
+
+def visual_files(t):
+    """The texture, mesh and material files that the git commits of ticket `t` change, as
+    paths from the project root; [] in a project without git."""
+    if P.vcs != "git":
+        return []
+    import vcs as _vcs
+    st = _vcs._git(P.ROOT, "log", "--format=", "--name-only", "--grep", "^%s:" % t.id,
+                   timeout=_vcs.COMMIT_TIMEOUT)
+    return sorted({f.strip() for f in _vcs._lines(st)
+                   if f.strip() and VISUAL_FILE.search(f.strip())})
+
+
+def visual_work(t, commits=True):
+    """Whether ticket `t` does visual work on textures, 3D meshes or materials: its `visual:`
+    field when it has one, else its order names one, else (`commits`) a git commit of the
+    ticket changes such a file."""
+    said = t.meta.get(VISUAL_FIELD, "").strip().lower()
+    if said in ("yes", "no"):
+        return said == "yes"
+    text = "\n".join([t.title, first_section(t.body)] + [
+        m.group(1) for m in re.finditer(r"^##\s+Owner's orders[ \t]*\n(.*?)(?=^##\s|\Z)",
+                                        t.body or "", re.M | re.S)])
+    if VISUAL_WORDS.search(text):
+        return True
+    return bool(commits and visual_files(t))
+
+
+def renders_of(t):
+    """The render files that the result sections of ticket `t` name and that exist, as
+    the paths the ticket writes, in order."""
+    out = []
+    for text in _result_texts(t):
+        for m in RENDER_FILE.finditer(text):
+            rel = m.group(0).rstrip(".,;:")
+            p = Path(rel)
+            if not p.is_absolute():
+                p = P.ROOT / rel
+            if rel not in out and p.is_file():
+                out.append(rel)
+    return out
+
+
+def renders_problem(t, state, status=""):
+    """Why ticket `t` cannot go to `state` with `status` for want of renders, or "": it is
+    visual work, the move lands it in the verify lane or in the closed lane as `done`, and its
+    result names no render that exists."""
+    if t.repeat == MANAGER:
+        return ""
+    if state == lane("closed"):
+        if (status or default_status(state)) != default_status(state):
+            return ""
+    elif state != lane("verify"):
+        return ""
+    if not visual_work(t) or renders_of(t):
+        return ""
+    return ("it does visual work on textures, 3D meshes or materials, and its `## Result` "
+            "names no render file that exists")
+
+
+def cmd_visual(args):
+    """Say whether a ticket is visual work: `yes`, or `no` with the reason under
+    `## Not visual work`."""
+    t = find(load_all(), args.id)
+    if t is None:
+        print("Error: no ticket %r" % args.id, file=sys.stderr)
+        return 2
+    why = " ".join((args.why or "").split())
+    if args.value == "no" and not why:
+        print("Error: `visual %s no` needs --why: what the work changed instead of a texture, "
+              "a mesh or a material" % t.id, file=sys.stderr)
+        return 2
+    t.meta[VISUAL_FIELD] = args.value
+    if args.value == "no":
+        t.body = add_section_line(t.body, NOT_VISUAL_SECTION, "- %s: %s" % (_today(), why))
+    _write(t.path, render(t.meta, t.body))
+    print("%s  visual: %s" % (t.id, args.value))
+    return 0
+
+
 def outcome_problem(text, own_id="", finished=False):
     """Why `text` is no outcome line, or "" when it is one. A `finished` ticket's outcome also
     says nothing that is still wrong."""
@@ -700,7 +809,8 @@ def parse(text):
 
 
 def render(meta, body):
-    keys = ["id", "title", "category", "severity", "difficulty", "status", "outcome", "source",
+    keys = ["id", "title", "category", "severity", "difficulty", "status", "outcome", "visual",
+            "source",
             "created", "filed-by", "claim", "session", "launched", "sessions", "blocked-by",
             "parent",
             "group", "related",
@@ -2018,6 +2128,19 @@ def cmd_move(args):
                     "forbids an action that the order names." % t.id,
                     "  Not sure what to call wrong: ask the owner, and keep the ticket where "
                     "it is.",
+                ):
+                    print(line, file=sys.stderr)
+                return 2
+            why = renders_problem(t, state, args.status)
+            if why:
+                for line in (
+                    "Error: %s cannot go to %s: %s." % (t.id, P.STATE_LABEL[state], why),
+                    "  Visual work is finished only with renders of the result. Save each "
+                    "render in %s/%s/%s/," % (P.todo_dir, RENDER_DIR, t.id),
+                    "  and name it under `## Result` by its path from the project root.",
+                    "  Work that changes no texture, mesh or material is no visual work:",
+                    "    %s visual %s no --why \"<what the work changed instead>\""
+                    % (P.cli, t.id),
                 ):
                     print(line, file=sys.stderr)
                 return 2
@@ -3857,6 +3980,9 @@ def build_brief(t, mode="work", note="", provider="claude"):
         out.append(sec("job.%s" % mode))
     if _project.rule_enabled(P.ROOT, README_RULE):
         out.append(sec("readme.%s" % mode))
+    if visual_work(t, commits=mode == "verify") or (
+            mode == "verify" and t.meta.get(VISUAL_FIELD, "").strip().lower() == "no"):
+        out.append(sec("renders.%s" % mode))
     out += permits
     out.append(sec("before.%s" % mode, "before"))
     out.append(sec("finish.%s" % mode))
@@ -7184,6 +7310,15 @@ def _main(argv):
     p.add_argument("id")
     p.add_argument("text")
     p.set_defaults(fn=cmd_outcome)
+
+    p = sub.add_parser("visual", help="say whether a ticket does visual work on textures, 3D "
+                                      "meshes or materials: visual work needs renders under "
+                                      "## Result before it finishes")
+    p.add_argument("id")
+    p.add_argument("value", choices=("yes", "no"))
+    p.add_argument("--why", help="with `no`: what the work changed instead of a texture, a "
+                                 "mesh or a material; it goes under ## %s" % NOT_VISUAL_SECTION)
+    p.set_defaults(fn=cmd_visual)
 
     p = sub.add_parser("new", help="create a ticket")
     p.add_argument("--title", required=True,

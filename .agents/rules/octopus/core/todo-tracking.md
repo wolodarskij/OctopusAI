@@ -735,7 +735,12 @@ that changes code or content and also its docs is a bug or a feature.
 `new`, the board's `New task` and its `Process with AI` write the section that the title names.
 `check` accepts the three kinds, and it renames no ticket.
 
-Other fields: `category`, `filed-by`, `parent`, `group`, `related`, `repeat`, `run`.
+Other fields: `category`, `filed-by`, `parent`, `group`, `related`, `repeat`, `run`, `visual`.
+
+**`visual` says whether a ticket does visual work** on textures, 3D meshes or the materials
+that show them: `yes`, or `no` with its reason under `## Not visual work` (`visual <id> yes|no
+--why "..."`). Visual work goes to Verification and Done only with renders under `## Result`:
+`renders-for-visual-work.md`.
 
 **`category` says what the ticket is about.** The defaults are `project code` and `internal
 tooling`. `categories` in `.octopus/project.json` adds categories, or rewords the default ones.

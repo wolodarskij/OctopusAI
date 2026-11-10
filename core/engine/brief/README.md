@@ -14,6 +14,7 @@ files in this directory, in this order:
 | 6 | `repeat`, then `repeat.<role>` | a repeatable ticket; `<role>` is `test`, `verify` or `board`. A `manager` ticket gets other sections: see below |
 | 7 | `job.work-plan` or `job.<mode>` | `job.work-plan` for a `work` launch on a ticket that has `## Plan` |
 | 7a | `readme.<mode>` | the rule `readme-needs-owner-approval` is on for the project: `readme.work` for a `work` launch (also on a ticket with `## Plan`), `readme.plan` for a `plan` launch |
+| 7b | `renders.<mode>` | the ticket is visual work on textures, 3D meshes or materials (`todo.visual_work`): `renders.work` for a `work` launch, `renders.plan` for a `plan` launch, `renders.verify` for a `verify` launch, also on a ticket with `visual: no` |
 | 8 | `permits.granted` or `permits.none` | the ticket has permits, or it has none |
 | 8a | `dirs` | the project lists `extraDirs` in `project.json`, and at least one of them exists |
 | 9 | `permits.ungranted` | a permit exists that the ticket does not have |
@@ -30,7 +31,7 @@ files in this directory, in this order:
 A `manager` ticket never finishes and never moves its own ticket, so its brief is only
 `header`, `messages`, `provider`, `where`, `repeat.manager`, the `permits.*` sections and `dirs` (never `projects`: `repeat.manager` carries the projects), `before`, `vcs.<kind>.manager` (on the
 same condition as `vcs.<kind>.<mode>`), `note` and `ticket`.
-It leaves out `boundary`, `blocked`, `repeat`, `job.*`, `readme.*`, `finish.*` and `close.*`.
+It leaves out `boundary`, `blocked`, `repeat`, `job.*`, `readme.*`, `renders.*`, `finish.*` and `close.*`.
 
 ## Where a section comes from
 

@@ -157,6 +157,7 @@ since your last update, once. Print its output as it is. Each agent is one line:
     **Finished since the last update**
     - <project> <id> "<title>" — <outcome>; <lane> / <status>; <commit> pushed|not pushed
       - <a line of its ## Result, when its order asks a question or an investigation>
+      - render: <the absolute path of each render, when its ticket is visual work>
     **Waiting for your input**
     - <project> <id> "<title>" — <the question, word for word>
     **Working**
@@ -174,6 +175,10 @@ since your last update, once. Print its output as it is. Each agent is one line:
   them too. Add no measurement, no
   caveat, no side ticket and no result of your own to a line, and no sentence
   around the sections.
+- **Send every render to the owner.** A finished agent whose ticket is visual
+  work on textures, 3D meshes or materials carries one `render: <path>` sub-line
+  per render. Copy the lines, and send each render file to the owner with the
+  update (Claude Code: `SendUserFile`).
 - **The reply check reads every message you send.** After each turn a small
   model checks each sentence against the request. The sentences that fail come
   to you with the next prompt: write no more of them, and never repeat, correct

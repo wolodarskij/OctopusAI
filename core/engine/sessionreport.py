@@ -9,6 +9,7 @@ and the manager copies the lines and never summarizes a ticket:
     **Finished since the last update**
     - <project> <id> "<title>" — <outcome>; <lane> / <status>; <commit> pushed|not pushed
       - <a line of its `## Result`, when its order asks a question or an investigation>
+      - render: <the absolute path of each render, when its ticket is visual work>
     **Waiting for your input**
     - <project> <id> "<title>" — <the question, word for word>
     **Working**
@@ -22,7 +23,9 @@ whose message starts with `<id>:`, and `pushed` when a remote branch holds it; `
 when none does, nothing in a project without git. THE ANSWER: a finished agent whose ticket's
 order (its title, its first section and its `## Owner's orders`) asks a question or an
 investigation (`asks_answer`) carries the lines of the ticket's last `## Result` section, one
-sub-line each, under its line (`answer_lines`). A session with no ticket is
+sub-line each, under its line (`answer_lines`). THE RENDERS: a finished agent whose ticket is
+visual work on textures, 3D meshes or materials (`todo.visual_work`) carries one
+`render: <path>` sub-line per render file that its `## Result` names (`render_lines`). A session with no ticket is
 `<project> <session> (<mode>)`. Waiting for your input holds only an open session whose agent
 runs and whose state is `input`; a finished or closed one is under Finished, whatever its
 ticket's result names for the owner, or under Other as blocked when its ticket's order is not
@@ -224,6 +227,23 @@ def answer_lines(T, t):
     return lines
 
 
+def render_lines(T, t):
+    """One `render: <absolute path>` line per render that the result of ticket `t` names,
+    when `t` is visual work (`todo.visual_work`); else []."""
+    if t is None or not T.visual_work(t):
+        return []
+    out = []
+    for rel in T.renders_of(t):
+        p = Path(rel)
+        out.append("render: %s" % (p if p.is_absolute() else T.P.ROOT / rel).as_posix())
+    return out
+
+
+def finished_lines(T, t):
+    """The sub-lines of a finished agent: its answer, then its renders."""
+    return answer_lines(T, t) + render_lines(T, t)
+
+
 def _ended(T, t, mode, sid, shell, text):
     """`(section, text)` of an agent whose session ended. Its ticket's order not carried out
     to the end (`todo.finish_undone`): `other`, as blocked, and the ticket goes to the blocked
@@ -278,7 +298,7 @@ def _row(name, T, s, t):
             # A question is repeated word for word, never cut.
             "text": " ".join(str(text or "").split()) if section == "input"
             else _cut(text, TEXT_WIDTH),
-            "answer": answer_lines(T, t) if section == "finished" else []}
+            "answer": finished_lines(T, t) if section == "finished" else []}
 
 
 def _gone_row(name, T, e, t):
@@ -288,7 +308,7 @@ def _gone_row(name, T, e, t):
     section, text = _ended(T, t, e.get("mode") or "", e.get("session") or "", 0,
                            finished_text(T, t, res) or "its terminal closed")
     row.update(section=section, text=_cut(text, TEXT_WIDTH),
-               answer=answer_lines(T, t) if section == "finished" else [])
+               answer=finished_lines(T, t) if section == "finished" else [])
     return row
 
 

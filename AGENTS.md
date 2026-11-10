@@ -18,6 +18,7 @@ The rules and the skills of this project live once, in `.agents/`. Every agent r
 - `.agents/rules/octopus/core/owner-is-remote.md`
 - `.agents/rules/octopus/core/owner-wording.md`
 - `.agents/rules/octopus/core/readme-needs-owner-approval.md`
+- `.agents/rules/octopus/core/renders-for-visual-work.md`
 - `.agents/rules/octopus/core/reporting-to-the-owner.md`
 - `.agents/rules/octopus/core/simplified-technical-english.md`
 - `.agents/rules/octopus/core/todo-tracking.md`
