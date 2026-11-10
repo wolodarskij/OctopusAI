@@ -53,6 +53,14 @@
   work. An outside cause goes to {label:blocked} as above. A decision of the owner: write the
   question on the ticket, run `report ... input` with it, end your last message with the
   question as its last line, and keep this terminal open.
+- **A ticket whose session did not carry out its order to the end is {label:blocked}, never
+  finished.** The order is the ticket, its `## Owner's orders` and the note of this launch. An
+  action that the order names (a run, a setup, a connection) is the work, not a test: a note
+  that forbids tests never forbids it. When you do not carry out an action of the order, for
+  any cause, run `report ... blocked` with the cause. Never move the ticket to
+  {label:verify}, and never write `WORK IS FINISHED`. `move` refuses a `## Result` that says
+  an action was not carried out ("The script was not run"). When a session ends with its
+  ticket's work not done, the engine moves the ticket to {label:blocked}.
 - **Work is never finished while a question is open.** When you cannot do the work without
   the owner (a value only the owner can give, a decision, a word), that is a question, not a
   finish: report `input`, ask it with the `AskUserQuestion` tool, and keep this terminal open.

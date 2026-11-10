@@ -295,6 +295,31 @@ _STILL_WRONG = re.compile(
     r"|\b(?:partly|partially)\s+(?:works?|fixed|done|implemented)\b"
     r"|\bstill\s+to\s+(?:do|fix)\b", re.I)
 FINISHED_SECTIONS = re.compile(r"^(?:Result|Verified)\s*$", re.I)
+# The phrases that say an action was not carried out: "The script was not run". A ticket whose
+# session did not carry out its order to the end is not finished work.
+_NOT_CARRIED_OUT = re.compile(
+    r"\b(?:was|were|is|are|have|has)\s*(?:n['’]t|\snot|\snever)\s+(?:yet\s+)?"
+    r"(?:run|executed|carried\s+out|performed)\b|\bnot\s+carried\s+out\b", re.I)
+# A phrase whose subject is a test states no unmet order: a test runs on the owner's
+# permission only. A sentence that sets the old behavior against the new one ("was not run
+# before; now it runs") describes a fix.
+_TEST_SUBJECT = re.compile(r"\b(?:tests?|test\s+suites?|suites?|testing)\b", re.I)
+_OLD_AND_NEW = re.compile(r"\b(?:now|before|no\s+longer|used\s+to)\b", re.I)
+
+
+def not_carried_out(text):
+    """The phrase of `text` (str) that says an action was not carried out, or "". A phrase
+    whose subject is a test or a test suite, and a phrase in a sentence that sets the old
+    behavior against the new one, do not count."""
+    text = str(text or "")
+    for m in _NOT_CARRIED_OUT.finditer(text):
+        start = max(text.rfind(c, 0, m.start()) for c in ".!?;:\n") + 1
+        ends = [i for i in (text.find(c, m.end()) for c in ".!?\n") if i >= 0]
+        if _TEST_SUBJECT.search(text[start:m.start()]) \
+                or _OLD_AND_NEW.search(text[start:min(ends or [len(text)])]):
+            continue
+        return m.group(0)
+    return ""
 
 
 def still_wrong(text):
@@ -313,12 +338,17 @@ def is_finished(state, status=""):
 
 def finished_problem(t, said=None):
     """Why ticket `t` cannot be finished work, or "": its outcome (`said`, else its own
-    `outcome:`), its `## Result` or its `## Verified` says that something is still wrong. Of a
-    repeatable ticket only the current run's `## Result (run <n>)` counts."""
+    `outcome:`), its `## Result` or its `## Verified` says that something is still wrong, or
+    that an action was not carried out (`not_carried_out`): a ticket whose session did not
+    carry out its order to the end is not finished. Of a repeatable ticket only the current
+    run's `## Result (run <n>)` counts."""
     said = t.meta.get(OUTCOME_FIELD, "") if said is None else said
     phrase = still_wrong(said)
     if phrase:
         return "its outcome says that something is still wrong (%r)" % phrase
+    phrase = not_carried_out(said)
+    if phrase:
+        return "its outcome says that an action was not carried out (%r)" % phrase
     own = re.compile(r"^Result \(run %d\)$" % t.run) if t.repeat else FINISHED_SECTIONS
     for m in re.finditer(r"^##\s+([^\n]*)\n(.*?)(?=^##\s|\Z)", t.body or "", re.M | re.S):
         if own.match(m.group(1).strip()):
@@ -326,6 +356,11 @@ def finished_problem(t, said=None):
             if phrase:
                 return "its `## %s` says that something is still wrong (%r)" \
                     % (m.group(1).strip(), phrase)
+            phrase = not_carried_out(m.group(2))
+            if phrase:
+                return ("its `## %s` says that an action was not carried out (%r): a ticket "
+                        "whose session did not carry out its order to the end goes to %s"
+                        % (m.group(1).strip(), phrase, lane("blocked")))
     return ""
 
 
@@ -1947,6 +1982,9 @@ def cmd_move(args):
                     "found.",
                     "  Wrong: keep the ticket and fix it, or send it back to %s from a verify "
                     "session." % lane("start"),
+                    "  An action of the order not carried out: carry it out, or run `report %s "
+                    "blocked` when an outside cause stops it. A note that forbids tests never "
+                    "forbids an action that the order names." % t.id,
                     "  Not sure what to call wrong: ask the owner, and keep the ticket where "
                     "it is.",
                 ):
@@ -6664,6 +6702,42 @@ def auto_block(tid, mode, sid, shell, why):
     why = " ".join((why or "").split()) or "an outside cause that the session did not name"
     _to_blocked(t, sid, shell, why, AUTO_BLOCKED % t.id)
     return True
+
+
+# What `## Blocked` says of a ticket whose session ended with its order not met.
+UNDONE_BLOCKED = ("Found by the engine: the %s session ended, and the ticket's order is not "
+                  "carried out to the end.")
+
+
+def _undone_path(sid):
+    """Line 1: the `launched:` stamp of the launch whose ticket `block_undone` handled."""
+    return P.SESSIONS_DIR / ("%s.undone" % sid.lower())
+
+
+def block_undone(t, mode, sid, shell=0):
+    """Move ticket `t` of the `mode` session `sid`, whose session ended (it said `WORK IS
+    FINISHED`, its Claude exited, or its terminal is gone) while its ticket does not show its
+    work done (`finish_undone`), to the blocked lane as `blocked by outside cause`: a ticket
+    whose session did not carry out its order to the end is blocked, never finished. Only a
+    ticket still in its launch lane, and only for its last launch; once per launch
+    (`<session>.undone`), so a ticket that the owner moves back stays there. A manager stays
+    where it is. Returns why its work is not done ("" when it is), whether it moved or not."""
+    undone = finish_undone(t, mode)
+    if not undone or not sid or t.session.lower() != sid.lower():
+        return undone
+    if t.state != P.LAUNCH_LANE[mode][0] or t.state in (lane("blocked"), lane("closed")):
+        return undone
+    path = _undone_path(sid)
+    stamp = t.launched or "-"
+    try:
+        if path.read_text(encoding="utf-8").strip() == stamp:
+            return undone
+    except OSError:
+        pass
+    _to_blocked(t, sid, shell, undone, UNDONE_BLOCKED % mode)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(stamp + "\n", encoding="utf-8")
+    return undone
 
 
 def _blocked_cycles(tickets):

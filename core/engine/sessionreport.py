@@ -25,7 +25,8 @@ investigation (`asks_answer`) carries the lines of the ticket's last `## Result`
 sub-line each, under its line (`answer_lines`). A session with no ticket is
 `<project> <session> (<mode>)`. Waiting for your input holds only an open session whose agent
 runs and whose state is `input`; a finished or closed one is under Finished, whatever its
-ticket's result names for the owner. Every open session the engine calls `input` is there,
+ticket's result names for the owner, or under Other as blocked when its ticket's order is not
+carried out to the end. Every open session the engine calls `input` is there,
 also when its ticket waits for other tickets or it holds a background task or a scheduled
 job. The manager sessions and the session that runs the command are left out.
 
@@ -36,9 +37,13 @@ as gone. Finished then holds each session that finished since that call: one fin
 that was not finished then, one that was in the snapshot unfinished and whose terminal is
 gone, since a finished session closes its terminal at once, and one whose launch in its
 ticket's `sessions:` is at or after that time and whose terminal is gone, so an agent that
-started and finished between two calls is there too. A launch is reported once. A gone
-session whose ticket does not show its work done (`todo.finish_undone`) carries that as a
-note. Without `--since-last`, Finished holds the sessions that are finished and still open,
+started and finished between two calls is there too. A launch is reported once.
+
+NEVER FINISHED WITH ITS ORDER UNMET. A session that ended (finished, its Claude exited, or
+its terminal gone) while its ticket does not show its work done (`todo.finish_undone`) did
+not carry out its order to the end: it stands under Other as `blocked`, never under
+Finished, and its ticket goes to the blocked lane as `blocked by outside cause`
+(`todo.block_undone`). Without `--since-last`, Finished holds the sessions that are finished and still open,
 and no snapshot is read or written.
 
 ONLY WHEN AN AGENT IS THERE. `--if-any` is `--since-last` that prints nothing only when the
@@ -75,6 +80,8 @@ DOING_WORDS = 10
 DASH = "—"
 # The most lines of a finished ticket's `## Result` that the update gives as its answer.
 ANSWER_LINES = 30
+# The text of an agent whose session ended while its ticket's order is not carried out.
+BLOCKED_TEXT = "blocked: its session ended, and the ticket's order is not carried out to the end"
 # What in an order asks a question or an investigation.
 ASKS = re.compile(r"\?|\b(?:investigat\w*|analy[sz]\w*|finds? out|measur\w*|evaluat\w*|"
                   r"determin\w*|assess\w*|research\w*|compar\w*|root cause|whether|"
@@ -216,13 +223,26 @@ def answer_lines(T, t):
     return lines
 
 
+def _ended(T, t, mode, sid, shell, text):
+    """`(section, text)` of an agent whose session ended. Its ticket's order not carried out
+    to the end (`todo.finish_undone`): `other`, as blocked, and the ticket goes to the blocked
+    lane (`todo.block_undone`). Else `finished` with `text`."""
+    undone = T.block_undone(t, mode, sid, shell) if t is not None else ""
+    if not undone:
+        return "finished", text
+    t = T.find(T.load_all(), t.id) or t
+    return "other", "; ".join(x for x in (BLOCKED_TEXT, _where(T, t),
+                                          commit_of(T.P.ROOT, t.id, T.P.vcs)) if x)
+
+
 def classify(T, s, t):
     """`(section, text)` of one live session: `t` is its ticket or None."""
     word = T.state_word(s)
     why = s.get("why") or ""
     if word == "finished":
         res = _last_result(T, s["session"]) if s.get("session") and t is None else ""
-        return "finished", finished_text(T, t, res or why)
+        return _ended(T, t, s.get("mode") or "", s.get("session") or "", s.get("shell") or 0,
+                      finished_text(T, t, res or why))
     if word == "running":
         return "working", _words(s.get("doing") or "its turn runs", DOING_WORDS)
     if word == "subagent":
@@ -230,7 +250,8 @@ def classify(T, s, t):
     if word == "input":
         # Only an open session whose agent still runs waits for the owner.
         if not s.get("claude"):
-            return "finished", finished_text(T, t, why)
+            return _ended(T, t, s.get("mode") or "", s.get("session") or "",
+                          s.get("shell") or 0, finished_text(T, t, why))
         return "input", _question(s)
     return "other", ("%s: %s" % (word, why) if why else word)
 
@@ -260,12 +281,10 @@ def _gone_row(name, T, e, t):
     """The row of a session in the snapshot whose terminal is gone."""
     row = dict(e, key="%s|%s" % (name, e["session"]), state="gone", lane=_where(T, t))
     res = _last_result(T, e["session"]) if t is None else ""
-    text = finished_text(T, t, res) or "its terminal closed"
-    # A note only: the ticket check never moves the agent out of Finished.
-    undone = T.finish_undone(t, e.get("mode") or "") if t is not None else ""
-    row.update(section="finished",
-               text=_cut("%s; note: %s" % (text, undone) if undone else text, TEXT_WIDTH),
-               answer=answer_lines(T, t))
+    section, text = _ended(T, t, e.get("mode") or "", e.get("session") or "", 0,
+                           finished_text(T, t, res) or "its terminal closed")
+    row.update(section=section, text=_cut(text, TEXT_WIDTH),
+               answer=answer_lines(T, t) if section == "finished" else [])
     return row
 
 

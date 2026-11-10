@@ -163,6 +163,22 @@ whether a part is enough. Only the owner, on the owner's own order, says that a 
 enough. A part of the order that cannot be done sends the ticket to Blocked with its cause.
 The reply check fails such an offer, also when it is a question.
 
+**A ticket whose session did not carry out its order to the end is Blocked, never finished.**
+The order is the ticket's first section, its `## Owner's orders` and the note of its launch.
+An action that the order names is the work, also a run, a setup or a connection. A note that
+forbids tests never forbids such an action. A session that does not carry out an action of the
+order, for any cause, never moves its ticket to Verification and never writes `WORK IS
+FINISHED`. It runs `report <id> blocked` with the cause, and it waits. The engine enforces it:
+
+- `move` to Verification or Done refuses a ticket whose outcome, `## Result` or `## Verified`
+  says that an action was not carried out: "The script was not run". A phrase whose subject
+  is a test, and a sentence that sets the old behavior against the new one, do not count.
+- When a session ends (`WORK IS FINISHED`, its Claude exits, or its terminal closes) and its
+  ticket does not show its work done, the engine moves the ticket from its launch board to
+  Blocked `blocked by outside cause`, with the cause under `## Blocked`. It does this once per
+  launch, so a ticket that the owner moves back stays there.
+- The manager's update lists that agent under Other as `blocked`, never under Finished.
+
 **A launched session that meets a blocker:**
 
 1. links the blocker and moves its own ticket to Blocked;
@@ -276,7 +292,7 @@ and every background shell of a `finished` session. A background shell that no l
 never makes a session `working`.
 
 **`WORK IS FINISHED` means that the work of the session is finished.** The engine trusts the
-line and checks nothing else, so a session writes it only when its work is done: a `work`
+line for the state of the session, so a session writes it only when its work is done: a `work`
 ticket in Verification, a plan `ready to implement` that leaves nothing open, a `review`
 verdict given, a `verify` measurement made. A session that cannot do its work (a missing
 asset or file, an ungranted permit, an outside action, a tool or a server that fails, another
@@ -287,7 +303,9 @@ ticket is the steps for a blocker; a decision of the owner is `report <id> input
 question dialog, and a note that forbids questions or the dialog only moves the question to
 the last line of its message. **A session whose work is finished never leaves the line out:** in
 every launch mode, also in the turn after the owner's answer, after a message of the owner,
-after a resume, and after the event or the background job it waited for.
+after a resume, and after the event or the background job it waited for. A line on a ticket
+that does not show the work done sends the ticket to Blocked: the session did not carry out
+its order to the end.
 
 **The engine decides the state in this order, and the first step that matches wins:**
 
@@ -588,8 +606,9 @@ the owner. It grants `projects`, so the session reaches every registered project
   question word for word, a working one `<project> <id> "<title>" — <what it does now, at most
   10 words>`. A finished agent whose ticket's order asks a question or an investigation
   carries its answer: the lines of the ticket's `## Result`, one sub-line each, under its
-  line. **Waiting for your input lists only an agent whose session is open and in the
-  `input` state.** A finished, closed or idle agent never stands there, and nor does a decision
+  line. An agent whose session ended while its ticket does not show its work done stands
+  under Other as `blocked`, never under Finished. **Waiting for your input lists only an
+  agent whose session is open and in the `input` state.** A finished, closed or idle agent never stands there, and nor does a decision
   that a finished ticket's result names: that agent stands only under Finished. The reply check
   fails a Waiting line about any other agent.
 - **The manager's check is always on, and it gives the full update every 10 minutes while

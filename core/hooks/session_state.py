@@ -2229,13 +2229,19 @@ def close_finished(session_id, text, shell=0, launch=None):
     the closed lane. Its terminal closes whether or not it ran `close --self` and whether or
     not the board runs. Returns whether it started.
 
-    `WORK IS FINISHED` closes at once (`--now`), and nothing else is read: no report and no
-    ticket. `launch` is `_launch_of(session_id)` when the caller has it already."""
+    `WORK IS FINISHED` closes at once (`--now`), and no report is read. A ticket that does not
+    show the work done goes to the blocked lane first (`todo.block_undone`): a session that
+    did not carry out its order to the end never finishes its ticket. `launch` is
+    `_launch_of(session_id)` when the caller has it already."""
     import todo
     t, mode = launch or _launch_of(session_id)
     if t is None or mode not in todo.MODES or t.repeat == "manager":
         return False
     if says_finished(text):
+        try:
+            todo.block_undone(t, mode, session_id, shell)
+        except Exception:                               # noqa: BLE001 - the update blocks it
+            pass
         return start_closer(t, mode, now=True)
     if owner_talks(session_id, shell):
         # The owner talks to it: only its own `WORK IS FINISHED` ends the session.
