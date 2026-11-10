@@ -247,18 +247,25 @@ class Record:
             d.mkdir()
             self.dirs.append(d.relative_to(self.root).as_posix())
 
-    def put(self, rel, data, owner, replace=False):
+    def put(self, rel, data, owner, replace=False, released=None):
         """Write one file and record it. A file that exists with other content is left
         alone and reported; install never overwrites what it did not write. With `replace`
-        the pack owns the file: a copy it did not write and an edited copy are overwritten."""
+        the pack owns the file: a copy it did not write and an edited copy are overwritten.
+        `released` gives the hashes of every released version of the file: a copy that
+        equals one of them is no edit, and is overwritten."""
         p = self.root / rel
         old = p.read_bytes() if p.exists() else None
+
+        def is_release():
+            return released is not None and _sha(old) in released()
+
         if old is not None and rel not in self.files and not replace:
             if old == data:
                 return "same"
-            return "kept"
-        if rel in self.files and old is not None and _sha(old) != self.files[rel]["hash"] \
-                and not replace:
+            if not is_release():
+                return "kept"
+        elif rel in self.files and old is not None and _sha(old) != self.files[rel]["hash"] \
+                and not replace and old != data and not is_release():
             return "edited"
         if old == data:
             self.files[rel] = {"hash": _sha(data), "by": owner}
@@ -277,6 +284,54 @@ def _fill(data, values):
     for k, v in values.items():
         text = text.replace("{{%s}}" % k, v)
     return text.encode("utf-8")
+
+
+_RELEASES = {}
+
+
+def _releases(src):
+    """Every version of the payload source `src` that git holds in the history of its
+    repository: the checkout, or the repository of its pack. [] outside a git repository."""
+    import subprocess
+    src = Path(src)
+    key = str(src.resolve())
+    if key in _RELEASES:
+        return _RELEASES[key]
+    found = []
+    kw = {"cwd": str(src.parent), "stdout": subprocess.PIPE, "stderr": subprocess.DEVNULL,
+          "timeout": 60, "creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)}
+    try:
+        revs = subprocess.run(["git", "rev-list", "HEAD", "--", src.name],
+                              stdin=subprocess.DEVNULL, **kw).stdout.split()
+        if revs:
+            query = b"".join(b"%s:./%s\n" % (r, src.name.encode("utf-8")) for r in revs)
+            blob = subprocess.run(["git", "cat-file", "--batch"], input=query, **kw).stdout
+            i = 0
+            while i < len(blob):
+                nl = blob.index(b"\n", i)
+                head = blob[i:nl].split()
+                i = nl + 1
+                if len(head) == 3 and head[1] == b"blob":
+                    n = int(head[2])
+                    found.append(blob[i:i + n])
+                    i += n + 1
+    except (OSError, ValueError, subprocess.SubprocessError):
+        found = []
+    _RELEASES[key] = found
+    return found
+
+
+def _released_hashes(src, values):
+    """The hashes of every released version of the payload source `src`, filled with the
+    project's `values` as install fills the current one. A text file counts with LF and with
+    CRLF line ends: git can check out either."""
+    if Path(src).suffix.lower() not in TEXT_SUFFIXES:
+        return {_sha(d) for d in _releases(src)}
+    out = set()
+    for d in _releases(src):
+        lf = _fill(d, values).replace(b"\r\n", b"\n")
+        out.update((_sha(lf), _sha(lf.replace(b"\n", b"\r\n"))))
+    return out
 
 
 def _payload_files(base, src, dst):
@@ -753,7 +808,8 @@ def _install_payload(root, rs, rec, values, out, only_replace=False):
             if src.suffix.lower() in TEXT_SUFFIXES:
                 data = _fill(data, values)
             shipped.add(dst)
-            r = rec.put(dst, data, rs, replace=replace)
+            r = rec.put(dst, data, rs, replace=replace,
+                        released=lambda src=src: _released_hashes(src, values))
             if r in ("kept", "edited"):
                 out("  %s: %s exists with other content and is left as it is" % (rs, dst))
             elif r == "written":
