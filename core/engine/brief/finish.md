@@ -59,7 +59,8 @@
   that forbids tests never forbids it. When you do not carry out an action of the order, for
   any cause, run `report ... blocked` with the cause. Never move the ticket to
   {label:verify}, and never write `WORK IS FINISHED`. `move` refuses a `## Result` that says
-  an action was not carried out ("The script was not run"). When a session ends with its
+  an action was not carried out ("The script was not run"), and a ticket whose `## Result`
+  and changed files do not show each part of the order done. When a session ends with its
   ticket's work not done, the engine moves the ticket to {label:blocked}.
 - **Work is never finished while a question is open.** When you cannot do the work without
   the owner (a value only the owner can give, a decision, a word), that is a question, not a

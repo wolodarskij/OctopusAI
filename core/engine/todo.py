@@ -400,16 +400,21 @@ def _result_texts(t):
             if own.match(m.group(1).strip())]
 
 
-def visual_files(t):
-    """The texture, mesh and material files that the git commits of ticket `t` change, as
-    paths from the project root; [] in a project without git."""
+def commit_files(t):
+    """The files that the git commits `<id>:` of ticket `t` change, as paths from the project
+    root, sorted; [] in a project without git."""
     if P.vcs != "git":
         return []
     import vcs as _vcs
     st = _vcs._git(P.ROOT, "log", "--format=", "--name-only", "--grep", "^%s:" % t.id,
                    timeout=_vcs.COMMIT_TIMEOUT)
-    return sorted({f.strip() for f in _vcs._lines(st)
-                   if f.strip() and VISUAL_FILE.search(f.strip())})
+    return sorted({f.strip() for f in _vcs._lines(st) if f.strip()})
+
+
+def visual_files(t):
+    """The texture, mesh and material files that the git commits of ticket `t` change, as
+    paths from the project root; [] in a project without git."""
+    return [f for f in commit_files(t) if VISUAL_FILE.search(f)]
 
 
 def visual_work(t, commits=True):
@@ -2249,6 +2254,32 @@ def cmd_move(args):
                 ):
                     print(line, file=sys.stderr)
                 return 2
+            if state != lane("verify") or args.dry_run or not _order_checked(t):
+                continue
+            try:
+                undone = order_undone(t, said)
+            except (ValueError, OSError) as exc:
+                print("The check of the order has no verdict, so the move goes on: %s" % exc,
+                      file=sys.stderr)
+                continue
+            if undone:
+                print("Error: %s cannot go to %s: a part of its order is not done."
+                      % (t.id, P.STATE_LABEL[state]), file=sys.stderr)
+                for part, why in undone:
+                    print("  - %s: %s" % (part, why or "the model gave no reason"),
+                          file=sys.stderr)
+                for line in (
+                    "  The order is the ticket's first section, its `## Owner's orders` and the "
+                    "note of its launch.",
+                    "  Carry out each part, and name it under `## Result`. When an outside "
+                    "cause stops a part, run",
+                    "    %s report %s blocked --why \"<the cause>\" --tried \"<every way "
+                    "tried>\" --mode work" % (P.cli, t.id),
+                    "  When the owner must decide a part, ask the owner, and keep the ticket "
+                    "where it is.",
+                ):
+                    print(line, file=sys.stderr)
+                return 2
     if said is not None and not args.dry_run:
         for ident in args.ids:
             t = find(tickets, ident)
@@ -3232,6 +3263,118 @@ def owner_named(tickets, claim, owner, direct=""):
             return (by_id + [x.strip().upper() for x in named if x.strip().upper() in known],
                     " ".join(str(d.get("why") or "").split()))
     raise ValueError("the model gave no verdict")
+
+
+# THE ORDER CHECK: an AI session's move of a ticket to the verify lane is refused while a part
+# of the ticket's order is not done. The order is the ticket's title, its first section, its
+# `## Owner's orders` and the note of its last launch. The duplicate check's model compares it
+# with the result (the outcome, `## Result`, `## Verified`) and the changed files (the files of
+# the ticket's commits, and the files of the tree that are not committed), and names each part
+# of the order that the work did not do, in words copied from the order. An answer whose words
+# do not stand in the order is rejected, and the model is asked once more. With no verdict the
+# move goes on.
+ORDER_CHARS = 6000
+ORDER_FILES = 200
+ORDER_PROMPT = """You check a ticket of the project %(project)s before its session moves it to
+%(verify)s, the board for finished work. Finished work carries out every part of the ORDER:
+each file to write or change, each document or page to write or publish, each run, setup or
+connection that the order names.
+
+Compare the ORDER with the RESULT and the CHANGED FILES. A part of the order is undone when:
+- the RESULT says that the part was not done, was left, or that the ticket did not change the
+  file, the document or the page that the part names;
+- the part names a deliverable (a file, a document, a page, a run, a publication), and neither
+  the RESULT nor the CHANGED FILES show it.
+
+These are no undone part:
+- a test or a test suite: a test runs only on the owner's permission;
+- a change of a project-wide README file that waits for the owner's approval;
+- a part that the order gives to another ticket or to the owner;
+- a part that the RESULT shows done in other words, or that a changed file carries;
+- an order to investigate or to answer, when the RESULT gives the answer;
+- the generic steps of a session: commit, report, move the ticket, close the terminal.
+When you are in doubt, the part is done.
+
+Answer with one JSON object and nothing else:
+{"undone": [{"part": "<the part of the order, words copied exactly from the ORDER>",
+"why": "<one sentence: what in the RESULT or the CHANGED FILES shows that it is not done>"}]}
+"undone" is [] when every part of the order is done.
+
+ORDER
+%(order)s
+
+RESULT
+%(result)s
+
+CHANGED FILES: the git commits of the ticket
+%(committed)s
+
+CHANGED FILES: the tree, not committed (any session's or the owner's)
+%(uncommitted)s"""
+
+
+def tree_changes():
+    """The files of the project tree that git shows changed and not committed, as paths from
+    the project root; [] in a project without git."""
+    if P.vcs != "git":
+        return []
+    import vcs as _vcs
+    st = _vcs._git(P.ROOT, "status", "--porcelain", "--untracked-files=all",
+                   timeout=_vcs.COMMIT_TIMEOUT)
+    return sorted({ln[3:].split(" -> ")[-1].strip().strip('"') for ln in _vcs._lines(st)
+                   if len(ln) > 3})
+
+
+def _order_norm(text):
+    text = re.sub(r"[`*\"'“”‘’]", "", str(text or "").lower())
+    return " ".join(re.sub(r"[^\w./\\:-]+", " ", text).split())
+
+
+def order_undone(t, said=None):
+    """The parts of the order of ticket `t` that its work did not do: a list of `(part,
+    why)`, empty when every part is done. `said` is the outcome of the move, else the
+    ticket's own `outcome:`. Raises ValueError when the model gives no usable answer."""
+    said = t.meta.get(OUTCOME_FIELD, "") if said is None else said
+    note = launch_note(t.id)
+    order = _ticket_words(t.title, t.body)
+    if note:
+        order += "\nThe owner's note to the last launch:\n" + note
+    result = "\n".join(x.strip() for x in (["outcome: %s" % said] if said else [])
+                       + _result_texts(t) if x.strip())
+
+    def listing(files):
+        return "\n".join(files[:ORDER_FILES]) or "(none)"
+
+    prompt = ORDER_PROMPT % {
+        "project": P.name, "verify": lane("verify"), "order": order[:ORDER_CHARS],
+        "result": result[:ORDER_CHARS] or "(none)", "committed": listing(commit_files(t)),
+        "uncommitted": listing(tree_changes())}
+    known = _order_norm(order)
+    for _try in range(DUP_TRIES):
+        d = _dup_json(_ask_dup_model(prompt))
+        undone = d.get("undone") if d else None
+        if not isinstance(undone, list) or not all(isinstance(x, dict) for x in undone):
+            continue
+        parts = [(" ".join(str(x.get("part") or "").split()),
+                  " ".join(str(x.get("why") or "").split())) for x in undone]
+        found = [(p, w) for p, w in parts if _order_norm(p) and _order_norm(p) in known]
+        if found or not parts:
+            return found
+        prompt += ("\n\nYour last answer named parts whose words do not stand in the ORDER: "
+                   "%s. Copy the words of each part exactly from the ORDER."
+                   % "; ".join(repr(p) for p, _w in parts))
+    raise ValueError("the model gave no verdict")
+
+
+def _order_checked(t):
+    """Whether the calling session's move of `t` to the verify lane runs the order check: an
+    AI session that is not a `review` or a `verify` launch of `t`, on a ticket that is not a
+    manager."""
+    if t.repeat == MANAGER or not _in_ai_session():
+        return False
+    sid = _caller_session()
+    return not any(e["session"].lower() == sid and e["mode"] in ("review", "verify")
+                   for e in t.sessions)
 
 
 def _claim(args):

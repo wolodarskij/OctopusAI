@@ -213,6 +213,12 @@ FINISHED`. It runs `report <id> blocked` with the cause, and it waits. The engin
   says that an action was not carried out: "The script was not run". A phrase whose subject
   is a test or a generic action, a phrase in quotes, and a sentence that sets the old behavior
   against the new one, do not count.
+- In an AI session, `move` to Verification refuses a ticket while a part of its order is not
+  done. A model (the duplicate check's model) compares the order with the outcome, the
+  `## Result` and the changed files: the files of the ticket's commits and the files of the
+  tree that are not committed. It names each part that the work did not do, in words of the
+  order. A `review` or a `verify` launch of the ticket, and a manager ticket, skip the check.
+  With no verdict, the move goes on.
 - When a session ends (`WORK IS FINISHED`, its Claude exits, or its terminal closes) and its
   ticket does not show its work done, the engine moves the ticket from its launch board to
   Blocked `blocked by outside cause`. The cause under `## Blocked` is the end of the session,
