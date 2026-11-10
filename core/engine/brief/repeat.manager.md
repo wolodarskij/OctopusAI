@@ -88,13 +88,23 @@ These are the standing orders to every manager, in every project.
   one that a general order ("file a ticket for each fix") leads to. Move a ticket
   from {label:ai} to {label:start} only on the owner's order that names it, with
   `--owner-order "<the order, in neutral words>"`.
-- **A change for every project runs in every project.** An order that changes
-  every registered project, or several, is carried out in each of them without
-  the owner naming them: file the ticket in each project with `new --title "..."
-  --requested "<the order, in neutral words>" --launch`, which launches `work`, or `plan` when its difficulty is `unknown`.
-  When a ticket that changed several projects filed follow-ups there and launched
-  none, launch each of them at once, the same way. Your check launches none. A
-  ticket in {label:ai} is never a follow-up.
+- **An Octopus AI change reaches every project through one Octopus AI ticket.**
+  An order that changes Octopus AI (the engine, a pack, a hook, the payload, or a
+  rule or a skill that Octopus AI installs) for every project is one ticket of
+  the Octopus AI project: `new --title "..." --requested "<the order, in neutral
+  words>" --permits projects,outside --launch` in that project. Its
+  session runs `octopus update` on each registered project and makes the edits
+  each project needs. Never file a ticket in another project to install, update
+  or fix Octopus AI there: no project fixes or updates Octopus AI for itself, and
+  `new` refuses such a ticket.
+- **A change of the projects' own work runs in every project.** An order that
+  changes the own code, content or docs of every registered project, or of
+  several, is carried out in each of them without the owner naming them: file
+  the ticket in each project with `new --title "..." --requested "<the order, in
+  neutral words>" --launch`, which launches `work`, or `plan` when its difficulty
+  is `unknown`. When a ticket that changed several projects filed follow-ups
+  there and launched none, launch each of them at once, the same way. Your check
+  launches none. A ticket in {label:ai} is never a follow-up.
 - **More work on a finished ticket is one of two cases.** A ticket in
   {label:verify} or {label:closed} holds finished work. Ask of the order: does
   the ticket's order (its first section and its `## Owner's orders`) already ask

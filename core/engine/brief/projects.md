@@ -4,6 +4,11 @@ This ticket holds `projects`: it may change other registered projects and file
 tickets in them. **Carry the change into each project to the end.** The owner
 never has to launch a session in another project by hand.
 
+**An Octopus AI change is never a follow-up.** No ticket of this project or of
+another project installs, updates or fixes Octopus AI there: the Octopus AI
+ticket carries its change into every project itself, and `new` refuses such a
+ticket. A defect of an Octopus AI tool goes to `notify`.
+
 - **File each follow-up with its session:** `new --title "..." --requested "<the
   owner's order for every project, in neutral words>" --launch`, with the command in
   the project's row below. It files the ticket and launches `work` on it, or `plan`

@@ -5,8 +5,9 @@ description: Check every registered project and bring each one up to the current
 
 # Update every project
 
-`octopus` is `python "{{OCTOPUS}}/octopus.py"`. The session needs write access to every
-registered project: the manager, or a session that holds the `projects` permit.
+`octopus` is `python "{{OCTOPUS}}/octopus.py"`. Run it in the session of an Octopus AI ticket that holds
+the `projects` and `outside` permits. The manager files that ticket and runs nothing here. No project
+updates Octopus AI for itself, and nobody files a ticket in another project for the update.
 
 ## 1. The projects
 
@@ -62,8 +63,9 @@ Do the steps for each project that exists. `<p>` is its path, `<name>` its name.
    needs a decision (a severity, a parent, a lane, an outcome that the ticket does not show) is a
    question to the owner. Run `check` again until it passes or only questions stay.
 
-Never undo a change that the owner made in a project. Commit nothing: the owner commits each
-project.
+Never undo a change that the owner made in a project. In a project that is a git repository,
+commit only the files that this run changed, as `<id>: <title>` of the Octopus AI ticket. The
+verify session of that ticket pushes them.
 
 ## 3. Report
 

@@ -88,7 +88,9 @@ class ProjectsBrief(FixtureCase):
 
     def test_the_manager_gets_its_own_order_and_not_the_section(self):
         brief = self.brief("--repeat", "manager", "--permits", "projects")
-        self.assertIn("A change for every project runs in every project", brief)
+        self.assertIn("An Octopus AI change reaches every project through one Octopus AI ticket",
+                      brief)
+        self.assertIn("A change of the projects' own work runs in every project", brief)
         self.assertNotIn("## A change for every project reaches every project", brief)
 
 

@@ -2862,9 +2862,12 @@ def cmd_new(args):
         print("Error: --launch files the ticket into %s; it does not go with --state %s"
               % (lane("start"), args.state), file=sys.stderr)
         return 2
-    tool = "" if _files_for_octopus() else octopus_tool_source(args.source)
+    tool = "" if is_octopus_project() else octopus_tool_source(args.source)
     if tool:
         return _refuse_tool_ticket(args.source, tool)
+    why = octopus_change_problem(args.title, args.description)
+    if why:
+        return _refuse_octopus_change(why)
     if _in_ai_session() and not getattr(args, "by_owner", False):
         why = _title_kind_problem(args.title, args.source)
         if why:
@@ -3658,10 +3661,70 @@ def is_octopus_project(root=None):
         return False
 
 
-def _files_for_octopus():
-    """Whether `new` files for Octopus AI: in the Octopus AI project, or from a working
-    directory inside it, as a follow-up of an Octopus AI ticket filed in another project."""
-    return is_octopus_project() or is_octopus_project(_project.find_root() or P.ROOT)
+# An Octopus AI change reaches every project through its own Octopus AI ticket: its session
+# runs `octopus update` on each project and edits there. A ticket of another project never
+# carries such a change.
+_OCTOPUS_CHANGE = re.compile(
+    r"\boctopus(?:\.py)?[\"']?\s+update\b"
+    r"|\.agents[/\\]rules[/\\]octopus\b"
+    r"|\bOctopus AI(?:'s)?\s+(?:rules?|skills?|hooks?|engine|payload|updates?|changes?)\b",
+    re.I)
+
+
+def _octopus_ticket_of_caller():
+    """The ticket of the Octopus AI project whose `sessions:` records the calling session, or
+    None."""
+    sid = _caller_session()
+    if not sid:
+        return None
+    try:
+        todo = _project.load(_project.OCTOPUS).TODO
+    except Exception:
+        return None
+    for f in todo.glob("*/**/T*.md"):
+        try:
+            text = _read(f)
+        except OSError:
+            continue
+        if sid not in text.lower():
+            continue
+        meta, body = parse(text)
+        t = Ticket(f, f.parent.name, "", meta, body)
+        if _own_ticket(t, sid):
+            return t
+    return None
+
+
+def octopus_change_problem(title, description):
+    """Why a ticket that `new` files in a project other than Octopus AI would carry an Octopus
+    AI change into it, or "": the session of an Octopus AI ticket other than the manager files
+    it, or its title or description orders an Octopus AI change."""
+    if is_octopus_project():
+        return ""
+    m = _OCTOPUS_CHANGE.search("%s\n%s" % (title or "", description or ""))
+    if m:
+        return "its text orders an Octopus AI change into this project (%r)" % m.group(0)
+    if _in_ai_session():
+        t = _octopus_ticket_of_caller()
+        if t is not None and t.repeat != MANAGER:
+            return ("the session of the Octopus AI ticket %s files it; that ticket carries its "
+                    "change into this project itself" % t.id)
+    return ""
+
+
+def _refuse_octopus_change(why):
+    for line in (
+        "Error: no ticket of %s carries an Octopus AI change: %s." % (P.name, why),
+        "  The Octopus AI ticket carries its change into every project itself: its session runs",
+        "    python \"%s\" update \"%s\"" % ((_project.OCTOPUS / "octopus.py").as_posix(),
+                                          Path(P.ROOT).as_posix()),
+        "  and makes the edits this project needs. No project fixes or updates Octopus AI for",
+        "  itself. A defect of an Octopus AI tool goes to:",
+        "    %s notify --tool <file> --defect \"<what is wrong>\" --evidence \"<the file and "
+        "line>\"" % P.cli,
+    ):
+        print(line, file=sys.stderr)
+    return 2
 
 
 def _installed_files(root):
@@ -4366,7 +4429,8 @@ def build_brief(t, mode="work", note="", provider="claude"):
         permits.append(sec("permits.denied"))
     if "projects" in granted and t.repeat != MANAGER:
         # The manager's own section already carries the projects and its orders on them.
-        permits.append(sec("projects"))
+        permits.append(sec("projects.octopus", "projects") if is_octopus_project()
+                       else sec("projects"))
     # A session on another provider has no hook: what the launch cannot enforce, it is told.
     other = sec("provider") if provider != "claude" else ""
     if t.repeat == MANAGER:

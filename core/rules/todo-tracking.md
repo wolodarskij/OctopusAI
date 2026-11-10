@@ -241,16 +241,42 @@ FINISHED`. It runs `report <id> blocked` with the cause, and it waits. The engin
 **Never wait passively on a blocker that nobody works.** A wait is only for a blocker that has a
 session. The brief carries the exact commands.
 
-**A change for every project reaches every project.** A session whose ticket holds `projects` and
-changes several registered projects carries the change into each of them to the end. Every
-follow-up ticket it files in another project gets its session from the filing session, the same
-way in every project: `new --project "<name>" --title "..." --requested "<the order>" --launch`
-files it and launches `work`, or `plan` when its difficulty is `unknown`. A follow-up filed
-without a session gets one
-at once. A ticket that `new` sends to AI-Pipeline is no follow-up: `--launch` files it and
-launches nothing, and the filing session neither launches it nor names it under
-`## Follow-ups`. The filing session names every follow-up on its own ticket, under
-`## Follow-ups`. The owner never launches them by hand. The brief of a ticket that holds `projects` carries the
+**An Octopus AI change reaches every project through its own Octopus AI ticket.** An Octopus AI
+change is a change of the engine, a pack and its tools and plugins, a hook, the payload, or a rule
+or a skill that Octopus AI installs. The Octopus AI ticket that makes the change carries it into
+every registered project. It holds the permits `projects` and `outside`, and its session does
+each step itself:
+
+1. It runs `python "<octopus.py>" update "<root>"` on each registered project.
+2. It makes the edits that each project needs: an own rule, skill or doc of the project that
+   contradicts the change.
+3. In a project with `vcs: git`, it commits only the files that the update and its edits
+   changed, as `<id>: <title>`. The verify session of the ticket pulls and pushes each of these
+   commits, as it does in the Octopus AI project.
+4. It names each project, and its commit, under `## Result`.
+
+**No ticket of another project carries an Octopus AI change.** No session and no manager files a
+ticket in another project to install, update or fix Octopus AI there. No project fixes or updates
+Octopus AI for itself: a session of another project that finds a defect of an Octopus AI tool
+notifies Octopus AI (below). **The engine enforces it.** In a project other than Octopus AI, `new`
+refuses:
+
+- a ticket that the session of an Octopus AI ticket files, except the manager's session;
+- a ticket whose title or description orders an Octopus AI change into the project: it names
+  `octopus update`, the payload directory `.agents/rules/octopus/`, or an Octopus AI rule, skill,
+  hook, engine, payload, update or change;
+- a ticket whose `source` is an Octopus AI tool (below).
+
+**A change of the projects' own work reaches every project through follow-ups.** A session whose
+ticket holds `projects` and changes the own code, content or docs of several registered projects
+carries the change into each of them to the end. Every follow-up ticket it files in another
+project gets its session from the filing session, the same way in every project: `new --project
+"<name>" --title "..." --requested "<the order>" --launch` files it and launches `work`, or `plan`
+when its difficulty is `unknown`. A follow-up filed without a session gets one at once. A ticket
+that `new` sends to AI-Pipeline is no follow-up: `--launch` files it and launches nothing, and the
+filing session neither launches it nor names it under `## Follow-ups`. The filing session names
+every follow-up on its own ticket, under `## Follow-ups`. The owner never launches them by hand.
+An Octopus AI change is never a follow-up. The brief of a ticket that holds `projects` carries the
 registered projects and their commands.
 
 ## A defect of an Octopus AI tool goes to Octopus AI
@@ -263,8 +289,7 @@ installs. It notifies Octopus AI, and carries on:
 
 - **The engine enforces it.** `new` refuses a ticket whose `source` is in the Octopus AI
   checkout, in the directory of a pack, or a file that `.octopus/installed.json` lists, and names
-  `notify`. A follow-up that a session of the Octopus AI project files in another project is not
-  refused.
+  `notify`. This holds for every caller, also for a session of the Octopus AI project.
 - **The notice goes to the Octopus AI project,** `TODO/.notices/N####.md`, with the project, the
   session and its ticket. The manager's check lists each open notice on every run.
 - **The Octopus AI manager decides on each notice:** a new Octopus AI ticket (`notice <id>

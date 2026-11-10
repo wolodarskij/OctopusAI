@@ -19,7 +19,7 @@ files in this directory, in this order:
 | 8a | `dirs` | the project lists `extraDirs` in `project.json`, and at least one of them exists |
 | 9 | `permits.ungranted` | a permit exists that the ticket does not have |
 | 10 | `permits.denied` | the launch denies a tool |
-| 10a | `projects` | the launch holds the `projects` permit: carry the change into every project, launch each follow-up; a ticket in the `ai` lane is no follow-up |
+| 10a | `projects.octopus` or `projects` | the launch holds the `projects` permit. `projects.octopus` in the Octopus AI project: run `octopus update` on every project, edit and commit there, file no ticket there. `projects` in every other project: carry the change into every project, launch each follow-up; a ticket in the `ai` lane is no follow-up, and an Octopus AI change is never one |
 | 11 | `before.<mode>`, else `before` | always |
 | 12 | `finish.<mode>` | always |
 | 13 | `vcs.<kind>.<mode>` | the project's `vcs` is not `none`. The pack of the kind supplies it: `perforce`, `diversion`, `svn`, `mercurial` or `plastic`. For git, `vcs.git.<mode>` falls back to `vcs.<mode>`: the core supplies `vcs.work` (commit the work before the move) and `vcs.verify` (push it when it holds), and the `git` pack supplies `vcs.plan`, `vcs.review` and `vcs.manager`. It continues the list of `finish.<mode>` |
@@ -29,7 +29,7 @@ files in this directory, in this order:
 | 17 | `ticket` | always |
 
 A `manager` ticket never finishes and never moves its own ticket, so its brief is only
-`header`, `messages`, `provider`, `where`, `repeat.manager`, the `permits.*` sections and `dirs` (never `projects`: `repeat.manager` carries the projects), `before`, `vcs.<kind>.manager` (on the
+`header`, `messages`, `provider`, `where`, `repeat.manager`, the `permits.*` sections and `dirs` (never `projects` or `projects.octopus`: `repeat.manager` carries the projects), `before`, `vcs.<kind>.manager` (on the
 same condition as `vcs.<kind>.<mode>`), `note` and `ticket`.
 It leaves out `boundary`, `blocked`, `repeat`, `job.*`, `readme.*`, `renders.*`, `finish.*` and `close.*`.
 

@@ -80,6 +80,7 @@ Bare words are an AND search over id, title, source, body, tags, permits and sta
 | "these belong together" | `epic <name> --title "..."`, then `move <ids> Pipeline --epic <name>` |
 | "relate T0001 and T0002" | `link T0001 --related T0002` |
 | "that is a bug of an Octopus AI tool", outside the Octopus AI project | `notify --tool <file> --defect "..." --evidence "..."`. File no ticket: `new` refuses it, and the Octopus AI manager decides on the notice |
+| "update Octopus AI in every project", or any change of Octopus AI for the projects | one ticket in the Octopus AI project: `new --title "..." --requested "<the order, in neutral words>" --permits projects,outside --launch`. Its session runs `octopus update` on each registered project and edits there. File no ticket in another project for it: `new` refuses it, and no project fixes or updates Octopus AI for itself |
 
 **An order the owner gives in this chat counts the same as a drag on the board or a command in
 the owner's shell.** Carry it out. Never ask the owner to drag a card or to type a command for it.
