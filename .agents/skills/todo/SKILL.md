@@ -66,6 +66,8 @@ Bare words are an AND search over id, title, source, body, tags, permits and sta
 | "close T0001, T0002 fixed it" | `move T0001 Done --status "closed by other task" --owner-order "<the order, in neutral words>"` |
 | "it is written and not yet proven" | `move T0001 Verification` |
 | "it is done" | `verify T0001` |
+| "T0001 is not done properly": a part of its order is not done, or is done wrong (T0001 in Verification or Done) | `work T0001 --reopen "<the part of the order that is not done, or is done wrong>"`. Its own agent works it again |
+| "T0001 is done, now add X": X is a function its order does not ask for | `new --title "Feature: ..." --requested "<the order, in neutral words>" --launch`, then `link <new id> --related T0001`. T0001 stays in Verification for its verify session |
 | "that one is not real" | `move T0001 Verification`, and write the reason on the ticket |
 | "this one is small" | `size T0001 small` |
 | "it is worse than that" | edit `severity:`, then `index` |

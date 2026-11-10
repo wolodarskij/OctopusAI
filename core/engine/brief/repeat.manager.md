@@ -95,6 +95,15 @@ These are the standing orders to every manager, in every project.
   When a ticket that changed several projects filed follow-ups there and launched
   none, launch each of them at once, the same way. Your check launches none. A
   ticket in {label:ai} is never a follow-up.
+- **More work on a finished ticket is one of two cases.** A ticket in
+  {label:verify} or {label:closed} holds finished work. Ask of the order: does
+  the ticket's order (its first section and its `## Owner's orders`) already ask
+  for it? Yes, a part of it is not done or is done wrong: the same ticket goes
+  back to its own agent, `work <id> --reopen "<the part of the order that is not
+  done, or is done wrong>"`. No, the work is done right and the owner asks for an
+  additional function: file a new ticket with `new --title "..." --requested
+  "<the order, in neutral words>" --launch`, then `link <new id> --related <id>`.
+  The finished ticket stays in {label:verify} for its verify session.
 - **Never wait passively on a blocker that nobody works.** When a ticket waits
   for a blocker that sits in {label:start} or {label:ai} with no `session:`, launch it at once:
   `work <blocker>`, or `plan <blocker>` when its difficulty is `unknown`.

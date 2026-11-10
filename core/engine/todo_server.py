@@ -415,12 +415,13 @@ def act_launch(body):
         if live:
             return {"rc": 3, "running": True, "mode": mode, "key": live[-1]["key"],
                     "session": T.ticket_session_id(t, mode)}
-    # A launch from the board is the owner's, also on a paused ticket.
+    # A launch from the board is the owner's, also on a paused ticket and on finished work.
     args = argparse.Namespace(id=t.id, model=model, effort=effort,
                               terminal=board_terminal(body),
                               dry_run=bool(body.get("dryRun")),
                               note=body.get("note", ""), mode=mode, provider=provider,
-                              owner_order=PAUSED_LAUNCH if t.state == P.PAUSED else None)
+                              owner_order=PAUSED_LAUNCH if t.state == P.PAUSED else None,
+                              by_owner=True)
     rc, error = _run(T.cmd_work, args)
     out = {"rc": rc, "mode": mode, "brief": "%s/.briefs/%s.md" % (P.todo_dir, t.id),
            "session": T.ticket_session_id(t, mode),

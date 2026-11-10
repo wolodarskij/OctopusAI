@@ -36,6 +36,8 @@ Nothing else is wrong. When no reference shows the intent of a thing, it is a qu
 
 **A session that did the work never closes its own ticket.** It lands the work and marks the ticket for verification. A separate session, or the user, measures the work with a test, a check command, a compile, or the code read against the ticket, then closes the ticket or sends it back. **Never delete a ticket to mark it finished.** Close it with a status that says how it closed: done, closed by another ticket, or cancelled.
 
+**More work on a finished ticket is one of two cases.** When a part of the ticket's order is not done, or is done wrong, the same ticket goes back out of verification or done, and its own session works it again. When the work is done right and the user asks for an additional function, that is a new ticket with a new session, and the finished ticket stays where it is.
+
 ## Severity, difficulty, and priority
 
 **Severity is what the user loses. Difficulty is what the fix costs.** They are independent. A ticket that mixes them gets worked in the wrong order.

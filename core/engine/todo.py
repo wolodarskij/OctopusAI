@@ -2176,6 +2176,121 @@ def _refuse_pause(what="pauses a ticket"):
     return 2
 
 
+# The section of a ticket that records each reopen of its finished work: when, from which
+# lane to which, and the part of the order that was not done or was done wrong.
+REOPEN_SECTION = "Reopened"
+REOPEN_PROMPT = """You check a ticket of the project %(project)s. Its work is finished: the ticket \
+is in %(lane)s. A session wants to take the ticket out of %(lane)s, so that its own agent works \
+it again, and states why.
+
+The order of the ticket is its title, its first section and its owner's orders. There are two \
+cases:
+- "order": the reason names a part of this order that is not done, or that is done wrong, or a \
+fault of the work that this ticket did (a crash, an error, a wrong result). The ticket goes \
+back to its own agent.
+- "new": the reason asks for a function, a change or a scope that the order does not ask for. \
+The work of the order is done, and the new work is a new ticket with a new agent.
+When you are in doubt, answer "order".
+
+Answer with one JSON object and nothing else: {"verdict": "order" or "new", "why": "<one \
+sentence>"}.
+
+TICKET %(id)s
+title: %(title)s
+order: %(order)s
+owner's orders: %(orders)s
+
+REASON: %(reason)s"""
+
+
+def _reopen_words(args):
+    said = getattr(args, "reopen", None)
+    return " ".join(said.split()) if isinstance(said, str) else ""
+
+
+def _finished_lane(t):
+    """Whether ticket `t` holds finished work that a reopen guards: an ordinary ticket in the
+    verify or the closed lane. A repeatable ticket runs again on its own, and a manager ticket
+    never finishes."""
+    return not t.repeat and t.state in (lane("verify"), lane("closed"))
+
+
+def reopen_fits(t, reason):
+    """Ask the model whether `reason` names a part of the order of `t` that is not done or done
+    wrong (`"order"`), or new work beyond the order (`"new"`). Returns `(verdict, why)`.
+    Raises ValueError when the model gives no usable answer."""
+    m = re.search(r"^##\s+Owner's orders[ \t]*\n(.*?)(?=^##\s|\Z)", t.body or "", re.M | re.S)
+    prompt = REOPEN_PROMPT % {
+        "project": P.name, "lane": P.STATE_LABEL[t.state], "id": t.id, "title": t.title,
+        "order": " ".join(first_section(t.body).split())[:DUP_TEXT_CHARS] or "-",
+        "orders": " ".join((m.group(1) if m else "").split())[:DUP_TEXT_CHARS] or "-",
+        "reason": reason}
+    for _try in range(DUP_TRIES):
+        d = _dup_json(_ask_dup_model(prompt))
+        verdict = str(d.get("verdict") or "").strip().lower() if d else ""
+        if verdict in ("order", "new"):
+            return verdict, " ".join(str(d.get("why") or "").split())
+    raise ValueError("the model gave no verdict")
+
+
+def _guard_reopen(targets, args, what):
+    """Refuse an AI session that takes finished work out of the verify or the closed lane,
+    unless it names the part of the ticket's order that is not done or is done wrong
+    (`--reopen`). That work goes back to the ticket's own agent. New work beyond the order is a
+    new ticket with a new agent, and the guard refuses it. The owner's own shell, the board and
+    a verification session that sends its ticket back pass. Returns 0 when it may go on."""
+    if not _in_ai_session() or getattr(args, "by_owner", False):
+        return 0
+    done = [t for t in targets if _finished_lane(t)]
+    if not done:
+        return 0
+    reason = _reopen_words(args)
+    if not reason:
+        for line in (
+            "Error: %s holds finished work in %s; this %s takes it out."
+            % (", ".join(t.id for t in done), "/".join(sorted({t.state for t in done})), what),
+            "  Work of the order that is not done, or done wrong, goes back to the ticket's own",
+            "  agent. Name that part of the order:",
+            "    --reopen \"<the part of the order that is not done, or is done wrong>\"",
+            "  An additional function on work that is done right is a new ticket with a new",
+            "  agent. The finished ticket stays where it is:",
+            "    %s new --title \"Feature: ...\" --requested \"<the order, in neutral words>\" "
+            "--launch" % P.cli,
+        ):
+            print(line, file=sys.stderr)
+        return 2
+    for t in done:
+        try:
+            verdict, why = reopen_fits(t, reason)
+        except ValueError as exc:
+            print("The check of the reopen has no verdict, so it goes on: %s" % exc,
+                  file=sys.stderr)
+            continue
+        if verdict == "new":
+            for line in (
+                "Error: %s: the reason asks for work that its order does not ask for: %s"
+                % (t.id, why or "the model gave no reason"),
+                "  An additional function on work that is done right is a new ticket with a new",
+                "  agent. %s stays in %s:" % (t.id, P.STATE_LABEL[t.state]),
+                "    %s new --title \"Feature: ...\" --requested \"<the order, in neutral words>\" "
+                "--launch" % P.cli,
+            ):
+                print(line, file=sys.stderr)
+            return 2
+    return 0
+
+
+def record_reopen(path, was, state, mode, reason):
+    """Write a reopen on the ticket, under `## Reopened`: the time, the lanes, the launch mode
+    or the move, and the part of the order that is not done or is done wrong."""
+    import datetime
+    stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    meta, body = parse(_read(path))
+    body = add_section_line(body, REOPEN_SECTION, "- %s: %s -> %s%s: %s" % (
+        stamp, P.STATE_LABEL[was], P.STATE_LABEL[state], (", " + mode) if mode else "", reason))
+    _write(path, render(meta, body))
+
+
 def cmd_move(args):
     ensure_tree()
     state = args.state
@@ -2305,6 +2420,11 @@ def cmd_move(args):
     if state != P.PAUSED and any(t.state == P.PAUSED for t in targets) \
             and not _may_pause(args):
         return _refuse_pause("ends the pause of a ticket")
+    if state not in (lane("verify"), lane("closed")) and not _by_verifier():
+        rc = _guard_reopen(targets, args, "move")
+        if rc:
+            return rc
+    reopen = _reopen_words(args) if state not in (lane("verify"), lane("closed")) else ""
 
     if args.epic:
         epics = load_epics()
@@ -2324,6 +2444,9 @@ def cmd_move(args):
         for f in sorted(dst.glob("*.md")):
             if f.name != EPIC_FILE:
                 _restatus(f, state, args.status)
+        for t in targets:
+            if reopen and _finished_lane(t):
+                record_reopen(dst / t.path.name, t.state, state, "", reopen)
         moved.append("epic %s (%d ticket(s))"
                      % (args.epic, len(list(dst.glob("*.md"))) - 1))
         if state == P.PAUSED:
@@ -2364,6 +2487,8 @@ def cmd_move(args):
                                              P.STATE_LABEL[state], note))
             if ordered:
                 record_owner_order(dst, state, args.status or default_status(state), ordered)
+            if reopen and _finished_lane(t):
+                record_reopen(dst, t.state, state, "", reopen)
             if state == lane("closed") and (args.status or "") in P.OWNER_CLOSES:
                 moved.extend(end_ticket_sessions(t.id))
             if state == P.PAUSED:
@@ -4996,6 +5121,10 @@ def cmd_work(args):
         return 2
     if t.state == P.PAUSED and not getattr(args, "dry_run", False) and not _may_pause(args):
         return _refuse_pause("starts an agent on a paused ticket")
+    if mode != "verify":
+        rc = _guard_reopen([t], args, "%s launch" % mode)
+        if rc:
+            return rc
     try:
         provider = launch_provider(t, getattr(args, "provider", None))
         # A model or an effort the provider cannot run never reaches its command line.
@@ -5003,6 +5132,11 @@ def cmd_work(args):
     except ValueError as exc:
         print("Error: %s" % exc, file=sys.stderr)
         return 2
+    reopened = _reopen_words(args) if mode != "verify" and _finished_lane(t) else ""
+    if reopened and not getattr(args, "dry_run", False):
+        # The brief carries the ticket, so the agent reads the part of the order to redo.
+        record_reopen(t.path, t.state, P.LAUNCH_LANE[mode][0], mode, reopened)
+        t = find(load_all(), t.id)
     P.BRIEFS.mkdir(parents=True, exist_ok=True)
     _write(P.BRIEFS / ("%s.md" % t.id), build_brief(t, mode, note, provider))
 
@@ -7629,6 +7763,10 @@ def _main(argv):
                         "ticket")
     p.add_argument("--outcome", help="the outcome line, written on the ticket before the "
                    "move: what now works or what was found, at most %d words" % OUTCOME_WORDS)
+    p.add_argument("--reopen", metavar="WORDS",
+                   help="the part of the ticket's order that is not done, or is done wrong: "
+                        "an AI session needs it to take a ticket out of the verify or the "
+                        "closed lane. New work beyond the order is a new ticket")
     p.add_argument("--dry-run", action="store_true")
     p.set_defaults(fn=cmd_move)
 
@@ -7826,6 +7964,10 @@ def _main(argv):
     p.add_argument("--owner-order", dest="owner_order", metavar="WORDS",
                    help="the owner ordered this launch in this session's chat, in "
                         "neutral words: an AI session needs it to start a paused ticket")
+    p.add_argument("--reopen", metavar="WORDS",
+                   help="the part of the ticket's order that is not done, or is done wrong: "
+                        "an AI session needs it to take a ticket out of the verify or the "
+                        "closed lane. New work beyond the order is a new ticket")
     p.set_defaults(fn=cmd_work, mode="work")
 
     p = sub.add_parser("plan", help="launch a Claude session that only produces the plan")
@@ -7843,6 +7985,10 @@ def _main(argv):
     p.add_argument("--owner-order", dest="owner_order", metavar="WORDS",
                    help="the owner ordered this launch in this session's chat, in "
                         "neutral words: an AI session needs it to start a paused ticket")
+    p.add_argument("--reopen", metavar="WORDS",
+                   help="the part of the ticket's order that is not done, or is done wrong: "
+                        "an AI session needs it to take a ticket out of the verify or the "
+                        "closed lane. New work beyond the order is a new ticket")
     p.set_defaults(fn=cmd_work, mode="plan")
 
     p = sub.add_parser("review", help="a session that re-evaluates the ticket, not the code")
@@ -7860,6 +8006,10 @@ def _main(argv):
     p.add_argument("--owner-order", dest="owner_order", metavar="WORDS",
                    help="the owner ordered this launch in this session's chat, in "
                         "neutral words: an AI session needs it to start a paused ticket")
+    p.add_argument("--reopen", metavar="WORDS",
+                   help="the part of the ticket's order that is not done, or is done wrong: "
+                        "an AI session needs it to take a ticket out of the verify or the "
+                        "closed lane. New work beyond the order is a new ticket")
     p.set_defaults(fn=cmd_work, mode="review")
 
     p = sub.add_parser("verify", help="a session that proves a Verification ticket, and the "

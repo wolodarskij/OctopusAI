@@ -530,6 +530,31 @@ session of the ticket, so no agent waits on a closed ticket.
 **A close needs a measurement by a session that did not write the fix.** Use a test, a check
 command, a compile, or the code read against the ticket.
 
+### Finished work: the same ticket, or a new ticket
+
+**A ticket in Verification or Done holds finished work. More work on it is one of two cases:**
+
+| The case | The work |
+|---|---|
+| **not done properly:** a part of the ticket's order is not done, or is done wrong, or the work of the ticket fails | goes back to the same ticket and its own agent: `work <id> --reopen "<the part of the order that is not done, or is done wrong>"`. The launch resumes the ticket's own session |
+| **done right, and the owner asks for an additional function** | is a new ticket with a new agent: `new --title "..." --requested "<the order, in neutral words>" --launch`. `link <new id> --related <id>` names the finished ticket on it. The finished ticket stays in Verification for its verify session |
+
+- **Ask of each order: does the ticket's order already ask for it?** Its order is its first
+  section and its `## Owner's orders`. Yes: case 1. No: case 2.
+- A `verify` session that finds case 1 sends the ticket back to Pipeline, and says
+  what is still wrong under `## Verification failed`.
+- Never put a new function into a finished ticket, and never file a new ticket for a part of
+  an order that its own ticket did not do.
+
+**The engine enforces it.** In an AI session, a `work`, `plan` or `review` launch of a ticket in
+Verification or Done, and a `move` of it to another board, need `--reopen "<the part of the
+order that is not done, or is done wrong>"`. A model (the duplicate check's model) reads the
+reason against the ticket's order. A reason that asks for work beyond the order is refused, and
+the refusal names `new ... --launch`. With no verdict, the reopen goes on. The engine writes each
+reopen under `## Reopened` on the ticket: the time, the boards, the mode and the reason. A
+`verify` session, the owner's own shell, a launch from the board, a drag on the board, and a
+repeatable ticket need no `--reopen`.
+
 ### A work session commits, a verify session pushes
 
 **In a project with `vcs: git`, the work of a ticket reaches the remote when its verification
