@@ -136,8 +136,13 @@ A project can map a status role to another word (`statusRoles` in `project.json`
 **`blocked by other task` names its blocker in `blocked-by:`.** `check` fails when it does not.
 
 **Only the owner's direct order sets `blocked by user`.** A session never infers it. A ticket that
-waits for an answer from the owner stays in its board, and the session asks the owner. `move` and
-`new` refuse the status to a Claude session that does not pass `--owner-order`.
+waits for an answer from the owner stays in its board, and the session asks the owner. `move`
+refuses the status to a Claude session that does not pass `--owner-order`.
+
+**A new ticket never goes to Blocked.** `new` refuses the blocked board for every caller: a
+session, a session with `--owner-order`, a project rule and the owner's shell. A ticket goes to
+Blocked only from its own session, when that session tried every way and cannot reach its goal:
+`report <id> blocked`, or the steps for a blocker.
 
 **Only the owner pauses a ticket.** A paused ticket is not blocked and not finished: its
 session did some of its work, and the owner stopped it. A ticket, a session or the engine

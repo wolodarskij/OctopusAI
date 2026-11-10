@@ -2544,8 +2544,23 @@ def edit_ticket(tid, fields, body, base):
     return find(load_all(), t.id)
 
 
+def _refuse_new_blocked():
+    for line in (
+        "Error: a new ticket does not go to %s, also on the owner's order." % lane("blocked"),
+        "  A ticket goes to %s only from its own session, when that session tried every way"
+        % lane("blocked"),
+        "  and cannot reach its goal: `%s report <id> blocked`, or `link <id> --blocked-by"
+        % P.cli,
+        "  <other id>` and a move. File the ticket without --state %s." % lane("blocked"),
+    ):
+        print(line, file=sys.stderr)
+    return 2
+
+
 def cmd_new(args):
     ensure_tree()
+    if args.state == lane("blocked"):
+        return _refuse_new_blocked()
     parent = getattr(args, "parent", None)
     pt = None
     if parent:
@@ -7358,8 +7373,9 @@ def _main(argv):
                    help="files to attach; new copies each into %s/%s/<id>/ and lists it under "
                         "## Attachments" % (P.todo_dir, ATTACH_DIR))
     p.add_argument("--state", choices=list(P.STATES),
-                   help="absent: %s for a requested ticket, %s for one an AI files on its own"
-                        % (lane("start"), lane("ai")))
+                   help="absent: %s for a requested ticket, %s for one an AI files on its "
+                        "own. A new ticket never goes to %s"
+                        % (lane("start"), lane("ai"), lane("blocked")))
     p.add_argument("--status")
     p.add_argument("--epic", default="")
     p.add_argument("--claim")
@@ -7373,8 +7389,8 @@ def _main(argv):
     p.add_argument("--group", help="the topic group (files store)")
     p.add_argument("--owner-order", dest="owner_order", nargs="?", const=True,
                    metavar="WORDS",
-                   help="the owner ordered, in this session's chat, to file this ticket as "
-                        "`blocked by user`; the order in neutral words is optional")
+                   help="the owner ordered, in this session's chat, to file this ticket; "
+                        "the order in neutral words is optional")
     p.add_argument("--requested", nargs="?", const=True, metavar="WORDS",
                    help="the owner's order that names this ticket's subject, in neutral "
                         "words; it goes under `## Owner's orders`. The ticket goes to %s, not "
