@@ -299,23 +299,28 @@ FINISHED_SECTIONS = re.compile(r"^(?:Result|Verified)\s*$", re.I)
 # session did not carry out its order to the end is not finished work.
 _NOT_CARRIED_OUT = re.compile(
     r"\b(?:was|were|is|are|have|has)\s*(?:n['’]t|\snot|\snever)\s+(?:yet\s+)?"
-    r"(?:run|executed|carried\s+out|performed)\b|\bnot\s+carried\s+out\b", re.I)
+    r"(?:run|executed|carried\s+out|performed)\b", re.I)
 # A phrase whose subject is a test states no unmet order: a test runs on the owner's
-# permission only. A sentence that sets the old behavior against the new one ("was not run
-# before; now it runs") describes a fix.
-_TEST_SUBJECT = re.compile(r"\b(?:tests?|test\s+suites?|suites?|testing)\b", re.I)
+# permission only. A generic subject ("an action", "every step") states a rule, not a result.
+# A sentence that sets the old behavior against the new one ("was not run before; now it
+# runs") describes a fix.
+_NOT_A_RESULT = re.compile(r"\b(?:tests?|test\s+suites?|suites?|testing|(?:an?|any|each|every)"
+                           r"\s+(?:action|order|step))\b", re.I)
 _OLD_AND_NEW = re.compile(r"\b(?:now|before|no\s+longer|used\s+to)\b", re.I)
 
 
 def not_carried_out(text):
     """The phrase of `text` (str) that says an action was not carried out, or "". A phrase
-    whose subject is a test or a test suite, and a phrase in a sentence that sets the old
-    behavior against the new one, do not count."""
+    whose subject is a test, a test suite or a generic action, a phrase in quotes, and a phrase
+    in a sentence that sets the old behavior against the new one, do not count."""
     text = str(text or "")
     for m in _NOT_CARRIED_OUT.finditer(text):
+        line = text[text.rfind("\n", 0, m.start()) + 1:m.start()]
+        if line.count('"') % 2 or line.count("`") % 2:
+            continue
         start = max(text.rfind(c, 0, m.start()) for c in ".!?;:\n") + 1
         ends = [i for i in (text.find(c, m.end()) for c in ".!?\n") if i >= 0]
-        if _TEST_SUBJECT.search(text[start:m.start()]) \
+        if _NOT_A_RESULT.search(text[start:m.start()]) \
                 or _OLD_AND_NEW.search(text[start:min(ends or [len(text)])]):
             continue
         return m.group(0)

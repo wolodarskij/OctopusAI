@@ -172,7 +172,8 @@ FINISHED`. It runs `report <id> blocked` with the cause, and it waits. The engin
 
 - `move` to Verification or Done refuses a ticket whose outcome, `## Result` or `## Verified`
   says that an action was not carried out: "The script was not run". A phrase whose subject
-  is a test, and a sentence that sets the old behavior against the new one, do not count.
+  is a test or a generic action, a phrase in quotes, and a sentence that sets the old behavior
+  against the new one, do not count.
 - When a session ends (`WORK IS FINISHED`, its Claude exits, or its terminal closes) and its
   ticket does not show its work done, the engine moves the ticket from its launch board to
   Blocked `blocked by outside cause`, with the cause under `## Blocked`. It does this once per
