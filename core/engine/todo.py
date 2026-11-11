@@ -2086,13 +2086,14 @@ def _in_ai_session():
 def _requested(args, parent=None):
     """Whether the ticket `new` files claims the owner's request. `--requested` and
     `--owner-order` claim it; a caller outside every AI session is the owner; a child of a
-    requested ticket claims that request. Every other ticket an AI files on its own. In an AI
-    session `cmd_new` holds a claim only when the owner's words name the subject."""
+    requested ticket, one the owner asked for or took, claims that request. Every other ticket
+    an AI files on its own. In an AI session `cmd_new` holds a claim only when the owner's
+    words name the subject."""
     if getattr(args, "requested", None) or getattr(args, "owner_order", None):
         return True
     if not _in_ai_session():
         return True
-    return parent is not None and not parent.ai_filed
+    return parent is not None and owner_asked(parent.ai_filed, parent.body)
 
 
 def _caller_session():
@@ -3239,9 +3240,10 @@ def same_as_new(title, source, text, candidates):
 
 # THE SUBJECT CHECK: in an AI session a ticket is requested only when the owner's own words
 # name its subject. The words are the owner's prompts and answers in the session's
-# transcript, the ticket the session was launched on and the note of that launch, and a
-# requested parent. The duplicate check's model reads them, and the session's statement of
-# the order, and names the tickets whose subject the owner named.
+# transcript, the ticket the session was launched on and the note of that launch, the owner's
+# prompts and answers in the other sessions of that ticket, of its parent and of the new
+# ticket's parent, and a requested parent. The duplicate check's model reads them, and the
+# session's statement of the order, and names the tickets whose subject the owner named.
 OWNER_CHARS = 8000
 SUBJECT_PROMPT = """You check tickets of the project %(project)s before they go to the owner's
 main Pipeline. A ticket goes there only when the OWNER'S WORDS below explicitly name its
@@ -3251,13 +3253,16 @@ These name no subject:
 - a general order to file tickets for what a task finds: "file a ticket for each fix",
   "evaluate and decide", "analyze this", "file the findings", "file it as requested";
 - the generic text of a brief, a plan, a rule file or a tool's instructions;
-- a defect or a fix that a session found while it did the owner's task;
+- a defect or a fix that a session found while it did an owner's task on another subject;
 - the SESSION'S STATEMENT alone: it is what the session says the owner ordered, not proof.
 
 These name it: the owner names the defect, the change, the feature or the requirement
-that the ticket asks for, or names the ticket by its id; the ticket is a part of a subject
-the owner named, such as one item of a list the owner wrote, or a step of a split of the
-owner's ticket; the ticket is
+that the ticket asks for, or names the ticket by its id; the owner reports a defect or a
+failure, also in general words ("the updates are broken"): a report of a defect is an order
+to fix it, and a ticket that fixes it, or a cause of it that the session found, is named;
+the ticket is a part of a subject or of work the owner named or ordered, such as one item
+of a list the owner wrote, a step of a split of the owner's ticket, or one part of a port,
+a migration or a feature that the owner ordered; the ticket is
 a follow-up that carries into one project a change the owner ordered for every project or
 for several, also when it changes that project's own rules, docs or code to match; the
 owner answered yes to a question that named the subject.
@@ -3288,21 +3293,42 @@ def _ticket_words(title, body):
                                  orders.group(1).strip() if orders else "") if x)
 
 
+def _ticket_file(todo_dir, tid):
+    """`(meta, body)` of the ticket `tid` in the ticket tree `todo_dir`, or None."""
+    for f in sorted(Path(todo_dir).rglob("%s-*.md" % tid)):
+        if f.parent.name == ".briefs":
+            continue
+        try:
+            return parse(_read(f))
+        except OSError:
+            return None
+    return None
+
+
+def owner_asked(ai_filed, body):
+    """Whether the owner asked for a ticket: no AI filed it, or the owner took it, which its
+    `## Owner's orders` records."""
+    if not ai_filed:
+        return True
+    m = re.search(r"^##\s+Owner's orders[ \t]*\n(.*?)(?=^##\s|\Z)", body or "", re.M | re.S)
+    return bool(m and m.group(1).strip())
+
+
 def _launch_words(brief):
     """The owner's words of the launch whose brief is `brief`: `(parts, note)`. `parts` holds
-    the ticket it was launched on, unless an AI filed it or it is repeatable, and the
-    owner's note to that launch; `note` is that note alone."""
+    the ticket it was launched on, unless the owner did not ask for it or it is repeatable,
+    and the owner's note to that launch; `note` is that note alone."""
     out = []
     try:
         text = _read(brief).replace("\r\n", "\n")
     except OSError:
         return out, ""
     tid = brief.stem
-    for f in sorted(brief.parent.parent.rglob("%s-*.md" % tid)):
-        if f.parent.name == ".briefs":
-            continue
-        meta, body = parse(_read(f))
-        if meta.get(FILED_BY_FIELD) != AI_FILED and not meta.get("repeat"):
+    found = _ticket_file(brief.parent.parent, tid)
+    if found:
+        meta, body = found
+        if (owner_asked(meta.get(FILED_BY_FIELD, "").strip() == AI_FILED, body)
+                and not meta.get("repeat")):
             out.append("The ticket %s that the owner launched this session on:\n%s"
                        % (tid, _ticket_words(meta.get("title", ""), body)))
             if ("projects" in meta.get("permits", "")
@@ -3311,7 +3337,6 @@ def _launch_words(brief):
                            "ticket is filed in another project, %s: it is a follow-up of %s "
                            "when it carries the change of %s into %s."
                            % (P.name, tid, tid, P.name))
-        break
     note = brief_note(text)
     if note:
         out.append("The owner's note to this launch:\n%s" % note)
@@ -3337,12 +3362,49 @@ def launch_note(tid):
         return ""
 
 
+def _sessions_of(meta):
+    """`(mode, session id)` of each launch that `sessions:` in `meta` records."""
+    out = []
+    for part in (meta.get("sessions") or "").split(";"):
+        bits = part.split()
+        if len(bits) >= 2 and bits[0] in MODES:
+            out.append((bits[0], bits[1]))
+    return out
+
+
+def _ordering_sessions(brief, parent, sid):
+    """The other sessions where the owner ordered the work of this session: `[(label, id)]`,
+    each launch of the ticket that this session was launched on, of that ticket's parent and
+    of `parent`, except the session `sid`. The plan session of a ticket holds the owner's
+    orders that its work session carries out."""
+    tickets = []
+    if brief is not None:
+        todo_dir = Path(brief).parent.parent
+        found = _ticket_file(todo_dir, Path(brief).stem)
+        if found:
+            tickets.append((Path(brief).stem, found[0]))
+            up = (found[0].get("parent") or "").strip()
+            above = _ticket_file(todo_dir, up) if up else None
+            if above:
+                tickets.append((up, above[0]))
+    if parent is not None:
+        tickets.append((parent.id, parent.meta))
+    out, seen = [], {(sid or "").lower()}
+    for tid, meta in tickets:
+        for mode, other in _sessions_of(meta):
+            if other.lower() not in seen:
+                seen.add(other.lower())
+                out.append(("the %s session of the ticket %s" % (mode, tid), other))
+    return out
+
+
 def owner_text(parent=None):
     """Every word the owner said to the AI session that runs this command: `(text, direct)`.
     `text` holds the owner's prompts and answers in its transcript (the last `OWNER_CHARS`
-    of them), the ticket and the note of its launch, and `parent` when the owner asked for
-    that ticket. `direct` holds only what the owner wrote: the prompts and the note. A
-    session with no Claude Code transcript finds its launch through the ticket whose
+    of them), the ticket and the note of its launch, the owner's prompts and answers in the
+    other sessions of that ticket, of its parent and of `parent`, and `parent` when the owner
+    asked for that ticket. `direct` holds only what the owner wrote: the prompts and the
+    note. A session with no Claude Code transcript finds its launch through the ticket whose
     `sessions:` names it."""
     import aifiled
     sid = (os.environ.get("CLAUDE_CODE_SESSION_ID") or os.environ.get("OCTOPUS_SESSION")
@@ -3359,10 +3421,16 @@ def owner_text(parent=None):
     if brief is not None:
         launch, note = _launch_words(Path(brief))
         parts += launch
-    if parent is not None and not parent.ai_filed:
+    if parent is not None and owner_asked(parent.ai_filed, parent.body):
         parts.append("The parent ticket %s, which the owner asked for:\n%s"
                      % (parent.id, _ticket_words(parent.title, parent.body)))
     direct = [text for kind, text in said if kind == "prompt"] + ([note] if note else [])
+    for label, other in _ordering_sessions(brief, parent, sid):
+        words = aifiled.owner_words(other)[0]
+        if words:
+            parts.append("The owner's prompts and answers in %s, oldest first:\n%s"
+                         % (label, "\n---\n".join(t for _k, t in words)[-OWNER_CHARS:]))
+            direct += [t for k, t in words if k == "prompt"]
     return "\n\n".join(parts), "\n".join(direct)
 
 
@@ -3377,6 +3445,18 @@ def owner_named(tickets, claim, owner, direct=""):
     tickets = [x for x in tickets if x[0] not in by_id]
     if not tickets:
         return by_id, "the owner named %s by its id" % ", ".join(by_id)
+    records = _owner_records()
+    key = _owner_key(claim, owner)
+    entry = records.get(key)
+    if entry is not None:
+        known = entry.get("ids") or {}
+        hit = {i: known[i] if i in known else entry.get("named") for i, _t, _x in tickets}
+        if all(isinstance(v, bool) for v in hit.values()):
+            _owner_record(records, key, claim, [(i, title) for i, title, _x in tickets],
+                          [i for i, v in hit.items() if v], entry.get("why") or "")
+            return (by_id + [i for i, v in hit.items() if v],
+                    "the same order got this verdict before: %s"
+                    % (entry.get("why") or "the model gave no reason"))
     listing = "\n".join("TICKET %s\ntitle: %s\ntext: %s\n" % (
         i, title, " ".join((text or "").split())[:DUP_TEXT_CHARS] or "-")
         for i, title, text in tickets)
@@ -3384,13 +3464,71 @@ def owner_named(tickets, claim, owner, direct=""):
                                "claim": " ".join((claim or "").split()) or "(none)",
                                "tickets": listing}
     known = {i for i, _t, _x in tickets}
+    judged = [(i, title) for i, title, _x in tickets]
     for _try in range(DUP_TRIES):
         d = _dup_json(_ask_dup_model(prompt))
         named = d.get("named") if d else None
         if isinstance(named, list) and all(isinstance(x, str) for x in named):
-            return (by_id + [x.strip().upper() for x in named if x.strip().upper() in known],
-                    " ".join(str(d.get("why") or "").split()))
+            named = [x for x in dict.fromkeys(x.strip().upper() for x in named) if x in known]
+            why = " ".join(str(d.get("why") or "").split())
+            _owner_record(records, key, claim, judged, named, why)
+            return by_id + named, why
+    _owner_record(records, key, claim, judged, list(known), OWNER_NO_VERDICT)
     raise ValueError("the model gave no verdict")
+
+
+# THE RECORD OF THE SUBJECT CHECK: each verdict stays outside every repository, per project,
+# under the session's statement of the order and the owner's words. The same order with the
+# same owner's words gets the recorded verdict, so the tickets filed on one order land on one
+# board. A missing verdict is recorded as named: the rule sends such a ticket to Pipeline.
+OWNER_NO_VERDICT = "the model gave no verdict, so the order counts as the owner's"
+
+
+def _owner_records_file():
+    return _project.home() / "owner-words" / ("%s.json" % P.slug)
+
+
+def _owner_records():
+    try:
+        d = json.loads(_owner_records_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return d if isinstance(d, dict) else {}
+
+
+def _owner_key(claim, owner):
+    """The record key of an order: the session's statement of it and the owner's words."""
+    h = hashlib.sha1()
+    h.update(" ".join((claim or "").split()).lower().encode("utf-8"))
+    h.update(b"\0")
+    h.update(" ".join((owner or "").split()).encode("utf-8"))
+    return h.hexdigest()
+
+
+def _owner_record(records, key, claim, judged, named, why):
+    """Record the verdict on the tickets `judged` (`(id, title)`) under `key`: `named` holds
+    the ids that the owner's words name. A verdict that names all or none of them holds for
+    every later ticket of the same order; each ticket with an id keeps its own verdict."""
+    import datetime
+    entry = records.setdefault(key, {"claim": " ".join((claim or "").split()), "ids": {},
+                                     "tickets": []})
+    ids = {i for i, _t in judged}
+    if "named" not in entry:
+        entry["named"] = (True if ids <= set(named) else False if not named else None)
+        entry["why"] = why
+    for i, _t in judged:
+        if i != "NEW":
+            entry["ids"][i] = i in named
+    stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    entry["tickets"] = (entry.get("tickets") or []) + [
+        "%s %s %s: %s" % (stamp, i, "named" if i in named else "not named", title)
+        for i, title in judged]
+    path = _owner_records_file()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(records, indent=1, sort_keys=True), encoding="utf-8")
+    except OSError:
+        pass
 
 
 # THE ORDER CHECK: an AI session's move of a ticket to the verify lane is refused while a part
