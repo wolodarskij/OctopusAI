@@ -370,6 +370,12 @@ def collect(since_last=False, registry=None):
                 if e.get("project") == name and key not in seen \
                         and e.get("section") != "finished" and e.get("session"):
                     t = by_id.get(e.get("id"))
+                    if t is None:
+                        # A copy of a launched session that ran under an id of its own: its
+                        # launch prompt names its ticket, which records it now.
+                        t, mode = T.link_launch(e["session"], tickets)
+                        if t is not None:
+                            e = dict(e, id=t.id, mode=mode, title=t.title)
                     rows.append(dict(_gone_row(name, T, e, t), launched=next(
                         (x["launched"] for x in (t.sessions if t else ())
                          if x["session"] == e["session"]), "")))

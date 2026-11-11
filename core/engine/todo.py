@@ -4809,21 +4809,87 @@ def apply_remote_control(t, sessions=None):
     return done
 
 
+# The last sentence of the launch prompt of each mode, and of a manager's.
+LAUNCH_TAILS = {
+    "work": "get on with it.",
+    "plan": "produce the plan and stop.",
+    "review": "re-evaluate the ticket. Change no file except the ticket itself.",
+    "verify": "prove the work landed, or send the ticket back with what is still wrong.",
+}
+MANAGER_TAIL = ("end this turn and wait for the owner's orders in this open session. "
+                "Never use sleep or a polling loop to wait. Do not close the session.")
+# A launch prompt: its verb, its ticket, and its last sentence.
+_LAUNCH_PROMPT = re.compile(r"^(Work|Re-evaluate|Verify) ticket (T\d+)\. Read \S*\.briefs[\\/]"
+                            r"\2\.md first and in full\b.*?\bThen (.+?)\s*$", re.S)
+# A Claude session id.
+_UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+
+
+def launch_prompt(t, mode="work"):
+    """The first prompt a launch of `t` in `mode` gives its session."""
+    tail = MANAGER_TAIL if t.repeat == MANAGER else LAUNCH_TAILS.get(mode, LAUNCH_TAILS["work"])
+    verb = {"review": "Re-evaluate", "verify": "Verify"}.get(mode, "Work")
+    return ("%s ticket %s. Read %s/.briefs/%s.md first and in full - it carries the "
+            "ticket, what you may and may not use, and what to do when you finish. "
+            "Then %s" % (verb, t.id, P.todo_dir, t.id, tail))
+
+
+def launch_of_prompt(text):
+    """`(ticket id, mode)` that a launch prompt (`launch_prompt`) names, `("", "")` for any
+    other text."""
+    m = _LAUNCH_PROMPT.match((text or "").strip())
+    if not m:
+        return "", ""
+    tail = " ".join(m.group(3).split())
+    mode = next((k for k, v in LAUNCH_TAILS.items() if v == tail), "")
+    if not mode and tail == " ".join(MANAGER_TAIL.split()):
+        mode = "work"
+    if not mode:
+        mode = {"Re-evaluate": "review", "Verify": "verify"}.get(m.group(1), "")
+    return (m.group(2), mode) if mode else ("", "")
+
+
+def recorded_session(t, sid):
+    """Whether `sessions:` of `t`, or its derived launch ids, name the session `sid`."""
+    sid = (sid or "").lower()
+    run = t.run if t.repeat else 1
+    return sid in {launch_session_id(t.id, m, run) for m in MODES} or any(
+        e["session"].lower() == sid for e in t.sessions)
+
+
+def link_launch(sid, tickets=None):
+    """Record a session that runs on a ticket's launch prompt under an id that no ticket
+    records, and return `(ticket, mode)`; `(None, "")` when its first prompt is no launch
+    prompt of a ticket of this project. Claude Code gives a copy of a session its own id: a
+    fork, and a session moved into the background (`--bg`, `/background`). The copy keeps
+    the first prompt of the session it copies, so that prompt names its ticket and mode. The
+    ticket gets the entry `<mode> <id> <now>` under `sessions:`."""
+    import datetime
+    import session_state
+    sid = (sid or "").lower()
+    if not _UUID_RE.match(sid):
+        return None, ""
+    tid, mode = launch_of_prompt(session_state.first_prompt(session_transcript(sid)))
+    if not tid:
+        return None, ""
+    tickets = load_all() if tickets is None else tickets
+    t = find(tickets, tid)
+    if t is None:
+        return None, ""
+    if recorded_session(t, sid):
+        return t, next((e["mode"] for e in t.sessions if e["session"].lower() == sid), mode)
+    stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    entries = list(t.sessions) + [{"mode": mode, "session": sid, "launched": stamp}]
+    t.meta["sessions"] = "; ".join("%s %s %s" % (e["mode"], e["session"], e["launched"])
+                                   for e in entries)
+    _write(t.path, render(t.meta, t.body))
+    return t, mode
+
+
 def _launch_argv(t, mode="work", model=None, no_fable=False, auto=False, effort=None,
                  provider=None):
     provider = launch_provider(t, provider)
-    tail = {
-        "plan": "produce the plan and stop.",
-        "review": "re-evaluate the ticket. Change no file except the ticket itself.",
-        "verify": "prove the work landed, or send the ticket back with what is still wrong.",
-    }.get(mode, "get on with it.")
-    if t.repeat == MANAGER:
-        tail = ("end this turn and wait for the owner's orders in this open session. "
-                "Never use sleep or a polling loop to wait. Do not close the session.")
-    verb = {"review": "Re-evaluate", "verify": "Verify"}.get(mode, "Work")
-    prompt = ("%s ticket %s. Read %s/.briefs/%s.md first and in full - it carries the "
-              "ticket, what you may and may not use, and what to do when you finish. "
-              "Then %s" % (verb, t.id, P.todo_dir, t.id, tail))
+    prompt = launch_prompt(t, mode)
     if provider != "claude":
         return _provider_argv(t, mode, provider, prompt, model, effort, auto)
     # The prompt is the first argument, before every option. `--disallowedTools` and
@@ -4947,10 +5013,14 @@ _LINE_SESSION = (r"--(?:session-id|resume)[\s\"']+([0-9a-fA-F-]{36})"
                  r"|OCTOPUS_SESSION=([0-9a-fA-F-]{36})")
 
 
+# Claude Code's switch that turns off its agent view: `claude agents`, `--bg`, `/background`
+# and the on-demand daemon (`claude daemon run`), which keeps spare sessions and runs copies of
+# a session under ids no ticket records. The `disableAgentView` setting does the same.
+AGENT_VIEW_OFF = "CLAUDE_CODE_DISABLE_AGENT_VIEW"
 # The variables the shell of every session sets before Claude starts, on every system;
 # `_shell_line` explains each.
 LAUNCH_ENV = {"CLAUDE_CODE_DISABLE_TERMINAL_TITLE": "1", "CLAUDE_CODE_FORCE_SESSION_PERSISTENCE": "1",
-              "CLAUDE_CODE_DISABLE_FAST_MODE": "1"}
+              "CLAUDE_CODE_DISABLE_FAST_MODE": "1", AGENT_VIEW_OFF: "1"}
 
 
 def _shell_line(argv, title, marks=None):
@@ -4974,6 +5044,8 @@ def _shell_line(argv, title, marks=None):
     # A session launched from inside a Claude session (the manager, the board under one) inherits
     # CLAUDE_CODE_CHILD_SESSION and would keep no transcript. Every session keeps its transcript.
     # `STATUS_ENV` sets Claude Code's reminder to ask for one status line once every 5 minutes.
+    # `AGENT_VIEW_OFF` keeps the session from starting Claude Code's daemon, its spare sessions
+    # and its background copies of the session.
     env = dict(LAUNCH_ENV, **_agents.STATUS_ENV)
     if not WINDOWS:
         import posixterm
@@ -5535,6 +5607,24 @@ def live_sessions(tickets=None, recheck=False):
             s["own"] = bool(pane) and not pane["attached"]
 
     known = {s["session"] for s in found}
+    # A session that runs on a ticket's launch prompt under an id no ticket records, such as
+    # a copy of a launched session, is that ticket's: the ticket records it now.
+    for sid in records:
+        if sid not in known and sid not in ids:
+            try:
+                t, mode = link_launch(sid, tickets)
+            except Exception:                           # noqa: BLE001 - the scan goes on
+                t, mode = None, ""
+            if t is not None:
+                ids[sid], modes[sid] = t.id, mode
+    # Claude Code's daemon that a ticket session started ends, with the sessions it runs.
+    owners = [s for s in found if s.get("id")] + [
+        {"session": sid, "claude": rec["claude"]} for sid, rec in records.items()
+        if sid in ids and sid not in known and rec.get("claude_alive")]
+    try:
+        gone = reap_daemons(owners, procs)
+    except Exception:                                   # noqa: BLE001 - the scan goes on
+        gone = set()
     goals = session_goals()
     hand = []
     for sid, rec in records.items():
@@ -5542,6 +5632,9 @@ def live_sessions(tickets=None, recheck=False):
             continue
         claude = rec["claude"] if rec.get("claude_alive") else None
         shell = rec["shell"] if rec.get("shell_alive") else 0
+        if claude in gone:
+            claude = None
+            shell = 0 if shell in gone else shell
         if not claude and not shell:
             continue
         waiting, since = session_state.at_prompt(claude, idle, sid, rec.get("shell") or 0)
@@ -5631,6 +5724,49 @@ def _read_marks(s):
     s["reported_why"] = session_state.reported_why(sid, shell)
     s["jobs"] = session_state.all_jobs(sid, shell, session_transcript(sid))
     s["tasks"] = session_state.background_tasks(sid, shell)
+
+
+# The command line of Claude Code's on-demand daemon, and the pid of the Claude that started
+# it: `claude daemon run --origin transient --spawned-by "{\"label\":...,\"pid\":19588}"`.
+_DAEMON_LINE = re.compile(r"(?:^|\s)daemon\s+run\b")
+_DAEMON_SPAWNER = re.compile(r'--spawned-by\b.*?"pid\\?"\s*:\s*(\d+)')
+
+
+def reap_daemons(owners, procs):
+    """End by force, with its whole process tree, each Claude Code daemon (`claude daemon
+    run`) whose `--spawned-by` names the Claude of a ticket session: the daemon keeps spare
+    sessions and runs copies of the session under ids of their own. `owners` are session
+    entries with `claude` and `session`; each gets the killed daemon pids in
+    `killed_daemons`. A daemon this process runs under is never killed. Returns every pid of
+    the trees killed."""
+    import winproc
+    by_claude = {o["claude"]: o for o in owners if o.get("claude")}
+    if not by_claude:
+        return set()
+    cand = [p for p, (_pp, name) in procs.items() if name in CLAUDE_IMAGES]
+    lines = winproc.command_lines(cand) if cand else {}
+    mine = _ancestors(procs)
+    kids = {}
+    for pid, (ppid, _name) in procs.items():
+        kids.setdefault(ppid, []).append(pid)
+    gone = set()
+    for pid, line in lines.items():
+        m = _DAEMON_SPAWNER.search(line or "")
+        if not (m and _DAEMON_LINE.search(line or "")) or pid in mine:
+            continue
+        owner = by_claude.get(int(m.group(1)))
+        if owner is None:
+            continue
+        tree, stack = set(), [pid]
+        while stack:
+            p = stack.pop()
+            if p not in tree:
+                tree.add(p)
+                stack += kids.get(p, [])
+        if winproc.taskkill(pid, force=True, tree=True) in (0, 128):
+            gone |= tree
+            owner.setdefault("killed_daemons", []).append(pid)
+    return gone
 
 
 def _ancestors(procs):
@@ -5730,6 +5866,11 @@ def read_turn(s, recheck=False, now=None):
     if live and s["dialog"] and session_state.dialog_closed(act, s.get("idle_since"),
                                                             TURN_SLACK):
         session_state.clear_dialog(sid, shell)
+        _read_marks(s)
+    # A dialog call that the transcript shows with no result while no marker says so: the
+    # dialog still waits, and the marker the `PreToolUse` hook writes is written again.
+    elif live and not s["dialog"] and act and not act["ended"] and act.get("dialog"):
+        session_state.mark_idle(sid, shell, dialog=act["dialog"])
         _read_marks(s)
     marker = s.get("idle_since")
     if live and marker and not s["dialog"] and act and not act["ended"] \
@@ -5935,6 +6076,20 @@ def _call_text(s):
         if since else s["calling"]
 
 
+def plan_rests(s, t):
+    """Whether a `plan` session did its job and waits only at Claude Code's plan approval:
+    its ticket shows the plan done and nothing open (`finish_undone`), and its turn waits at
+    the `ExitPlanMode` dialog, or stopped at that call and writes nothing (`stale`). The
+    approval would only take it out of plan mode, which a plan session never needs."""
+    import session_state
+    if t is None or s.get("mode") != "plan" or finish_undone(t, "plan"):
+        return False
+    if s.get("dialog"):
+        return s.get("question") == session_state.PLAN_APPROVAL
+    return bool(s.get("stale")) and not s.get("calling") and \
+        str(s.get("doing") or "").split(":")[0] == session_state.PLAN_TOOL
+
+
 def wait_state(s, t, now=None):
     """What a session waits for, as `(wait, why)`. `t` is its ticket or None.
 
@@ -5949,6 +6104,9 @@ def wait_state(s, t, now=None):
            no hook has run under this Claude and it has no
              transcript: a question before its first turn,
              such as folder trust (while it starts: None)  input
+           a `plan` session whose ticket shows the plan
+             done waits at the plan approval, or its turn
+             stopped at `ExitPlanMode` (`plan_rests`)      finished
            a dialog stops the turn: a permission, an
              AskUserQuestion, a plan to approve            input
            the turn ended in an API error (`StopFailure`)  input
@@ -5995,6 +6153,9 @@ def wait_state(s, t, now=None):
         if s.get("starting"):
             return None, "starts"
         return "input", "has not begun: a question before its first turn, such as folder trust"
+    if plan_rests(s, t):
+        return "finished", "the plan is on the ticket (%s); it waits only at the plan approval" \
+            % t.status
     if s.get("dialog"):
         return "input", ("dialog: %s" % s["question"] if s.get("question") else
                          "a dialog waits for an answer: a permission, a question or a plan")
@@ -6129,6 +6290,10 @@ def wait_signals(s, t):
     if s.get("killed_shells"):
         out.append(["shells killed", "pid %s: ran no process, or the session is finished"
                     % ", ".join(str(p) for p in s["killed_shells"])])
+    if s.get("killed_daemons"):
+        out.append(["daemon ended", "pid %s: Claude Code's daemon that this session started, "
+                    "with its spare sessions and copies"
+                    % ", ".join(str(p) for p in s["killed_daemons"])])
     out.append(["jobs", ", ".join(s["jobs"]) if s.get("jobs") else "none"])
     if t is None:
         out.append(["ticket", "none"])

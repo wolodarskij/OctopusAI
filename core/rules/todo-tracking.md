@@ -343,6 +343,14 @@ the permit <name>" --tried "<every way tried>"`, and wait.
 - Each mode has its own session id, from the project's session namespace and the ticket id.
   Every launch writes one `<mode> <uuid> <time>` entry under `sessions:`, and the last launch in
   `session:` and `launched:`. `claude --resume <uuid>` restores that agent from the ticket.
+- **Every session that runs on a ticket's launch prompt is that ticket's.** Claude Code gives a
+  copy of a session (a fork, a session moved into the background) an id of its own. The
+  engine reads the first prompt of each session that no ticket records: a launch prompt
+  names its ticket and mode, and the ticket records the session under `sessions:`.
+- **A launch runs with Claude Code's agent view off** (`CLAUDE_CODE_DISABLE_AGENT_VIEW=1`): no
+  `claude agents`, no `--bg`, no `/background` and no on-demand daemon, so no spare session
+  and no background copy. Each scan of the sessions ends by force, with its whole process
+  tree, a Claude Code daemon (`claude daemon run`) that the Claude of a ticket session started.
 - **`review` judges the ticket.** Is it still true against the tree? Does it describe what is
   wrong now? Are `severity` and `difficulty` correct? Its verdict: leave it, rewrite it, narrow
   it, send it to Verification, or move it to Blocked. It gets no permit, and it changes only the
@@ -388,7 +396,8 @@ its order to the end.
 | 0 | its Claude exited | `finished` |
 | 0 | its turn ended, and the last line of its last message is `WORK IS FINISHED` (every brief asks for it when the work is finished and the session has no question). The engine reads nothing else: no report, no ticket, no plan, no job, no background work and no judge | `finished`; a manager `idle` |
 | 0 | no hook ran and it has no transcript: a question before its first turn, such as folder trust | `input` |
-| 0 | a dialog waits (a permission, a question, a plan to approve), or its turn ended in an API error (a rate limit, an overload, a network fault) | `input` |
+| 0 | a `plan` session whose ticket shows the plan done (`ready to implement`, nothing left open) waits at the plan approval of `ExitPlanMode`, or its turn stopped at that call and wrote nothing for 5 minutes | `finished` |
+| 0 | a dialog waits (a permission, a question, a plan to approve), or its turn ended in an API error (a rate limit, an overload, a network fault). A dialog call with no result in the transcript is a dialog that waits | `input` |
 | 0 | it reported `event`, and its last lines do not say its ticket is in Verification or Done | `event` |
 | 0 | it reported `report <id> input --why "<the question>" --mode <mode>` in this turn | `input` |
 | 1 | its turn ended, and its last lines say its ticket is in Verification or Done, or it reported `finished` | `finished`; a manager `idle` |

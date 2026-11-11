@@ -108,7 +108,8 @@ a `dialog` marker written before it started; a marker of any other word is the `
 and stays. No hook fires when Claude Code denies a permission prompt by itself after its time
 runs out (auto mode does it after 2 minutes), nor when the owner chooses No or presses Esc:
 `todo.py read_turn` removes the marker when the transcript shows the dialog closed
-(`dialog_closed`).
+(`dialog_closed`), and writes it again when the transcript shows a dialog call with no result
+while no marker says so (`_open_dialog`).
 
 A session can end its turn while its own background work goes on: a subagent, or a shell
 command it ran in the background. Claude Code re-invokes it when that work completes, so it
@@ -211,7 +212,10 @@ BUSY_EVENTS = ("UserPromptSubmit", "SessionStart")
 # and the tools that open one.
 DIALOG_NOTIFICATIONS = ("permission_prompt", "elicitation_dialog", "elicitation_url_dialog")
 ASK_TOOL = "AskUserQuestion"
-DIALOG_TOOLS = (ASK_TOOL, "ExitPlanMode")
+PLAN_TOOL = "ExitPlanMode"
+DIALOG_TOOLS = (ASK_TOOL, PLAN_TOOL)
+# What the marker of a plan approval says.
+PLAN_APPROVAL = "approve the plan"
 
 # The tools that schedule a prompt into the session and cancel it, and how long a recurring
 # job lives before Claude deletes it.
@@ -1398,7 +1402,7 @@ def judge(session_id, shell=0):
     # unless the owner talks to it: then only its own `WORK IS FINISHED` closes it.
     if state == "finished" and not owner_talks(session_id, shell):
         try:
-            start_closer(*_launch_of(session_id))
+            start_closer(*_launch_of(session_id), session_id=session_id)
         except Exception:                               # noqa: BLE001 - the verdict stands
             pass
     if state == "blocked":
@@ -1590,8 +1594,10 @@ def transcript_activity(path):
     type of its last row, "" when the turn did not end in an API error; `call` and
     `call_since`, the tool call of a turn that runs which has no result yet and its start
     (`_running_call`); `open_since`, the start of the oldest call of a turn that runs which
-    has no result yet, a dialog tool included (`_open_since`); `last_row`, the time of the
-    last row. `None` when there is no transcript or it holds no message.
+    has no result yet, a dialog tool included (`_open_since`); `dialog`, what the dialog of
+    a dialog tool call of a turn that runs which has no result yet asks, as `dialog_text`
+    gives it, "" when there is none (`_open_dialog`); `last_row`, the time of the last row.
+    `None` when there is no transcript or it holds no message.
 
     A tool result, a prompt and a tool call waiting for its result are a turn that runs. The
     owner's slash commands, their output and the summary of a compaction are bookkeeping."""
@@ -1650,6 +1656,7 @@ def transcript_activity(path):
             break
     call, call_since = _running_call(rows) if not ended else ("", 0)
     open_since = _open_since(rows) if not ended else 0
+    dialog = _open_dialog(rows) if not ended else ""
     if not any(t.strip() for t in texts):
         # A turn that runs: the last thing it wrote in it, above the tool calls since.
         for d in reversed(rows):
@@ -1666,7 +1673,7 @@ def transcript_activity(path):
     return {"text": "\n".join(t for t in texts if t.strip()), "ended": ended, "when": when,
             "doing": doing, "since": since, "error": api_error(last),
             "call": call, "call_since": call_since, "open_since": open_since,
-            "last_row": _stamp(last.get("timestamp"))}
+            "dialog": dialog, "last_row": _stamp(last.get("timestamp"))}
 
 
 def last_answer(path):
@@ -1718,6 +1725,64 @@ def _running_call(rows):
         if b.get("id") not in results and b.get("name") not in DIALOG_TOOLS:
             return _doing_of(b), _stamp(d.get("timestamp"))
     return "", 0
+
+
+def _open_dialog(rows):
+    """What the newest dialog tool call (`AskUserQuestion`, `ExitPlanMode`) of the current
+    turn that has no result yet asks, as `dialog_text` gives it; "" when every dialog call of
+    the turn has its result."""
+    results = set()
+    for d in reversed(rows):
+        content = (d.get("message") or {}).get("content")
+        blocks = [b for b in content if isinstance(b, dict)] if isinstance(content, list) else []
+        if d.get("type") == "user":
+            ids = [b.get("tool_use_id") for b in blocks if b.get("type") == "tool_result"]
+            if not ids:
+                break
+            results.update(ids)
+            continue
+        for b in reversed(blocks):
+            if b.get("type") == "tool_use" and b.get("name") in DIALOG_TOOLS \
+                    and b.get("id") not in results:
+                text = dialog_text({"tool_name": b.get("name"), "tool_input": b.get("input")})
+                return text if isinstance(text, str) else b.get("name")
+    return ""
+
+
+# How many lines from the start of a transcript `first_prompt` reads.
+FIRST_PROMPT_LINES = 400
+
+
+def first_prompt(path):
+    """The text of the first prompt of a session's transcript: its first user row that is no
+    tool result and no bookkeeping. A copy of a session, such as a fork, keeps the first
+    prompt of the session it copies. "" when the transcript is missing or holds none in its
+    first `FIRST_PROMPT_LINES` lines."""
+    try:
+        with open(path, "rb") as f:
+            for n, raw in enumerate(f):
+                if n >= FIRST_PROMPT_LINES:
+                    break
+                if b'"type":"user"' not in raw and b'"type": "user"' not in raw:
+                    continue
+                try:
+                    d = json.loads(raw)
+                except ValueError:
+                    continue
+                if not isinstance(d, dict) or d.get("type") != "user" or _bookkeeping(d):
+                    continue
+                content = (d.get("message") or {}).get("content")
+                if isinstance(content, list):
+                    if any(isinstance(b, dict) and b.get("type") == "tool_result"
+                           for b in content):
+                        continue
+                    content = "\n".join(str(b.get("text") or "") for b in content
+                                        if isinstance(b, dict) and b.get("type") == "text")
+                if isinstance(content, str) and content.strip():
+                    return content.strip()
+    except (OSError, TypeError):
+        return ""
+    return ""
 
 
 def _open_since(rows):
@@ -2256,7 +2321,9 @@ def _launch_of(session_id):
         modes.update({e["session"]: e.get("mode") or "" for e in t.sessions})
         if sid in modes:
             return t, modes[sid]
-    return None, ""
+    # A copy of a launched session, such as a fork, runs under an id of its own: its first
+    # prompt, the launch prompt, names its ticket and mode, and the ticket records it.
+    return todo.link_launch(sid)
 
 
 def own_ticket(session_id):
@@ -2288,28 +2355,32 @@ def close_finished(session_id, text, shell=0, launch=None):
             todo.block_undone(t, mode, session_id, shell)
         except Exception:                               # noqa: BLE001 - the update blocks it
             pass
-        return start_closer(t, mode, now=True)
+        return start_closer(t, mode, now=True, session_id=session_id)
     if owner_talks(session_id, shell):
         # The owner talks to it: only its own `WORK IS FINISHED` ends the session.
         return False
     if mode == "plan" and todo.plan_done(t):
-        return start_closer(t, mode)
+        return start_closer(t, mode, session_id=session_id)
     if says_done(text, t.id):
-        return start_closer(t, mode)
+        return start_closer(t, mode, session_id=session_id)
     return False
 
 
-def start_closer(t, mode, now=False):
+def start_closer(t, mode, now=False, session_id=""):
     """Start `todo.py close <id> --mode <mode> --when-finished`, detached. The closer waits
     until the turn has ended and closes only a `finished` session, so a question keeps the
     terminal open; with `now` it closes the ended turn at once (`todo.close_when_finished`).
-    A manager never closes. Returns whether it started."""
+    When the ticket records more than one session in `mode`, such as a copy of a launched
+    session, `<id>` is `session_id`, so the closer closes that session and no other. A
+    manager never closes. Returns whether it started."""
     import project
     import todo
     if t is None or mode not in todo.MODES or t.repeat == "manager":
         return False
+    ident = session_id if session_id and sum(
+        e["mode"] == mode for e in t.sessions) > 1 else t.id
     todo.spawn_detached([sys.executable, str(Path(todo.__file__).resolve()), "--project",
-                         str(project.current().ROOT), "close", t.id, "--mode", mode,
+                         str(project.current().ROOT), "close", ident, "--mode", mode,
                          "--when-finished"] + (["--now"] if now else []))
     return True
 
@@ -2332,8 +2403,8 @@ def dialog_text(payload):
             opts = " | ".join(o for o in opts if o)
             qs.append(str(q["question"]).strip() + (" (%s)" % opts if opts else ""))
         text = " / ".join(qs)
-    elif tool == "ExitPlanMode":
-        text = "approve the plan"
+    elif tool == PLAN_TOOL:
+        text = PLAN_APPROVAL
     else:
         text = str(payload.get("message") or "").strip()
     text = " ".join(text.split())
