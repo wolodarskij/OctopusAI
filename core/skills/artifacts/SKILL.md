@@ -33,6 +33,17 @@ Other commands:
 
 The list is `.octopus/artifacts.json`. Do not edit it by hand.
 
+## A documentation ticket
+
+A `Documentation: ` or `Documentation Bug: ` ticket delivers its result as an artifact (`documentation-delivers-artifact.md`):
+
+1. Write the page, as this skill says.
+2. Publish it on claude.ai with the `Artifact` tool. The link opens on the owner's phone.
+3. Register the local page and the link, each with `--ticket <id>`.
+4. Name the link under `## Result`.
+
+`move` to Verification refuses the ticket without them. Only the owner's order frees it: `python .octopus/todo.py doc-artifact <id> no --owner-order "<the order, in neutral words>"`.
+
 ## What the page holds
 
 **Only what the order asked for, in the form the order asked for.** The reader is an expert: the owner knows the project, the engine and the tools.

@@ -849,6 +849,12 @@ A ticket whose work changes code or content, and also its docs, is a bug or a fe
 finding: in an analysis, a review, a check of records or a doc sweep. A documentation ticket
 adds or extends what the documentation states; it never names a defect.
 
+**A documentation ticket delivers an artifact:** its result as an HTML page, published on
+claude.ai, and registered on the board as the local page and as the link; the link goes under
+`## Result`. `move` to Verification, and to Done as `done`, refuses it without them. Only the
+owner's order frees it: `doc-artifact <id> no --owner-order "<the order>"`.
+`documentation-delivers-artifact.md` is the full rule.
+
 **`source:` names the file that is wrong.** A bug in code that a doc page shows names the code in
 `source:` and the doc page under `## Evidence`. A documentation bug names the doc file.
 
@@ -862,7 +868,7 @@ adds or extends what the documentation states; it never names a defect.
   is wrong. `check` renames no ticket.
 - `new`, the board's `New task` and its `Process with AI` write the section that the title names.
 
-Other fields: `category`, `filed-by`, `parent`, `group`, `related`, `repeat`, `run`, `visual`.
+Other fields: `category`, `filed-by`, `parent`, `group`, `related`, `repeat`, `run`, `visual`, `artifact`.
 
 **`visual` says whether a ticket does visual work** on textures, 3D meshes or the materials
 that show them: `yes`, or `no` with its reason under `## Not visual work` (`visual <id> yes|no

@@ -490,6 +490,94 @@ def cmd_visual(args):
     return 0
 
 
+# A DOCUMENTATION TICKET DELIVERS AN ARTIFACT (`core/rules/documentation-delivers-artifact.md`).
+# A `Documentation: ` or `Documentation Bug: ` ticket is finished only when its result is an
+# HTML page that the board's artifact list holds, by its local path and by its claude.ai link,
+# and its `## Result` names that link (`artifact_problem`). Only the owner's order sets
+# `artifact: no`, with the order under `## No artifact`.
+ARTIFACT_FIELD = "artifact"
+NO_ARTIFACT_SECTION = "No artifact"
+CLAUDE_LINK = re.compile(r"https://claude\.ai/(?:[\w-]+/)*artifacts?/[\w-]+", re.I)
+
+
+def doc_ticket(t):
+    """Whether ticket `t` is a documentation ticket: its title starts with `Documentation: `
+    or `Documentation Bug: `. Returns a bool."""
+    return title_kind(t.title) in (DOC_PREFIX, DOC_BUG_PREFIX)
+
+
+def artifact_due(t):
+    """Whether ticket `t` must deliver an artifact: a documentation ticket that the owner's
+    order did not mark `artifact: no`. Returns a bool."""
+    if t.repeat == MANAGER or not doc_ticket(t):
+        return False
+    return t.meta.get(ARTIFACT_FIELD, "").strip().lower() != "no"
+
+
+def artifact_links(t):
+    """The claude.ai artifact links that the result sections of ticket `t` name, in order."""
+    out = []
+    for text in _result_texts(t):
+        for m in CLAUDE_LINK.finditer(text):
+            if m.group(0) not in out:
+                out.append(m.group(0))
+    return out
+
+
+def artifact_problem(t, state, status=""):
+    """Why ticket `t` cannot go to `state` with `status` for want of its artifact, or "": it
+    is a documentation ticket, the move lands it in the verify lane or in the closed lane as
+    `done`, and the board does not hold its page by a local path and by the claude.ai link
+    that its `## Result` names."""
+    if state == lane("closed"):
+        if (status or default_status(state)) != default_status(state):
+            return ""
+    elif state != lane("verify"):
+        return ""
+    if not artifact_due(t):
+        return ""
+    import artifacts
+    entries = artifacts.load(P.ROOT)
+    urls = {(e.get("url") or "").rstrip("/") for e in entries if e.get("url")}
+    links = artifact_links(t)
+    if not links:
+        return "it is a documentation ticket, and its `## Result` names no claude.ai link"
+    if not any(u.rstrip("/") in urls for u in links):
+        return ("it is a documentation ticket, and the board's artifact list does not hold the "
+                "claude.ai link that its `## Result` names")
+    pages = [e for e in entries if e.get("path") and (e.get("ticket") or "").upper() == t.id
+             and e["path"].lower().endswith(artifacts.PAGE_EXT)
+             and artifacts.safe_path(P.ROOT, e["path"]) is not None]
+    if not pages:
+        return ("it is a documentation ticket, and the board's artifact list holds no local "
+                "HTML page of it that exists")
+    return ""
+
+
+def cmd_doc_artifact(args):
+    """Mark a documentation ticket `artifact: no` on the owner's order, or `yes` again."""
+    t = find(load_all(), args.id)
+    if t is None:
+        print("Error: no ticket %r" % args.id, file=sys.stderr)
+        return 2
+    said = _owner_words(args)
+    if args.value == "no":
+        if _in_ai_session() and not said:
+            for line in (
+                "Error: only the owner's order frees a documentation ticket from its artifact.",
+                "  When the owner ordered it in this session's chat, pass",
+                "    --owner-order \"<the order, in neutral words>\"",
+            ):
+                print(line, file=sys.stderr)
+            return 2
+        t.body = add_section_line(t.body, NO_ARTIFACT_SECTION, "- %s: %s" % (
+            _today(), said or "the owner's order, from the owner's own shell"))
+    t.meta[ARTIFACT_FIELD] = args.value
+    _write(t.path, render(t.meta, t.body))
+    print("%s  artifact: %s" % (t.id, args.value))
+    return 0
+
+
 def outcome_problem(text, own_id="", finished=False):
     """Why `text` is no outcome line, or "" when it is one. A `finished` ticket's outcome also
     says nothing that is still wrong."""
@@ -888,7 +976,7 @@ def parse(text):
 
 def render(meta, body):
     keys = ["id", "title", "category", "severity", "difficulty", "status", "outcome", "visual",
-            "source",
+            "artifact", "source",
             "created", "filed-by", "claim", "session", "launched", "sessions", "blocked-by",
             "parent",
             "group", "related",
@@ -2372,6 +2460,20 @@ def cmd_move(args):
                     "  and name it under `## Result` by its path from the project root.",
                     "  Work that changes no texture, mesh or material is no visual work:",
                     "    %s visual %s no --why \"<what the work changed instead>\""
+                    % (P.cli, t.id),
+                ):
+                    print(line, file=sys.stderr)
+                return 2
+            why = artifact_problem(t, state, args.status)
+            if why:
+                for line in (
+                    "Error: %s cannot go to %s: %s." % (t.id, P.STATE_LABEL[state], why),
+                    "  A documentation ticket delivers its result as an HTML page. Publish the "
+                    "page on claude.ai,",
+                    "  register the local page and the link, and name the link under "
+                    "`## Result`:",
+                    "    %s artifact add <path> --ticket %s" % (P.cli, t.id),
+                    "    %s artifact add <https://claude.ai/... link> --ticket %s"
                     % (P.cli, t.id),
                 ):
                     print(line, file=sys.stderr)
@@ -4610,6 +4712,8 @@ def build_brief(t, mode="work", note="", provider="claude"):
     if visual_work(t, commits=mode == "verify") or (
             mode == "verify" and t.meta.get(VISUAL_FIELD, "").strip().lower() == "no"):
         out.append(sec("renders.%s" % mode))
+    if artifact_due(t) or (mode == "verify" and doc_ticket(t)):
+        out.append(sec("artifact.%s" % mode))
     out += permits
     out.append(sec("before.%s" % mode, "before"))
     out.append(sec("finish.%s" % mode))
@@ -8362,6 +8466,15 @@ def _main(argv):
     p.add_argument("--why", help="with `no`: what the work changed instead of a texture, a "
                                  "mesh or a material; it goes under ## %s" % NOT_VISUAL_SECTION)
     p.set_defaults(fn=cmd_visual)
+
+    p = sub.add_parser("doc-artifact", help="free a documentation ticket from its artifact on "
+                                            "the owner's order (`no`), or bind it again (`yes`)")
+    p.add_argument("id")
+    p.add_argument("value", choices=("yes", "no"))
+    p.add_argument("--owner-order", metavar="WORDS",
+                   help="the owner's order, in neutral words; an AI session needs it for `no`. "
+                        "It goes under ## %s" % NO_ARTIFACT_SECTION)
+    p.set_defaults(fn=cmd_doc_artifact)
 
     p = sub.add_parser("new", help="create a ticket")
     p.add_argument("--title", required=True,

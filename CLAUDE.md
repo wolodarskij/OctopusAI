@@ -1,5 +1,6 @@
 <!-- octopus:begin - generated from .agents/ by Octopus AI. Edit the files in .agents/, not this block. -->
 @AGENTS.md
+@.agents/rules/octopus/core/documentation-delivers-artifact.md
 @.agents/rules/octopus/core/heavy-tools-only-when-needed.md
 @.agents/rules/octopus/core/investigate-first.md
 @.agents/rules/octopus/core/local-information.md
