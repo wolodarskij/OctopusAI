@@ -402,7 +402,7 @@ its order to the end.
 | 0 | it reported `report <id> input --why "<the question>" --mode <mode>` in this turn | `input` |
 | 1 | its turn ended, and its last lines say its ticket is in Verification or Done, or it reported `finished` | `finished`; a manager `idle` |
 | 2 | its turn ended, and the last line of its last message is a question | `input` |
-| 3 | it holds a recurring job, its own subagent runs, or its background shell runs a process | `blocker` when its ticket waits for other tickets, else `working` |
+| 3 | it holds a recurring job, its own subagent runs, its background shell runs a process, or a monitor runs while no other ticket waits for its ticket (`open-ended-blocker-asks.md`) | `blocker` when its ticket waits for other tickets, else `working` |
 | 4 | its turn runs and wrote to its transcript within 5 minutes, or a tool call of its turn has no result yet | `running` |
 | 5 | its turn ended, or it wrote nothing for 5 minutes and no tool call runs: the judge reads its last message and its ticket | the verdict: `input`, `event` (`blocked`), `finished`, `working` or `blocker` |
 | 6 | the judge is unsure | `idle`; the engine types nothing into the session |

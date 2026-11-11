@@ -7,6 +7,7 @@
 @.agents/rules/octopus/core/no-mutual-waits.md
 @.agents/rules/octopus/core/no-narration-in-comments.md
 @.agents/rules/octopus/core/no-owner-quotes.md
+@.agents/rules/octopus/core/open-ended-blocker-asks.md
 @.agents/rules/octopus/core/owner-edits.md
 @.agents/rules/octopus/core/owner-is-remote.md
 @.agents/rules/octopus/core/owner-wording.md

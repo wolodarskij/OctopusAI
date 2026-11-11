@@ -11,6 +11,13 @@
     a part of the work. A recommended option stands first.
   - Put the context the owner needs into the question and the option descriptions, or into a
     short message before the dialog.
+- **When another ticket waits for this ticket (`blocked-by:`) and the owner decides where its
+  work ends** (an open discussion with you, or a launch note that leaves the end to the
+  owner): when you did all the work that the owner asked for, run `report ... input`, then ask
+  with the `AskUserQuestion` tool if more work comes or the ticket is finished. Never end such
+  a turn with a plain message. A watch of an artifact's live updates, or another background
+  monitor, is no work that you wait for. The `Stop` hook holds a turn that ends with no
+  question, once (`open-ended-blocker-asks.md`).
 - **When you wait for something outside the project, not for an answer**, such as an
   editor restart: run `{cli} report {id} event --why "<what you wait for>" --mode {mode}`,
   say what you wait for, and end the turn without a question. The board shows the session

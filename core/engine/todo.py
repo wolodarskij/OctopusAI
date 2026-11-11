@@ -70,6 +70,11 @@ ONE ENGINE, MANY PROJECTS. Every path and every rule is read from the current pr
     octopus todo send T0001 --text "yes" --keys Enter
     octopus todo report T0001 input --why "Which lane?" --mode work   a session asks the owner
     octopus todo report T0001 event --why "editor restart"   ... or for an outside event
+    octopus todo decide T0001 --question "..." --decision "..."
+                                              night mode: a decision taken in place of the owner
+    octopus todo morning T0001 --question "..."   night mode: a question for the morning
+    octopus todo morning T0001 --answer 1 --text "..."   the owner's answer to it
+    octopus todo morning                      the open questions for the morning
     octopus todo approve-readme README.md --session <id> --owner-order "<the order, in neutral words>"
                                               the owner approved the exact new text of a
                                               project-wide README file: the README guard lets
@@ -127,6 +132,7 @@ import providers as _providers  # noqa: E402
 from project import P  # noqa: E402
 from project import CATEGORY_CODE, CATEGORY_TOOLING, LEGACY_KINDS  # noqa: E402
 import oldnames  # noqa: E402
+import nightmode  # noqa: E402
 import agents as _agents  # noqa: E402
 
 # A ticket carries whatever the code it describes carries - an arrow, a non-Latin identifier,
@@ -4396,6 +4402,14 @@ def waits_for(t, tickets):
             + [k.id for k in children_of(tickets, t.id) if k.state not in settled])
 
 
+def waited_for_by(t, tickets):
+    """The open tickets that wait for `t`: each ticket outside the verify and the closed lane
+    whose `blocked-by:` names `t`."""
+    settled = settled_states()
+    return [x.id for x in tickets
+            if x.id != t.id and t.id in x.blocked_by and x.state not in settled]
+
+
 def _resolve_id(ident):
     t = find(load_all(), ident)
     return t.id if t else ident
@@ -5906,6 +5920,9 @@ def live_sessions(tickets=None, recheck=False):
         # The tickets this one waits for: its blockers and its children that are not yet
         # in Verification or Done.
         s["waits_for"] = [] if t is None else waits_for(t, tickets)
+        # The tickets that wait for this one: its session asks the owner when its work is
+        # done, and its monitor is no work of its own (`work_tasks`).
+        s["waited_by"] = [] if t is None or t.repeat == MANAGER else waited_for_by(t, tickets)
         try:
             reap_shells(s, procs)
         except Exception:                               # noqa: BLE001 - the scan goes on
@@ -6042,13 +6059,25 @@ def reap_shells(s, procs, finished=False, now=None):
     return killed
 
 
+def work_tasks(s):
+    """The recorded background tasks that make the session `working`: every one, except a
+    monitor (a watch of an artifact's live updates, a `Monitor` call) of a session whose
+    ticket another open ticket waits for (`waited_by`). Such a session asks the owner when
+    its work is done (`open-ended-blocker-asks.md`); a monitor is no work it waits for."""
+    import session_state
+    tasks = s.get("tasks") or []
+    if s.get("waited_by"):
+        tasks = [x for x in tasks if not session_state.monitor_task(x)]
+    return tasks
+
+
 def _judge_needed(s):
     """Whether no rule before the judge decides the session (`wait_state` steps 0 to 3), so
     the judge has to read it."""
     return not (s.get("chat") or s.get("dialog") or s.get("error") or s.get("asks")
                 or s.get("says_finished")
                 or s.get("reported") in ("input", "event", "finished")
-                or s.get("jobs") or s.get("tasks"))
+                or s.get("jobs") or work_tasks(s))
 
 
 def read_turn(s, recheck=False, now=None):
@@ -6357,7 +6386,9 @@ def wait_state(s, t, now=None):
              tickets and it holds a recurring job          row 3
         2  the turn ended, and its last line asks          input
         3  it holds a recurring job, or its own subagent
-             runs, or its background shell runs a process  blocker when its ticket waits for
+             runs, or its background shell runs a process,
+             or a monitor runs while no other ticket waits
+             for its ticket (`work_tasks`)                 blocker when its ticket waits for
                                                            other tickets, else subagent
         4  the turn runs and wrote within `STALE_SECONDS`,
              or a tool call of the turn has no result yet  None
@@ -6434,8 +6465,9 @@ def wait_state(s, t, now=None):
         return "finished", "reported finished"
     if ended and s.get("asks"):
         return "input", _asked("asked", s)
-    if s.get("tasks"):
-        return _working(s, t, "its own " + _tasks_text(s["tasks"]))
+    tasks = work_tasks(s)
+    if tasks:
+        return _working(s, t, "its own " + _tasks_text(tasks))
     if s.get("jobs"):
         return _working(s, t, "its scheduled job %s" % ", ".join(s["jobs"]))
     if not ended and s.get("calling"):

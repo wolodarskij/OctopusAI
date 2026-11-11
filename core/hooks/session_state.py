@@ -890,6 +890,18 @@ def mark_tasks(session_id, shell, tasks):
     p.write_text(json.dumps(tasks, ensure_ascii=False), encoding="utf-8")
 
 
+# The `type` of a background task that is a monitor: the watch Claude Code arms on an
+# artifact's publish for its live updates, or a `Monitor` call. A monitor of a session whose
+# ticket another ticket waits for is no work of that session (`open-ended-blocker-asks.md`).
+MONITOR_TASK_TYPES = ("monitor",)
+
+
+def monitor_task(task):
+    """Whether a recorded background task is a monitor, not a subagent or a shell."""
+    return isinstance(task, dict) and \
+        str(task.get("type") or "").strip().lower() in MONITOR_TASK_TYPES
+
+
 def background_tasks(session_id, shell=0):
     """The background tasks this terminal's session waits for: its own record, else an
     unknown terminal's. Empty when it waits for none."""
@@ -1215,6 +1227,7 @@ def _others_of(session_id, shell=0):
     sid = session_id.lower()
     tickets = todo.load_all()
     by_id = {t.id: t for t in tickets}
+    waited = []
     for t in tickets:
         sids = {todo.launch_session_id(t.id, m, t.run if t.repeat else 1) for m in todo.MODES}
         sids.update(e["session"] for e in t.sessions)
@@ -1224,8 +1237,14 @@ def _others_of(session_id, shell=0):
             o = by_id.get(w)
             lines.append("- ticket %s%s" % (w, ": %s, now in %s" % (
                 o.title, p.STATE_LABEL.get(o.state, o.state)) if o else ""))
+        if t.repeat != todo.MANAGER:
+            waited = todo.waited_for_by(t, tickets)
         break
+    # A session whose ticket another ticket waits for asks the owner when its work is done:
+    # its monitor is no work it waits for.
     for task in background_tasks(session_id, shell):
+        if waited and monitor_task(task):
+            continue
         lines.append("- its own background work: %s" % (
             task.get("description") or task.get("type") or "a task"))
     for j in all_jobs(session_id, shell, todo.session_transcript(session_id)):
@@ -2383,6 +2402,60 @@ def close_finished(session_id, text, shell=0, launch=None):
     return False
 
 
+# What the `Stop` hook tells a session whose ticket another ticket waits for, when its turn
+# ends with no question in the dialog (`open-ended-blocker-asks.md`).
+ASK_OWNER_REASON = (
+    "%(waiting)s for ticket %(id)s, and this turn ends with no question to the owner "
+    "in the question dialog. The work of %(id)s is not shown done: %(undone)s.\n"
+    "- When the owner decides where the work of %(id)s ends (an open discussion, or a launch "
+    "note that leaves the end to the owner), and you did all the work that the owner asked "
+    "for now: run `%(cli)s report %(id)s input --why \"<the question>\" --mode %(mode)s`, "
+    "then ask the owner with the AskUserQuestion tool if more work comes or the ticket is "
+    "finished.\n"
+    "- When the order of %(id)s has its own end: continue the work to that end, or report "
+    "what stops it.\n"
+    "A watch of an artifact's live updates, or another background monitor, is no work that "
+    "you wait for.")
+
+
+def ask_owner_end(session_id, shell, payload, text, launch=None):
+    """The `Stop` answer that keeps the turn of a launched session going once, so that it
+    asks the owner (`open-ended-blocker-asks.md`), or None. It blocks the stop when another
+    open ticket waits for the session's ticket (`todo.waited_for_by`), the ticket does not
+    show the work done (`todo.finish_undone`) and is not in the blocked or the paused lane,
+    and the turn ends with no finished line, no statement that the ticket is done, no report
+    of `input` or `event`, and no work of its own: a subagent or a shell that runs, or a
+    recurring job. A monitor is no such work. A stop that a `Stop` hook already held
+    (`stop_hook_active`) goes through, so a session is held at most once per turn."""
+    import project
+    import todo
+    if payload.get("stop_hook_active"):
+        return None
+    t, mode = launch or _launch_of(session_id)
+    if t is None or mode not in todo.MODES or t.repeat == todo.MANAGER:
+        return None
+    if t.state in (todo.lane("blocked"), todo.lane("paused")):
+        return None
+    undone = todo.finish_undone(t, mode)
+    if not undone:
+        return None
+    if says_finished(text) or says_done(text, t.id):
+        return None
+    if reported(session_id, shell) in ("input", "event"):
+        return None
+    tasks = running_tasks(payload.get("background_tasks"))
+    if any(not monitor_task(x) for x in tasks) or jobs(session_id, shell):
+        return None
+    waiting = todo.waited_for_by(t, todo.load_all())
+    if not waiting:
+        return None
+    p = project.current()
+    return {"decision": "block", "reason": ASK_OWNER_REASON % {
+        "waiting": ("Ticket %s waits" if len(waiting) == 1 else "Tickets %s wait")
+        % ", ".join(waiting), "id": t.id, "undone": undone,
+        "cli": p.cli, "mode": mode}}
+
+
 def start_closer(t, mode, now=False, session_id=""):
     """Start `todo.py close <id> --mode <mode> --when-finished`, detached. The closer waits
     until the turn has ended and closes only a `finished` session, so a question keeps the
@@ -2543,6 +2616,16 @@ def _hook(payload, started=None):
                 launch = _launch_of(sid)
             except Exception:                           # noqa: BLE001 - a hook never raises
                 launch = (None, "")
+            # A session whose ticket another ticket waits for asks the owner before its turn
+            # ends: the stop is held once, and the turn goes on.
+            try:
+                hold = ask_owner_end(sid, shell, payload, text, launch) if launch[0] else None
+            except Exception:                           # noqa: BLE001 - a hook never raises
+                hold = None
+            if hold:
+                sys.stdout.write(json.dumps(hold) + "\n")
+                sys.stdout.flush()
+                return 0
             judge_it = mark_stop(sid, shell, text, ticket=launch[0].id if launch[0] else "")
             # `background_tasks` is not in the hook documentation. Claude Code 2.1.287 sends
             # it: the subagents and background shells that still run when the turn ends.
