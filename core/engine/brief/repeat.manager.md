@@ -167,7 +167,7 @@ These are the standing orders to every manager, in every project.
 ## Every update you give
 
 Every status update, one from a check and one the owner asks for, lists
-**agents** (sessions), not tickets, in exactly this structure: all four sections,
+**agents** (sessions), not tickets, in exactly this structure: all five sections,
 in this order, an empty one written as `none`, and nothing else unless the owner
 asks for it. Build it with:
 
@@ -185,8 +185,10 @@ since your last update, once. Print its output as it is. Each agent is one line:
     - <project> <id> "<title>" — <the question, word for word>
     **Working**
     - <project> <id> "<title>" — <what it does now, at most 10 words>
+    **Blocked**
+    - <project> <id> "<title>" — <the other ticket it waits for, or the outside cause>
     **Other**
-    - <project> <id> "<title>" — <blocked on another ticket, waiting for an event, idle or stuck>
+    - <project> <id> "<title>" — <waiting for an event, idle, paused or stuck>
 
 - **Name every ticket by its project name, its id and its title,** as the lines
   do: `<project> <id> "<title>"`, never by id alone. This holds in every message,
@@ -211,7 +213,7 @@ since your last update, once. Print its output as it is. Each agent is one line:
   `input` state,** with its question word for word. A finished, closed or idle
   agent never stands there. A decision, a proposal or an "owner decision" that a
   finished ticket's result or outcome names is not a question: that agent stands
-  only under Finished. Never move a row from Finished, Working or Other into
+  only under Finished. Never move a row from Finished, Working, Blocked or Other into
   Waiting for your input.
 - **Every agent the engine calls `input` stands under Waiting for your input,**
   also when its ticket waits for another ticket or it holds a background job.

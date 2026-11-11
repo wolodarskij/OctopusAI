@@ -24,7 +24,7 @@ the registry holds the state.
 
 One check, `check` alone, does three things. It launches no ticket and no follow-up:
 
-1. THE UPDATE. `sessions --if-any`: the four sections while any agent finished since the last
+1. THE UPDATE. `sessions --if-any`: the five sections while any agent finished since the last
    update, waits for the owner, works or waits for anything else; nothing at all only when
    none does. Never a line that says nothing changed.
 2. THE NOTICES. Each notice that a session of another project sent about a defect of an

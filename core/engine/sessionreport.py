@@ -2,8 +2,8 @@
 
     python octopus.py sessions [--since-last] [--if-any] [--json]
 
-THE FORMAT. Every update of the manager lists agents (sessions), not tickets, in four
-sections, always all four and in this order, an empty one as `none`. Each agent is one line,
+THE FORMAT. Every update of the manager lists agents (sessions), not tickets, in five
+sections, always all five and in this order, an empty one as `none`. Each agent is one line,
 and the manager copies the lines and never summarizes a ticket:
 
     **Finished since the last update**
@@ -14,8 +14,10 @@ and the manager copies the lines and never summarizes a ticket:
     - <project> <id> "<title>" — <the question, word for word>
     **Working**
     - <project> <id> "<title>" — <what it does now, at most 10 words>
+    **Blocked**
+    - <project> <id> "<title>" — <the other ticket it waits for, or the outside cause>
     **Other**
-    - <project> <id> "<title>" — <what it waits for: a blocker, an event, idle, stuck>
+    - <project> <id> "<title>" — <what it waits for: an event, idle, paused, stuck>
 
 The outcome is the ticket's `outcome:` line, which its `work` or `verify` session wrote
 (`todo.outcome_problem`); a ticket without one leaves it out. The commit is the newest commit
@@ -28,10 +30,16 @@ visual work on textures, 3D meshes or materials (`todo.visual_work`) carries one
 `render: <path>` sub-line per render file that its `## Result` names (`render_lines`). A session with no
 ticket, such as a chat or a session the owner opened, is no agent of the update. Waiting for your input holds only an open session whose agent
 runs and whose state is `input`; a finished or closed one is under Finished, whatever its
-ticket's result names for the owner, or under Other as blocked when its ticket's order is not
+ticket's result names for the owner, or under Blocked when its ticket's order is not
 carried out to the end. Every open session the engine calls `input` is there,
 also when its ticket waits for other tickets or it holds a background task or a scheduled
 job. The manager sessions and the session that runs the command are left out.
+
+THE BLOCKED SECTION. Blocked holds every agent whose ticket waits on another ticket or is
+blocked by an outside cause, and that does not wait for the owner: a session in the state
+`blocker`, a session whose ticket is in the blocked lane as `blocked by other task` or
+`blocked by outside cause` (`ticket_blocked`), and a session that ended while its ticket's
+order is not carried out to the end. Other holds the rest: an event, idle, paused, stuck.
 
 SINCE THE LAST CALL. `--since-last` reads the snapshot of the last call
 (`sessions-snapshot.json` beside the registry, outside every repository) and writes it again.
@@ -45,15 +53,16 @@ started and finished between two calls is there too. A launch is reported once.
 NEVER FINISHED WITH ITS ORDER UNMET. A session that ended (it said `WORK IS FINISHED`, its
 Claude exited, or its terminal is gone; `todo.session_ended`) while its ticket does not show
 its work done (`todo.finish_undone`) did not carry out its order to the end: it stands under
-Other as `blocked`, never under Finished, and its ticket goes to the blocked lane as
+Blocked, never under Finished, and its ticket goes to the blocked lane as
 `blocked by outside cause` (`todo.block_undone`). A session that is `finished` while its
 Claude runs and that did not say the finished line did not end: with its ticket's work not
-done, it stands under Other as `finished`, and its ticket stays where it is. Without `--since-last`, Finished holds the sessions that are finished and still open,
+done, it stands under Other as `finished`, or under Blocked when its ticket is blocked,
+and its ticket stays where it is. Without `--since-last`, Finished holds the sessions that are finished and still open,
 and no snapshot is read or written.
 
 ONLY WHEN AN AGENT IS THERE. `--if-any` is `--since-last` that prints nothing only when the
 update has no row: no agent finished since that call, none waits for the owner, none works and
-none waits for anything else. Otherwise it prints all four sections, every run, and a waiting
+none waits for anything else. Otherwise it prints all five sections, every run, and a waiting
 question again on every run until it is answered. The manager's check runs it
 (`managercheck.py`). No output ever says that nothing changed.
 """
@@ -78,6 +87,7 @@ SNAPSHOT = "sessions-snapshot.json"
 SECTIONS = (("finished", "Finished since the last update"),
             ("input", "Waiting for your input"),
             ("working", "Working"),
+            ("blocked", "Blocked"),
             ("other", "Other"))
 TEXT_WIDTH = 200
 # The most words of what a working agent does now.
@@ -246,10 +256,23 @@ def finished_lines(T, t):
     return answer_lines(T, t) + render_lines(T, t)
 
 
+def ticket_blocked(T, t):
+    """Whether ticket `t` is in the blocked lane as `blocked by other task` or `blocked by
+    outside cause`."""
+    return t is not None and t.state == T.lane("blocked") and t.status in (
+        T.S("blocked by other task"), T.S("blocked by outside cause"))
+
+
+def _waits(T, word, t):
+    """The section of a live session that neither works nor waits for the owner: `blocked`
+    when its state is `blocker` or its ticket is blocked (`ticket_blocked`), else `other`."""
+    return "blocked" if word == "blocker" or ticket_blocked(T, t) else "other"
+
+
 def _ended(T, t, mode, sid, shell, text):
     """`(section, text)` of an agent whose session ended. Its ticket's order not carried out
-    to the end (`todo.finish_undone`): `other`, as blocked, and the ticket goes to the blocked
-    lane (`todo.block_undone`). A ticket the owner paused: `other`, as paused. Else `finished`
+    to the end (`todo.finish_undone`): `blocked`, and the ticket goes to the blocked lane
+    (`todo.block_undone`). A ticket the owner paused: `other`, as paused. Else `finished`
     with `text`."""
     if t is not None and t.state == T.P.PAUSED:
         return "other", "; ".join(x for x in (PAUSED_TEXT, _where(T, t)) if x)
@@ -257,7 +280,7 @@ def _ended(T, t, mode, sid, shell, text):
     if not undone:
         return "finished", text
     t = T.find(T.load_all(), t.id) or t
-    return "other", "; ".join(x for x in (BLOCKED_TEXT, _where(T, t),
+    return "blocked", "; ".join(x for x in (BLOCKED_TEXT, _where(T, t),
                                           commit_of(T.P.ROOT, t.id, T.P.vcs)) if x)
 
 
@@ -270,7 +293,7 @@ def classify(T, s, t):
         if not T.session_ended(s) and T.finish_undone(t, s.get("mode") or ""):
             # Its Claude runs and it did not say the finished line: it did not end, so its
             # ticket stays where it is.
-            return "other", "; ".join(x for x in ("%s: %s" % (word, why) if why else word,
+            return _waits(T, word, t), "; ".join(x for x in ("%s: %s" % (word, why) if why else word,
                                                   _where(T, t)) if x)
         return _ended(T, t, s.get("mode") or "", s.get("session") or "", s.get("shell") or 0,
                       finished_text(T, t, res or why))
@@ -284,7 +307,7 @@ def classify(T, s, t):
             return _ended(T, t, s.get("mode") or "", s.get("session") or "",
                           s.get("shell") or 0, finished_text(T, t, why))
         return "input", _question(s)
-    return "other", ("%s: %s" % (word, why) if why else word)
+    return _waits(T, word, t), ("%s: %s" % (word, why) if why else word)
 
 
 def agent_cell(r):
@@ -404,7 +427,7 @@ def line(r):
 
 
 def render(rows):
-    """The four sections as Markdown, every section present, an empty one as `none`, one
+    """The five sections as Markdown, every section present, an empty one as `none`, one
     line per agent, and under a finished agent the lines of its answer."""
     out = []
     for key, heading in SECTIONS:
@@ -423,7 +446,7 @@ def render(rows):
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="octopus sessions",
                                  description="the manager's update: every agent of every "
-                                             "registered project, in four sections")
+                                             "registered project, in five sections")
     ap.add_argument("--since-last", action="store_true",
                     help="Finished holds what finished since the last --since-last call, "
                          "and the snapshot is written again")

@@ -1,4 +1,4 @@
-"""The manager's update (`octopus sessions`) and `manager --claim`: the four sections, the
+"""The manager's update (`octopus sessions`) and `manager --claim`: the five sections, the
 snapshot of the last call, and a session the owner opened that becomes the manager.
 python -m unittest discover tests"""
 
@@ -63,11 +63,11 @@ class Report(FixtureCase):
     def section(self, rows, key):
         return sorted(r.get("id") for r in rows if r["section"] == key)
 
-    def test_four_sections_in_order_and_an_empty_one_says_none(self):
+    def test_five_sections_in_order_and_an_empty_one_says_none(self):
         _rows, text = self.run_report(False)
         heads = [ln for ln in text.splitlines() if ln.startswith("**")]
         self.assertEqual(heads, ["**Finished since the last update**", "**Waiting for your input**",
-                                 "**Working**", "**Other**"])
+                                 "**Working**", "**Blocked**", "**Other**"])
         finished = text.split("**Waiting for your input**")[0]
         self.assertIn("none", finished)
 
@@ -84,6 +84,19 @@ class Report(FixtureCase):
         self.assertIn("Which lane? (Pipeline / Blocked)", text)
         self.assertIn('- Sample Game %s "Feature: the work" — Bash: run the tests'
                       % self.work, text)
+
+    def test_an_agent_whose_ticket_waits_or_is_blocked_is_under_blocked(self):
+        rc, _o, err = self.todo(self.root, "move", self.wait, "Blocked", "--status",
+                                "blocked by outside cause")
+        self.assertEqual(rc, 0, err)
+        rows, text = self.run_report(False, [
+            sess(SID_A, self.work, "blocker", why="blocked by T9999"),
+            sess(SID_C, self.wait, "event", why="the editor restart"),
+            sess(SID_B, self.ask, "event", why="an editor restart"),
+        ])
+        self.assertEqual(self.section(rows, "blocked"), sorted([self.work, self.wait]))
+        self.assertEqual(self.section(rows, "other"), [self.ask])
+        self.assertLess(text.index("**Blocked**"), text.index("**Other**"))
 
     def test_since_last_reports_a_gone_session_once(self):
         gone_done = sess(str(uuid.UUID(int=6)), self.done, None)

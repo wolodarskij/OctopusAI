@@ -5,7 +5,7 @@
                                                   the board, serving every registered project
     python octopus.py sessions [--since-last] [--if-any] [--json]
                                                   the manager's update: every agent of every
-                                                  registered project, in four sections
+                                                  registered project, in five sections
     python octopus.py check [--watch] [--dry-run]
                                                   the manager's check: the update while any
                                                   agent finished, waits or works; it launches

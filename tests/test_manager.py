@@ -407,7 +407,7 @@ class ShippedManager(FixtureCase):
         for words in ("A task is a ticket", "Never wait passively", "Fix tooling faults",
                       "positive statement", "Project facts live in the project",
                       "**Finished since the last update**", "**Waiting for your input**",
-                      "**Working**", "**Other**", "sessions --since-last", "Never repeat",
+                      "**Working**", "**Blocked**", "**Other**", "sessions --since-last", "Never repeat",
                       "Never write \"no change\""):
             self.assertIn(words, brief)
 

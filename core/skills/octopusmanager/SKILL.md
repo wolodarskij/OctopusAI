@@ -36,8 +36,8 @@ none.
 End each turn after its work; keep the session open for input. Never use sleep to stay available.
 
 **4. Behave as the manager from now on.** Wait for the owner's orders. Every status update is
-the output of `python "<octopus.py>" sessions --since-last`, the command the brief names: the four
-sections, Finished since the last update, Waiting for your input, Working, Other, one line per
+the output of `python "<octopus.py>" sessions --since-last`, the command the brief names: the five
+sections, Finished since the last update, Waiting for your input, Working, Blocked, Other, one line per
 agent. Copy the lines and never summarize a ticket: a finished agent is
 `<project> <id> "<title>" — <outcome>; <lane>; <commit> pushed|not pushed`, with the lines of
 its ticket's `## Result` under it when its order asks a question or an investigation, a waiting one its

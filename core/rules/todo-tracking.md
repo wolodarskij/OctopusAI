@@ -226,7 +226,7 @@ FINISHED`. It runs `report <id> blocked` with the cause, and it waits. The engin
   moves back stays there. A session whose Claude still runs and that did not write
   `WORK IS FINISHED` did not end, also when the judge calls it `finished`: its ticket stays
   where it is.
-- The manager's update lists that agent under Other as `blocked`, never under Finished.
+- The manager's update lists that agent under Blocked, never under Finished.
 
 **A launched session that meets a blocker:**
 
@@ -707,9 +707,9 @@ the owner. It grants `projects`, so the session reaches every registered project
   project write in the Octopus AI project from then on, so the watchdog guards it and the
   board starts no second manager. While a manager runs in any registered project, the claim
   names it and refuses; `--take-over` closes it first.
-- **Every update of the manager lists agents, not tickets,** in four sections, always all four
+- **Every update of the manager lists agents, not tickets,** in five sections, always all five
   and in this order, an empty one as `none`: Finished since the last update, Waiting for your
-  input, Working, Other. `octopus sessions --since-last` builds it from every registered
+  input, Working, Blocked, Other. `octopus sessions --since-last` builds it from every registered
   project, against a snapshot it keeps outside every repository. An agent is a session of a
   ticket: a session with no ticket, such as a codebase chat, is not in it. Each agent is one
   line, and the manager copies it and never summarizes a ticket: a finished agent is `<project> <id>
@@ -717,9 +717,11 @@ the owner. It grants `projects`, so the session reaches every registered project
   question word for word, a working one `<project> <id> "<title>" — <what it does now, at most
   10 words>`. A finished agent whose ticket's order asks a question or an investigation
   carries its answer: the lines of the ticket's `## Result`, one sub-line each, under its
-  line. An agent whose session ended while its ticket does not show its work done stands
-  under Other as `blocked`, never under Finished; one whose ticket the owner paused stands
-  under Other as `paused`. **Waiting for your input lists only an
+  line. **Blocked lists every agent whose ticket waits on another ticket or is blocked by an
+  outside cause,** and that does not wait for the owner: a session in the state `blocker`, a
+  ticket in Blocked as `blocked by other task` or `blocked by outside cause`, and a session
+  that ended while its ticket does not show its work done, never under Finished. Other lists
+  the rest: an event, idle, stuck, and an agent whose ticket the owner paused, as `paused`. **Waiting for your input lists only an
   agent whose session is open and in the `input` state.** A finished, closed or idle agent never stands there, and nor does a decision
   that a finished ticket's result names: that agent stands only under Finished. The reply check
   fails a Waiting line about any other agent.

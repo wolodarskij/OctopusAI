@@ -70,7 +70,7 @@ class IfAny(FixtureCase):
         self.assertIn("**Working**", self.report([sess(SID_A, self.a, None, doing="Bash: one")]))
         out = self.report([sess(SID_A, self.a, None, doing="Bash: one")])
         for heading in ("Finished since the last update", "Waiting for your input",
-                        "Working", "Other"):
+                        "Working", "Blocked", "Other"):
             self.assertIn("**%s**" % heading, out)
         self.assertIn(self.a, out)
 
