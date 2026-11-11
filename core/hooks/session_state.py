@@ -2170,10 +2170,27 @@ def owning_claude(procs=None):
     return 0
 
 
+def _chat(session_id):
+    """The record of the codebase chat `session_id` (`chats.py`), or None."""
+    try:
+        import chats
+        return chats.get(session_id)
+    except Exception:                                   # noqa: BLE001 - a hook never raises
+        return None
+
+
 def session_title(session_id, shell=0):
     """`<title> - <ticket> - <short ticket title> - <mode>` for a session the Agent Board launched, read
     off the `--remote-control` (or `--name`) name on its shell's command line. Any other session is named
-    by the first block of its id, which `claude --resume` completes."""
+    by the first block of its id, which `claude --resume` completes. A codebase chat is named
+    by its chat title (`chats.title`): its first question."""
+    chat = _chat(session_id)
+    if chat is not None:
+        try:
+            import chats
+            return chats.title(chat)
+        except Exception:                               # noqa: BLE001 - a hook never raises
+            pass
     if shell:
         try:
             import winproc
@@ -2530,8 +2547,9 @@ def _hook(payload, started=None):
             # `background_tasks` is not in the hook documentation. Claude Code 2.1.287 sends
             # it: the subagents and background shells that still run when the turn ends.
             mark_tasks(sid, shell, running_tasks(payload.get("background_tasks")))
-            # Haiku reads only what no rule above could read.
-            if judge_it:
+            # Haiku reads only what no rule above could read. A chat waits for the owner's
+            # next question: nothing is judged.
+            if judge_it and _chat(sid) is None:
                 try:
                     import project
                     start_judge(sid, shell, text, project.current().ROOT)

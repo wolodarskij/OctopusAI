@@ -25,8 +25,8 @@ order (its title, its first section and its `## Owner's orders`) asks a question
 investigation (`asks_answer`) carries the lines of the ticket's last `## Result` section, one
 sub-line each, under its line (`answer_lines`). THE RENDERS: a finished agent whose ticket is
 visual work on textures, 3D meshes or materials (`todo.visual_work`) carries one
-`render: <path>` sub-line per render file that its `## Result` names (`render_lines`). A session with no ticket is
-`<project> <session> (<mode>)`. Waiting for your input holds only an open session whose agent
+`render: <path>` sub-line per render file that its `## Result` names (`render_lines`). A session with no
+ticket, such as a chat or a session the owner opened, is no agent of the update. Waiting for your input holds only an open session whose agent
 runs and whose state is `input`; a finished or closed one is under Finished, whatever its
 ticket's result names for the owner, or under Other as blocked when its ticket's order is not
 carried out to the end. Every open session the engine calls `input` is there,
@@ -288,8 +288,8 @@ def classify(T, s, t):
 
 
 def agent_cell(r):
-    """`<project> <id> "<title>"`, or `<project> <session> (<mode>)` for a session with no
-    ticket."""
+    """`<project> <id> "<title>"`, or `<project> <session> (<mode>)` for a row with no
+    ticket: a project whose sessions cannot be read."""
     if r.get("id"):
         return '%s %s "%s"' % (r["project"], r["id"], " ".join(str(r.get("title") or "").split()))
     return "%s %s (%s)" % (r["project"], (r.get("session") or "")[:8] or "-",
@@ -362,7 +362,9 @@ def collect(since_last=False, registry=None):
             sessions = T.live_sessions(tickets)
             for s in sessions:
                 t = by_id.get(s.get("id"))
-                if (t is not None and t.repeat == T.MANAGER) or T._is_own_session(s):
+                # The update lists the agents of tickets: a session with no ticket, such as
+                # a chat or a session the owner opened, is the owner's own.
+                if t is None or t.repeat == T.MANAGER or T._is_own_session(s):
                     continue
                 here.append(_row(name, T, s, t))
             seen = {x["key"] for x in here}
@@ -374,8 +376,9 @@ def collect(since_last=False, registry=None):
                         # A copy of a launched session that ran under an id of its own: its
                         # launch prompt names its ticket, which records it now.
                         t, mode = T.link_launch(e["session"], tickets)
-                        if t is not None:
-                            e = dict(e, id=t.id, mode=mode, title=t.title)
+                        if t is None:
+                            continue
+                        e = dict(e, id=t.id, mode=mode, title=t.title)
                     rows.append(dict(_gone_row(name, T, e, t), launched=next(
                         (x["launched"] for x in (t.sessions if t else ())
                          if x["session"] == e["session"]), "")))

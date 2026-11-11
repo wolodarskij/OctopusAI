@@ -195,6 +195,11 @@ def snapshot():
         sessions = _public(T.live_sessions(objs))
     except Exception:                                   # a board without terminals still draws
         sessions = []
+    try:
+        import chats
+        chat_rows = chats.listing({s["session"] for s in sessions})
+    except Exception:                                   # noqa: BLE001 - the board still draws
+        chat_rows = []
     return {
         "project": {"name": _current_name(), "slug": P.slug, "title": P.title,
                     "path": str(P.ROOT), "todoDir": P.todo_dir,
@@ -203,6 +208,7 @@ def snapshot():
                     "problems": list(P.problems)},
         "tickets": tickets,
         "sessions": sessions,
+        "chats": chat_rows,
         "epics": epics,
         "groups": groups,
         "groupItems": items,
@@ -1674,24 +1680,41 @@ def act_edit(body):
 
 
 def act_chat(body):
-    """Open a read-only codebase chat with the project's selected provider."""
-    import uuid
+    """Open a read-only codebase chat with the project's selected provider, or with `session`
+    the recorded chat of that id again, with its history (`T.open_chat`)."""
     provider = body.get("provider") or P.provider
     model, effort = _model_effort(body, provider)
-    sid = str(uuid.uuid4())
-    argv = T.chat_argv(model, effort, sid, provider)
-    if not body.get("dryRun"):
-        title = "%s - chat" % P.title
-        terminal = body.get("terminal") or P.terminal
-        if terminal not in project.TERMINALS:
-            terminal = P.terminal
-        rc, error = _run(lambda _a: T._open_terminal(T._shell_line(
-            argv, title, providers.launch_env(provider)), title,
-                                                     terminal), None)
-        if rc:
-            raise ValueError(error or "the chat did not start")
-    return {"session": sid, "provider": provider, "argv": argv,
-            "command": " ".join(argv), "noSnapshot": True}
+    terminal = body.get("terminal") or P.terminal
+    if terminal not in project.TERMINALS:
+        terminal = P.terminal
+    resume = body.get("session") or None
+    import contextlib
+    import io
+    err = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(err):
+            sid, argv, name = T.open_chat(model, effort, None if resume else provider,
+                                          terminal, resume=resume,
+                                          dry_run=bool(body.get("dryRun")))
+    except ValueError as exc:
+        lines = [x for x in err.getvalue().strip().splitlines() if x.strip()]
+        raise ValueError(lines[-1] if lines and str(exc) == "the chat did not start"
+                         else str(exc))
+    return {"session": sid, "title": name, "provider": provider, "argv": argv,
+            "resumed": bool(resume), "command": " ".join(argv), "noSnapshot": True}
+
+
+def act_chatForget(body):
+    """Drop a chat from the project's chat record. Its terminal, when open, closes first."""
+    import chats
+    c = T.find_chat(body.get("session") or "")
+    if c is None:
+        raise KeyError(body.get("session") or "")
+    s = T.find_session(c["session"], "chat")
+    if s is not None:
+        T.close_session(s, force=bool(body.get("force")))
+    chats.forget(c["session"])
+    return {"forgot": c["session"]}
 
 
 def act_board(body):
@@ -2356,7 +2379,7 @@ ACTIONS = {"move": act_move, "field": act_field, "launch": act_launch, "open": a
            "repeat": act_repeat, "screen": act_screen, "send": act_send, "log": act_log,
            "allSessions": act_allSessions, "reevaluate": act_reevaluate, "lanes": act_lanes,
            "addProject": act_addProject, "suggestPacks": act_suggestPacks, "pickFolder": act_pickFolder, "ticket": act_ticket, "edit": act_edit,
-           "chat": act_chat, "groupDraft": act_groupDraft, "groupApply": act_groupApply,
+           "chat": act_chat, "chatForget": act_chatForget, "groupDraft": act_groupDraft, "groupApply": act_groupApply,
            "groupDescription": act_groupDescription,
            "project": act_project, "removeProject": act_removeProject, "vcs": act_vcs,
            "remoteControl": act_remoteControl, "providers": act_providers, "packs": act_packs,

@@ -2127,7 +2127,7 @@ function sessionView(b, shown) {
 /* The card of a session of another project: its ticket and mode, or its goal, with Focus
    and Stop acting on that project. */
 function otherCard(proj, s) {
-  const id = s.id || s.session, mode = s.id ? s.mode : "cli";
+  const id = s.id || s.session, mode = s.id ? s.mode : (s.mode || "cli");
   const c = el("article", "card cli");
   c.title = `${proj}${BR}${s.title || ""}${BR}${s.session}`;
   const head = s.id ? `${s.id} · ${s.mode}` + (s.goal || s.title ? " · " + (s.goal || s.title) : "")
@@ -2135,7 +2135,7 @@ function otherCard(proj, s) {
   c.append(el("div", "t", head));
   const m = el("div", "m");
   m.append(el("span", "id", String(s.session || "").slice(0, 8)),
-           el("span", "pill cli", s.id ? s.mode : "cli"));
+           el("span", "pill cli", s.id ? s.mode : (s.mode || "cli")));
   const sp = el("span", "sp");
   const d = el("span", "dot " + waitOf(s));
   d.title = stateTip(s);
@@ -2180,7 +2180,7 @@ function sessionViewHere(b, shown) {
     if (!mine.length) continue;
     (mine.some(s => s.running) ? run : idle).push(t);
   }
-  const hand = live.filter(x => !x.id && sessShown(x)).sort((a, b) => (b.running - a.running) || ((a.created || 0) - (b.created || 0)));
+  const hand = live.filter(x => !x.id && !x.chat && sessShown(x)).sort((a, b) => (b.running - a.running) || ((a.created || 0) - (b.created || 0)));
   const rows = [...run.sort(byOrder), ...idle.sort(byOrder), ...hand];
   b.append(sessionLane(OTHERS === "shown" && ALLSESS.length
       ? (DATA.project || {}).name || "Active" : "Active",
@@ -2188,6 +2188,86 @@ function sessionViewHere(b, shown) {
     "Every terminal a Claude session of this project has open. Close finished closes the finished"
     + " ones only: a session that waits for input, for an event, for a subagent or for a"
     + " blocker, or is idle, stays open."));
+  b.append(chatLane());
+}
+
+/* ── the codebase chats of this project: one card per chat, open or closed ── */
+function chatLane() {
+  const rows = DATA.chats || [];
+  const lane = el("section", "lane grp");
+  lane.style.setProperty("--tone", "#8fa8cc");
+  const lh = el("div", "lh"), r1 = el("div", "r1");
+  r1.append(el("span", "nm", "Chats"), el("span", "n num", String(rows.length)));
+  lh.append(r1);
+  const open = rows.filter(c => c.live).length;
+  lh.append(el("div", "sub", `${open} open · ${rows.length - open} closed`));
+  lh.title = "The read-only codebase chats of this project. A chat keeps its history:"
+    + " Resume opens a closed chat again. Chat with codebase starts a new one.";
+  lane.append(lh);
+  const stack = el("div", "stack");
+  sizeColumn(lane, "sessions:chats");
+  stack.dataset.s = "s:chats";
+  for (const c of rows) stack.append(chatCard(c));
+  if (!rows.length) stack.append(el("div", "none", "no chat"));
+  lane.append(stack);
+  return lane;
+}
+
+function chatCard(c) {
+  const s = (DATA.sessions || []).find(x => x.session === c.session);
+  const card = el("article", "card cli");
+  card.dataset.session = c.session;
+  card.title = `${c.title}${BR}${c.session}${BR}` + (s ? "open"
+    : c.history ? "closed · Resume opens it again, with its history" : "closed");
+  card.append(el("div", "t", c.title));
+  const m = el("div", "m");
+  m.append(el("span", "id", c.session.slice(0, 8)), el("span", "pill cli", "chat"));
+  const sp = el("span", "sp");
+  if (s) {
+    const d = el("span", "dot " + waitOf(s));
+    d.title = stateTip(s) + BR + "click to bring the terminal forward";
+    d.addEventListener("click", e => { e.stopPropagation(); focusSession(c.session, "chat"); });
+    sp.append(d, ...waitPills([s], () => focusSession(c.session, "chat")));
+  } else {
+    sp.append(el("span", "pill", "closed"));
+  }
+  m.append(sp);
+  card.append(m);
+  const act = el("div", "act");
+  const button = (label, tip, run, cls) => {
+    const x = el("button", cls || null, label);
+    x.title = tip;
+    x.addEventListener("click", e => { e.stopPropagation(); run(); });
+    act.append(x);
+  };
+  if (s) {
+    button("Focus", "bring the terminal forward", () => focusSession(c.session, "chat"));
+    button("Close", s.running ? "close this chat; asks first" : "close this chat: its history stays",
+           () => closeSession(c.session, "chat", s), "danger");
+  } else if (c.history) {
+    button("Resume", "open this chat again, with its history", () => resumeChat(c));
+  }
+  button("Forget", "take this chat off the list; its transcript stays", () => forgetChat(c, s));
+  card.append(act);
+  return card;
+}
+
+async function resumeChat(c) {
+  try {
+    const r = await api("/api/chat", {session: c.session});
+    toast(`chat resumed · ${r.title}`);
+  } catch (e) { toast(String(e.message || e), true); }
+}
+
+async function forgetChat(c, s) {
+  if (!confirm(`Take the chat "${c.title}" off the list?` + BR + BR
+               + (s ? "Its terminal closes. " : "") + "Its transcript stays, but the board"
+               + " no longer offers to resume it.")) return;
+  try {
+    const r = await api("/api/chatForget", {session: c.session, force: !!(s && s.running)});
+    DATA = r.snapshot; render();
+    toast(`chat ${c.session.slice(0, 8)} forgotten`);
+  } catch (e) { toast(String(e.message || e), true); }
 }
 
 const isSession = row => !row.id && "session" in row;
@@ -2222,7 +2302,7 @@ function cliCard(s) {
   c.title = `${s.title}${BR}${s.session}${BR}right-click for focus and close`;
   c.append(el("div", "t", s.goal || s.title));
   const m = el("div", "m");
-  m.append(el("span", "id", s.session.slice(0, 8)), el("span", "pill cli", "cli"));
+  m.append(el("span", "id", s.session.slice(0, 8)), el("span", "pill cli", s.mode || "cli"));
   const sp = el("span", "sp");
   const d = el("span", "dot " + waitOf(s));
   d.title = `${stateTip(s)} · shell ${s.shell || "-"} · claude ${s.claude || "-"}`
@@ -3017,7 +3097,7 @@ async function submitTask() {
 async function startChat() {
   try {
     const r = await api("/api/chat", {});
-    toast(`chat opened · read-only · session ${r.session}`);
+    toast(`chat opened · read-only · ${r.title} · it stands in the Chats lane of the Sessions view`);
   } catch (e) { toast(String(e.message || e), true); }
 }
 
@@ -3152,11 +3232,13 @@ async function moveEpic(epic, state) {
 /* True when `proj` names the project the page shows: a call on another project carries a
    snapshot of that project, which the page must not draw. */
 const isHere = proj => proj == null || proj === PROJECT;
-/* The live session a click names: a ticket id and a mode, or a session id and `cli`, in
-   this project or in the other project `proj` names. */
+/* A mode whose sessions a session id names: a session with no ticket, or a chat. */
+const bySession = mode => mode === "cli" || mode === "chat";
+/* The live session a click names: a ticket id and a mode, or a session id and `cli` or
+   `chat`, in this project or in the other project `proj` names. */
 const liveOf = (id, mode, proj) => (isHere(proj) ? (DATA.sessions || [])
   : ((ALLSESS.find(p => p.name === proj) || {}).sessions || [])).find(s =>
-  mode === "cli" ? s.session === id : (s.id === id && s.mode === mode));
+  bySession(mode) ? s.session === id : (s.id === id && s.mode === mode));
 /* A click on a session: raise its window, or show its screen on the page. The window of an
    own pseudoconsole is the viewer that the server opens on the owner's desktop. */
 function focusSession(id, mode) {
@@ -3180,7 +3262,7 @@ function openTerminal(id, mode, proj) {
           queue: [], sending: false, fastUntil: 0, lastPoll: 0, drawn: ""};
   const s = liveOf(id, mode, proj);
   $("#tKey").textContent = (other ? other + " · " : "")
-    + (mode === "cli" ? id.slice(0, 8) : `${id} · ${mode}`);
+    + (bySession(mode) ? id.slice(0, 8) : `${id} · ${mode}`);
   $("#tTitle").textContent = s ? (s.goal || s.title || "") : "";
   $("#tOwn").textContent = s && s.own ? "own pseudoconsole" : "";
   $("#tLog").style.display = s && s.own ? "" : "none";
@@ -3392,12 +3474,15 @@ function closeSession(id, mode, s, proj) {
   const why = s && s.why ? ` (${s.why})` : "";
   const other = isHere(proj) ? undefined : proj;
   stopping = {id, mode, running, proj: other};
-  const who = (mode === "cli" ? `the session ${id.slice(0, 8)}` : `the ${mode} agent on ${id}`)
+  const who = (mode === "chat" ? `the chat ${s && s.title ? s.title : id.slice(0, 8)}`
+               : mode === "cli" ? `the session ${id.slice(0, 8)}` : `the ${mode} agent on ${id}`)
     + (other ? ` of ${other}` : "");
-  $("#sdlgT").textContent = "Stop  ·  " + (other ? other + " · " : "")
-    + (mode === "cli" ? id.slice(0, 8) : `${id} · ${mode}`);
+  $("#sdlgT").textContent = (mode === "chat" ? "Close  ·  " : "Stop  ·  ") + (other ? other + " · " : "")
+    + (bySession(mode) ? id.slice(0, 8) : `${id} · ${mode}`);
   $("#sdlgP").textContent = `Are you sure? This ends ${who} and closes its terminal.`
-    + BR + BR + (running ? "Claude is still working in it. Stopping it loses whatever it has not written to disk."
+    + BR + BR + (mode === "chat" && !running
+      ? "The chat keeps its history: Resume on its card in the Chats lane opens it again."
+      : running ? "Claude is still working in it. Stopping it loses whatever it has not written to disk."
       : w === "input" ? `It waits for your answer${why}. Read its question first:`
                         + " claude --resume brings the session back, but not the open terminal."
       : w === "event" ? `It ${s.why || "waits for an outside event"}. Stopping it loses the`

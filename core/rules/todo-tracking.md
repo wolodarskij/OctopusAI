@@ -710,8 +710,9 @@ the owner. It grants `projects`, so the session reaches every registered project
 - **Every update of the manager lists agents, not tickets,** in four sections, always all four
   and in this order, an empty one as `none`: Finished since the last update, Waiting for your
   input, Working, Other. `octopus sessions --since-last` builds it from every registered
-  project, against a snapshot it keeps outside every repository. Each agent is one line, and
-  the manager copies it and never summarizes a ticket: a finished agent is `<project> <id>
+  project, against a snapshot it keeps outside every repository. An agent is a session of a
+  ticket: a session with no ticket, such as a codebase chat, is not in it. Each agent is one
+  line, and the manager copies it and never summarizes a ticket: a finished agent is `<project> <id>
   "<title>" — <outcome>; <lane> / <status>; <commit> pushed|not pushed`, a waiting one its
   question word for word, a working one `<project> <id> "<title>" — <what it does now, at most
   10 words>`. A finished agent whose ticket's order asks a question or an investigation

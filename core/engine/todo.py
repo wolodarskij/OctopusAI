@@ -5334,8 +5334,10 @@ NO_NARRATION_PROMPT = _agents.NO_NARRATION.replace("**", "").replace('"', "'")
 CHAT_DENIED = ("Write", "Edit", "NotebookEdit", "Bash", "PowerShell", "ExitPlanMode")
 
 
-def chat_argv(model=None, effort=None, sid=None, provider=None):
-    """The command line of a read-only session that answers questions about this codebase."""
+def chat_argv(model=None, effort=None, sid=None, provider=None, name=None, resume=False):
+    """The command line of a read-only session that answers questions about this codebase.
+    A Claude chat carries its title as `--name`, and `resume` opens the chat `sid` again
+    from its transcript."""
     import uuid
     note = ("You answer the owner's questions about the %s codebase. Read and search as "
             "much as the answer needs. You cannot change any file, and you do not offer "
@@ -5346,13 +5348,16 @@ def chat_argv(model=None, effort=None, sid=None, provider=None):
     argv = [_providers.launch_command(P.providers[provider]["command"])] + _providers.fill(
         prov["args"], root=str(P.ROOT))
     if prov["dialect"] == "codex":
+        if resume:
+            raise ValueError("a Codex chat cannot be resumed")
         return argv + ["--no-daemon", "--sandbox", "read-only"] + _providers.approval_argv(prov) + (
             ["--model", model] if model else []) + (
             ["-c", "model_reasoning_effort=%s" % effort] if effort else []) + [note]
     if prov["dialect"] != "claude":
         raise ValueError("Codebase chat supports Claude Code and Codex")
     dirs = P.extra_dirs()
-    return argv + ["--session-id", sid or str(uuid.uuid4()),
+    return argv + ["--resume" if resume else "--session-id", sid or str(uuid.uuid4())] + (
+            ["--name", name] if name else []) + [
             "--permission-mode", "plan",
             "--disallowedTools", " ".join(CHAT_DENIED)] + (
             ["--add-dir"] + dirs if dirs else []) + [
@@ -5360,27 +5365,96 @@ def chat_argv(model=None, effort=None, sid=None, provider=None):
             ["--effort", effort] if effort else [])
 
 
-def cmd_chat(args):
-    """Open a terminal with a read-only session on the selected provider."""
+def find_chat(ident):
+    """The recorded chat that `ident` names: its session id, or eight or more of its first
+    characters. None when no chat or more than one matches."""
+    import chats
+    want = (ident or "").strip().lower()
+    hits = [c for c in chats.load() if c["session"] == want
+            or (len(want) >= 8 and c["session"].startswith(want))]
+    return hits[0] if len(hits) == 1 else None
+
+
+def open_chat(model=None, effort=None, provider=None, terminal=None, resume=None,
+              dry_run=False):
+    """Open a new codebase chat, or with `resume` the recorded chat it names again, in a
+    terminal of its own. A Claude chat goes into the chat record (`chats.py`), so it can be
+    resumed and the board shows it once. Returns `(session id, argv, title)`; raises
+    `ValueError` when it cannot start, with the cause."""
+    import time
     import uuid
-    sid = str(uuid.uuid4())
+    import chats
+    if resume:
+        c = find_chat(resume)
+        if c is None:
+            raise ValueError("no chat %r in this project" % resume)
+        if not chats.has_history(c["session"]):
+            raise ValueError("the chat %s has no history to resume: nobody asked it anything"
+                             % c["session"][:8])
+        live = [s for s in live_sessions() if s["session"] == c["session"]]
+        if live:
+            raise ValueError("the chat %s is open: bring its terminal forward" % c["session"][:8])
+        sid, provider = c["session"], c.get("provider") or "claude"
+        model, effort = model or c.get("model") or None, effort or c.get("effort") or None
+    else:
+        sid, c = str(uuid.uuid4()), None
+        provider = provider or P.provider
+    entry = c or {"session": sid, "created": time.time(), "question": ""}
+    name = chats.title(entry) if c else chats.title(entry, entries=[])
+    argv = chat_argv(model, effort, sid, provider, name=name, resume=bool(resume))
+    if dry_run or terminal == "none":
+        return sid, argv, name
+    claude = _providers.get(provider)["dialect"] == "claude"
+    if resume:
+        chats.opened(sid)
+    elif claude:
+        chats.add(sid, provider, model, effort, now=entry["created"])
+    if _open_terminal(_shell_line(argv, name, _providers.launch_env(provider)), name,
+                      terminal or P.terminal) != 0:
+        if claude and not resume:
+            chats.forget(sid)
+        raise ValueError("the chat did not start")
+    return sid, argv, name
+
+
+def cmd_chat(args):
+    """Open a terminal with a read-only session on the selected provider, list the chats, or
+    open a recorded chat again."""
+    if getattr(args, "list", False):
+        import chats
+        live = {s["session"] for s in live_sessions()}
+        rows = chats.listing(live)
+        if not rows:
+            print("no chat")
+        for c in rows:
+            print("%s  %-6s  %s" % (c["session"][:8],
+                                    "open" if c["live"] else "closed", c["title"]))
+        return 0
+    if getattr(args, "forget", None):
+        import chats
+        c = find_chat(args.forget)
+        if c is None or not chats.forget(c["session"]):
+            print("Error: no chat %r in this project" % args.forget, file=sys.stderr)
+            return 2
+        print("FORGOT  chat %s" % c["session"][:8])
+        return 0
     provider = getattr(args, "provider", None) or P.provider
     try:
-        argv = chat_argv(args.model, args.effort, sid, provider)
-    except ValueError as exc:
+        sid, argv, name = open_chat(args.model, args.effort, provider,
+                                    "none" if args.dry_run else args.terminal,
+                                    resume=getattr(args, "resume", None))
+    except (ValueError, KeyError) as exc:
         print("Error: %s" % exc, file=sys.stderr)
         return 2
     if args.dry_run or args.terminal == "none":
         print(" ".join(('"%s"' % a) if " " in a else a for a in argv))
         return 0
-    title = "%s - chat" % P.title
-    if _open_terminal(_shell_line(argv, title, _providers.launch_env(provider)), title,
-                      args.terminal or P.terminal) != 0:
-        return 2
-    print("CHAT  launched in a new terminal")
+    print("CHAT  %s in a new terminal" % ("resumed" if getattr(args, "resume", None)
+                                          else "launched"))
+    print("  title   %s" % name)
     print("  session %s" % sid)
-    if provider == "claude":
-        print("  resume  claude --resume %s" % sid)
+    if provider == "claude" or getattr(args, "resume", None):
+        print("  resume  %s chat --resume %s" % (P.cli, sid[:8]))
     return 0
 
 
@@ -5583,6 +5657,7 @@ def live_sessions(tickets=None, recheck=False):
 
     A session the board did not launch comes from the live record the hooks write. It
     carries `id` None, `mode` `cli`, the window `title` and the `goal` from `SESSIONS.md`.
+    A codebase chat (`chats.py`) carries `mode` `chat`, `chat` True and its chat title.
 
     Each entry also carries `wait` and `why` from `wait_state`: `None` while its turn runs,
     else `input`, `event`, `subagent`, `blocker`, `idle` or `finished`; `running` is
@@ -5767,6 +5842,12 @@ def live_sessions(tickets=None, recheck=False):
     except Exception:                                   # noqa: BLE001 - the scan goes on
         gone = set()
     goals = session_goals()
+    try:
+        import chats
+        chat_list = chats.load()
+    except Exception:                                   # noqa: BLE001 - the scan goes on
+        chats, chat_list = None, []
+    chat_of = {c["session"]: c for c in chat_list}
     hand = []
     for sid, rec in records.items():
         if sid in known:
@@ -5783,9 +5864,17 @@ def live_sessions(tickets=None, recheck=False):
         # A session the owner opened that a ticket records as its own (`manager --claim`)
         # is that ticket's session: the watchdog and the board see it like a launched one.
         tid = ids.get(sid)
+        # A codebase chat (`chats.py`) is named by its chat title.
+        chat = chat_of.get(sid) if not tid else None
+        if chat is not None:
+            try:
+                chat_title = chats.title(chat, chat_list)
+            except Exception:                           # noqa: BLE001 - the scan goes on
+                chat_title = ""
         (found if tid else hand).append({
             "id": tid,
-            "mode": modes.get(sid, "work") if tid else "cli",
+            "mode": modes.get(sid, "work") if tid else "chat" if chat is not None else "cli",
+            "chat": chat is not None,
             "session": sid,
             "shell": shell,
             "claude": claude,
@@ -5798,8 +5887,9 @@ def live_sessions(tickets=None, recheck=False):
             "own": bool(shell) and shell in ptys,
             "pty": ptys.get(shell) if shell else None,
             "terminal": rec.get("terminal") or None,
-            "title": rec.get("title") or "%s - %s" % (P.title, sid[:8]),
-            "goal": " - ".join(x for x in (agent, goal) if x),
+            "title": (chat is not None and chat_title) or rec.get("title")
+            or "%s - %s" % (P.title, sid[:8]),
+            "goal": "" if chat is not None else " - ".join(x for x in (agent, goal) if x),
             "mark_shell": rec.get("shell") or 0,
             "starting": False,
             "cwd": rec.get("cwd") or "",
@@ -5955,7 +6045,8 @@ def reap_shells(s, procs, finished=False, now=None):
 def _judge_needed(s):
     """Whether no rule before the judge decides the session (`wait_state` steps 0 to 3), so
     the judge has to read it."""
-    return not (s.get("dialog") or s.get("error") or s.get("asks") or s.get("says_finished")
+    return not (s.get("chat") or s.get("dialog") or s.get("error") or s.get("asks")
+                or s.get("says_finished")
                 or s.get("reported") in ("input", "event", "finished")
                 or s.get("jobs") or s.get("tasks"))
 
@@ -6033,6 +6124,9 @@ def read_turn(s, recheck=False, now=None):
         _read_marks(s)
         marker = s.get("idle_since")
     s["ended"] = not s.get("claude") or bool(marker and not s["dialog"])
+    # The transcript's word that the last turn ended, before any marker says so: a resumed
+    # chat waits for the owner's question at once.
+    s["transcript_ended"] = bool(act and act["ended"])
     s["updated"] = act["when"] if act else marker
     s["doing"] = act["doing"] if act else ""
     s["doing_since"] = act["since"] if act else 0
@@ -6251,6 +6345,7 @@ def wait_state(s, t, now=None):
            a dialog stops the turn: a permission, an
              AskUserQuestion, a plan to approve            input
            the turn ended in an API error (`StopFailure`)  input
+           a codebase chat whose turn does not run        input (no judge reads a chat)
            the turn ended, and its last line is `WORK IS
              FINISHED`: no other signal is read            finished (a manager: idle)
            the session reported `event`                    event
@@ -6306,6 +6401,11 @@ def wait_state(s, t, now=None):
         return "input", "its turn ended in an API error%s (%s): try again" % (
             time.strftime(" at %Y-%m-%d %H:%M", time.localtime(since)) if since else "",
             s["error"])
+    if s.get("chat"):
+        # A codebase chat waits for the owner's next question whenever its turn does not run.
+        if s.get("ended") or s.get("transcript_ended") or not s.get("updated"):
+            return "input", "the chat waits for the owner's question"
+        return None, ""
     import session_state
     manager = t is not None and t.repeat == MANAGER
     ended = bool(s.get("ended"))
@@ -8299,6 +8399,13 @@ def _main(argv):
     p.add_argument("--effort", help="one of `efforts`; absent is the project's default")
     p.add_argument("--terminal", default=None, choices=["own", "wt", "cmd", "none"])
     p.add_argument("--dry-run", action="store_true")
+    g = p.add_mutually_exclusive_group()
+    g.add_argument("--resume", metavar="SESSION",
+                   help="open the recorded chat with this session id (8 or more characters) "
+                        "again, with its history")
+    g.add_argument("--list", action="store_true", help="the chats of this project")
+    g.add_argument("--forget", metavar="SESSION",
+                   help="drop the chat from the record; its transcript stays")
     p.set_defaults(fn=cmd_chat)
 
     p = sub.add_parser("migrate", help="rewrite what an older engine left: `kind` becomes "
@@ -8604,20 +8711,20 @@ def _main(argv):
 
     p = sub.add_parser("focus", help="bring a session's terminal to the front")
     p.add_argument("id", help="a ticket id, or the first 8+ characters of a session id")
-    p.add_argument("--mode", choices=list(MODES) + ["cli"])
+    p.add_argument("--mode", choices=list(MODES) + ["cli", "chat"])
     p.set_defaults(fn=cmd_focus)
 
     p = sub.add_parser("screen", help="print the screen of a session's terminal; Claude "
                        "Code's suggested prompt in the input box shows as "
                        "'[suggestion, not typed]'")
     p.add_argument("id", help="a ticket id, or the first 8+ characters of a session id")
-    p.add_argument("--mode", choices=list(MODES) + ["cli"])
+    p.add_argument("--mode", choices=list(MODES) + ["cli", "chat"])
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_screen)
 
     p = sub.add_parser("send", help="type text and keys into a session's terminal")
     p.add_argument("id", help="a ticket id, or the first 8+ characters of a session id")
-    p.add_argument("--mode", choices=list(MODES) + ["cli"])
+    p.add_argument("--mode", choices=list(MODES) + ["cli", "chat"])
     p.add_argument("--text", default="", help="characters to type")
     p.add_argument("--keys", default="",
                    help="comma-separated key names after the text: Enter, Esc, Tab, "
@@ -8629,7 +8736,7 @@ def _main(argv):
 
     p = sub.add_parser("close", help="close a session's terminal")
     p.add_argument("id", nargs="?", help="a ticket id, or the first 8+ characters of a session id")
-    p.add_argument("--mode", choices=list(MODES) + ["cli"])
+    p.add_argument("--mode", choices=list(MODES) + ["cli", "chat"])
     p.add_argument("--finished", action="store_true",
                    help="close every terminal whose session is finished: its Claude has "
                         "exited, or its ticket left the lane it was launched on and it "
