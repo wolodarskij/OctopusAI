@@ -400,6 +400,42 @@ class Wake(FixtureCase):
         self.assertFalse(self.send.called)
         self.assertTrue(T.manager_brief_stale(t))
 
+    def test_a_lone_character_that_stands_unchanged_is_deleted_and_the_check_typed(self):
+        todo_server._wake_project(self.root, 1e9)
+        self.screen = box("#")
+        self.assertEqual(todo_server._wake_project(self.root, 1e9 + 30), [])
+
+        def send(s, text, keys):
+            if keys == ["Backspace"]:
+                self.screen = box()
+        self.send.side_effect = send
+        self.assertEqual(len(todo_server._wake_project(self.root, 1e9 + C.INTERVAL)), 1)
+        self.assertEqual([c[0][1:] for c in self.send.call_args_list],
+                         [("", ["Backspace"]), ("/manager-check", ["Enter"])])
+
+    def test_a_lone_character_that_just_came_is_typing(self):
+        todo_server._wake_project(self.root, 1e9)
+        self.screen = box("D")
+        self.assertEqual(todo_server._wake_project(self.root, 1e9 + C.INTERVAL), [])
+        self.screen = box("Do")
+        self.assertEqual(todo_server._wake_project(self.root, 1e9 + C.INTERVAL + 90), [])
+        self.assertFalse(self.send.called)
+
+    def test_a_lone_character_with_the_cursor_elsewhere_is_typing(self):
+        todo_server._wake_project(self.root, 1e9)
+        self.screen = box("#", cursor=[5, 2])
+        todo_server._wake_project(self.root, 1e9 + 30)
+        self.assertEqual(todo_server._wake_project(self.root, 1e9 + C.INTERVAL), [])
+        self.assertFalse(self.send.called)
+
+    def test_a_stray_character_that_stays_after_the_delete_holds_the_check(self):
+        todo_server._wake_project(self.root, 1e9)
+        self.screen = box("#")
+        todo_server._wake_project(self.root, 1e9 + 30)
+        with mock.patch.object(C, "STRAY_CLEAR", 0):
+            self.assertEqual(todo_server._wake_project(self.root, 1e9 + C.INTERVAL), [])
+        self.assertEqual([c[0][1:] for c in self.send.call_args_list], [("", ["Backspace"])])
+
     def test_a_claude_screen_with_no_input_box_holds_the_check(self):
         todo_server._wake_project(self.root, 1e9)
         self.screen = {"cols": 80, "rows": 1, "cursor": [0, 0], "lines": ["output"],

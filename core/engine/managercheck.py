@@ -60,6 +60,10 @@ import project  # noqa: E402
 INTERVAL = 600
 BOARD_STALE = 2 * INTERVAL
 WATCH_POLL = 60
+# Seconds a lone character must stand unchanged in a manager's input box before the wake
+# takes it for a stray one, and how long the wake waits for the box to clear after it.
+STRAY_AFTER = 60
+STRAY_CLEAR = 2.0
 STATE_FILE = "manager-watch.json"
 FOLLOWUPS = "Follow-ups"
 _TICKET = re.compile(r"\bT\d{4,}\b")
@@ -138,18 +142,22 @@ def wake_home(now, note=None, mark=False):
             note(now, managers, "the manager waits for your answer")
             continue
         # Text typed into a box that holds the owner's unsent message cuts into it. The
-        # session waits, unclaimed, and the next tick reads the box again.
+        # session waits, unclaimed, and the next tick reads the box again. A stray
+        # character that nobody types is deleted before the wake types.
         try:
-            busy = T.input_box_busy(s)
+            scr = T.screen_session(s)
+            busy = T.input_box_busy(s, scr)
+            stray = stray_char(s, scr, now) if busy else forget_box(s)
         except OSError as exc:
-            busy = "its screen could not be read: %s" % exc
-        if busy:
+            busy, stray = "its screen could not be read: %s" % exc, ""
+        if busy and not stray:
             note(now, managers, "the check waits: %s" % busy)
             continue
         t = managers[s["id"]]
         if T.manager_brief_stale(t):
             brief = T.rewrite_manager_brief(t)
             try:
+                clear_stray(s, stray)
                 T.send_when_box_empty(s, T.manager_brief_text(brief, s), ["Enter"])
             except (OSError, ValueError) as exc:
                 os.utime(str(brief), ns=(0, 0))         # stale again: the next tick tries again
@@ -163,6 +171,7 @@ def wake_home(now, note=None, mark=False):
         if not news:
             continue
         try:
+            clear_stray(s, stray)
             T.send_when_box_empty(s, wake_text(s), ["Enter"])
         except T.InputBoxBusy:
             release_wake(key, now)
@@ -174,6 +183,52 @@ def wake_home(now, note=None, mark=False):
         remember(seen)
         woken.append(s["key"])
     return woken
+
+
+def stray_char(s, scr, now):
+    """The lone character in the input box of session `s` that nobody types, or "". It is
+    one character with the cursor right after it, and the box held the same character at a
+    read `STRAY_AFTER` seconds or more before `now`. Each call records what the box holds."""
+    import todo as T
+    text = T.typed_input(scr) or ""
+    boxes = load_state().get("boxes") or {}
+    seen = boxes.get(s["session"]) or {}
+    if seen.get("text") != text:
+        seen = boxes[s["session"]] = {"text": text, "since": now}
+        update_state(boxes=boxes)
+    box = T.input_box(scr)
+    if len(text) != 1 or box is None or box["rows"][0].strip() != text:
+        return ""
+    end = [box["col"] + len(box["rows"][0].rstrip()), box["row"]]
+    if list(scr.get("cursor") or ()) != end or now - seen["since"] < STRAY_AFTER:
+        return ""
+    return text
+
+
+def forget_box(s):
+    """Drop the record of what the input box of session `s` held. Returns ""."""
+    boxes = load_state().get("boxes") or {}
+    if boxes.pop(s["session"], None) is not None:
+        update_state(boxes=boxes)
+    return ""
+
+
+def clear_stray(s, stray):
+    """Delete the stray character `stray` from the input box of session `s`, and wait up to
+    `STRAY_CLEAR` seconds for the box to show empty. Raises `InputBoxBusy` when it does not."""
+    import todo as T
+    if not stray:
+        return
+    T.send_session(s, "", ["Backspace"] * len(stray))
+    end = time.monotonic() + STRAY_CLEAR
+    while True:
+        busy = T.input_box_busy(s)
+        if not busy:
+            forget_box(s)
+            return
+        if time.monotonic() >= end:
+            raise T.InputBoxBusy("%s: %s" % (s.get("key") or s.get("id"), busy))
+        time.sleep(0.25)
 
 
 # ── the follow-ups ─────────────────────────────────────────────────────────
@@ -252,9 +307,9 @@ def state_file():
 
 
 def load_state():
-    """`{"board", "checked", "notices", "watcher", "watcher_pid", "watcher_started"}`,
-    each part absent
-    until something wrote it."""
+    """`{"board", "checked", "notices", "watcher", "watcher_pid", "watcher_started",
+    "boxes"}`, each part absent until something wrote it. `boxes` maps a manager session to
+    the text of its input box and the time it first held it."""
     try:
         data = json.loads(state_file().read_text(encoding="utf-8"))
     except (OSError, ValueError):

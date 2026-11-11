@@ -6871,6 +6871,24 @@ def suggested_prompt(scr):
     return None
 
 
+def input_box(scr):
+    """Claude Code's input box on the screen: `{"row", "col", "rows"}`, the row of its prompt,
+    the column after the prompt, and its lines from there down to the line of `─` under it.
+    `None` when the screen shows no input box."""
+    lines = scr.get("lines") or []
+    for y in range(len(lines) - 1, 0, -1):
+        m = _PROMPT_LINE.match(lines[y])
+        if not m or not lines[y - 1].lstrip().startswith("\u2500"):
+            continue
+        rows = [lines[y][m.end():]]
+        for line in lines[y + 1:]:
+            if line.lstrip().startswith("\u2500"):
+                break
+            rows.append(line)
+        return {"row": y, "col": m.end(), "rows": rows}
+    return None
+
+
 def typed_input(scr):
     """The text that somebody typed into Claude Code's input box and did not send: the lines
     of the box from its prompt down to the line of `─` under it. "" when the box is empty or
@@ -6880,36 +6898,28 @@ def typed_input(scr):
     cell: Claude Code keeps the cursor at the end of typed text, and at the start of a
     suggestion. The screen of a pseudoconsole does not carry SGR 2 (faint) in `dim`, so a
     faint suggestion shows there as plain text."""
-    lines = scr.get("lines") or []
-    for y in range(len(lines) - 1, 0, -1):
-        m = _PROMPT_LINE.match(lines[y])
-        if not m or not lines[y - 1].lstrip().startswith("\u2500"):
-            continue
-        col = m.end()
-        rows = [lines[y][col:]]
-        for line in lines[y + 1:]:
-            if line.lstrip().startswith("\u2500"):
-                break
-            rows.append(line)
-        text = "\n".join(r.rstrip() for r in rows).strip()
-        if not text:
-            return ""
-        if not any(r.strip() for r in rows[1:]) and (
-                suggested_prompt(scr) or list(scr.get("cursor") or ()) == [col, y]):
-            return ""
-        return text
-    return None
+    box = input_box(scr)
+    if box is None:
+        return None
+    rows = box["rows"]
+    text = "\n".join(r.rstrip() for r in rows).strip()
+    if not text:
+        return ""
+    if not any(r.strip() for r in rows[1:]) and (
+            suggested_prompt(scr) or list(scr.get("cursor") or ()) == [box["col"], box["row"]]):
+        return ""
+    return text
 
 
 class InputBoxBusy(ValueError):
     """The input box of a session holds text that nobody sent yet."""
 
 
-def input_box_busy(s):
+def input_box_busy(s, scr=None):
     """Why the engine may not type into session `s` now, or "": its input box holds unsent
-    text, or a Claude session's screen shows no input box. Raises OSError when the screen
-    cannot be read."""
-    typed = typed_input(screen_session(s))
+    text, or a Claude session's screen shows no input box. `scr` is a screen read already.
+    Raises OSError when the screen cannot be read."""
+    typed = typed_input(scr if scr is not None else screen_session(s))
     if typed:
         return "the input box holds unsent text"
     if typed is None and (s.get("provider") or "claude") == "claude":

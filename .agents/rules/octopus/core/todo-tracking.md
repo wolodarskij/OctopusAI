@@ -731,6 +731,8 @@ the owner. It grants `projects`, so the session reaches every registered project
   whose project holds no such skill, or of another AI provider, gets the full text of each.
   The engine reads the session's input box first. While the box holds text that nobody
   sent, the engine types nothing into the session, and reads the box again at its next tick.
+  A lone character that stands unchanged in the box for a minute, with the cursor after it,
+  is no typing: the engine deletes it, then types.
   A finished ticket reaches the
   owner within one interval. The manager makes no `CronCreate` job for the check. While the
   board does not run, the engine's watcher, `octopus check --watch`, does the same. The
