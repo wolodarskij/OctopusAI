@@ -55,11 +55,12 @@ _CD = re.compile(r"""^\s*(?:cd|Set-Location|pushd)\s+(?:-\w+\s+)?(?:"([^"]+)"|'(
 _REQUESTED = re.compile(r"\s--(?:requested|owner-order)\b")
 _FILED = re.compile(r"^(T\d{3,})  (\S[^\r\n]*?\.md)\s*$", re.M)
 _ENGINE_PROMPT = re.compile(r"^(?:(?:Work|Re-evaluate|Verify) ticket T\d+\. Read \S*\.briefs[\\/]"
-                            r"|Run the 10-minute check:|Manager check: run |<task-notification>|You judge one Claude "
+                            r"|Run the 10-minute check:|Manager check: run |Manager stuck check: run |<task-notification>|You judge one Claude "
                             r"Code session)")
 # The skill calls the engine types into a manager session (`managercheck.wake_text`,
-# `todo.manager_brief_text`).
-_ENGINE_COMMAND = re.compile(r"<command-name>/(?:manager-check|manager-brief)</command-name>")
+# `managercheck.stuck_text`, `todo.manager_brief_text`).
+_ENGINE_COMMAND = re.compile(r"<command-name>/(?:manager-check|manager-stuck|manager-brief)"
+                             r"</command-name>")
 # The launch prompt of a ticket session, and the brief it names.
 _LAUNCH = re.compile(r"(?:Work|Re-evaluate|Verify) ticket T\d+\. Read (\S*\.briefs[\\/]T\d+\.md)")
 _KEEP_TURN = ("This session is being continued", "[Request interrupted", "<local-command",

@@ -35,6 +35,12 @@ One check, `check` alone, does three things. It launches no ticket and no follow
    owner's request and that sits outside AI-Pipeline with no `filed-by: ai` moves there
    (`aifiled.sweep`). It writes nothing to the update.
 
+THE HOURLY EVALUATION. Once every `STUCK_INTERVAL` seconds per manager session, `wake_home`
+also runs `stuckcheck.evaluate`: is a running ticket or a blocker stuck. Only when it finds
+something does it type `stuck_text()` into the session (`wake_stuck`), and only while the
+manager's turn does not run and no check was typed into it in the same tick. Its own key in
+`claim_wake` lets one evaluation per hour through across the board and the watcher.
+
 `named_followups` reads the `## Follow-ups` section of a ticket for `aifiled`.
 """
 
@@ -58,6 +64,7 @@ for _d in (HERE, HERE.parent / "win", HERE.parent / "hooks"):
 import project  # noqa: E402
 
 INTERVAL = 600
+STUCK_INTERVAL = 3600
 BOARD_STALE = 2 * INTERVAL
 WATCH_POLL = 60
 # Seconds a lone character must stand unchanged in a manager's input box before the wake
@@ -80,6 +87,19 @@ def wake_text(s=None):
         'Keep the session open for the owner. Do not call sleep, poll, close the '
         'session, or schedule another check; the engine owns the timer.'
         % (project.OCTOPUS / "octopus.py").as_posix())
+
+
+def stuck_text(s=None):
+    """What the board and the watcher type into a manager session `s` once an hour when a
+    running ticket or a blocker is stuck: the skill call `/manager-stuck`, or the full text
+    when the session cannot call the skill."""
+    import todo as T
+    return T.skill_call(s, T.MANAGER_STUCK_SKILL) or (
+        'Manager stuck check: run python "%s" stuck. Print what it prints on stdout as it '
+        'is. Run each command it prints on stderr, and write nothing about the commands. '
+        'Then end this turn immediately. Keep the session open for the owner. Do not call '
+        'sleep, poll, close the session, or schedule another check; the engine owns the '
+        'timer.' % (project.OCTOPUS / "octopus.py").as_posix())
 
 
 def claim_wake(key, now, interval=INTERVAL):
@@ -165,24 +185,52 @@ def wake_home(now, note=None, mark=False):
                       % (root.name, s["id"], exc))
             continue
         key = (os.path.normcase(str(root.resolve())), s["session"])
-        if not claim_wake(key, now):
-            continue
-        news, seen = evaluate(now=now)
-        if not news:
-            continue
-        try:
-            clear_stray(s, stray)
-            T.send_when_box_empty(s, wake_text(s), ["Enter"])
-        except T.InputBoxBusy:
-            release_wake(key, now)
-            note(now, managers, "the check waits: the input box holds unsent text")
-            continue
-        except (OSError, ValueError) as exc:
-            print("watchdog: %s %s: the check could not be typed: %s" % (root.name, s["id"], exc))
-            continue
-        remember(seen)
-        woken.append(s["key"])
+        if claim_wake(key, now):
+            news, seen = evaluate(now=now)
+            if news:
+                try:
+                    clear_stray(s, stray)
+                    T.send_when_box_empty(s, wake_text(s), ["Enter"])
+                except T.InputBoxBusy:
+                    release_wake(key, now)
+                    note(now, managers, "the check waits: the input box holds unsent text")
+                    continue
+                except (OSError, ValueError) as exc:
+                    print("watchdog: %s %s: the check could not be typed: %s"
+                          % (root.name, s["id"], exc))
+                    continue
+                remember(seen)
+                woken.append(s["key"])
+                continue
+        if not busy and wake_stuck(s, key, now):
+            woken.append(s["key"])
     return woken
+
+
+def wake_stuck(s, key, now):
+    """Type the hourly evaluation into manager session `s` when a running ticket or a
+    blocker is stuck (`stuckcheck.evaluate`). It runs at most once every `STUCK_INTERVAL`
+    seconds per session, and never while the manager's turn runs. Returns whether it typed.
+    Never raises."""
+    import todo as T
+    if s.get("running"):
+        return False
+    skey = (key[0], "%s|stuck" % key[1])
+    try:
+        if not claim_wake(skey, now, STUCK_INTERVAL):
+            return False
+        import stuckcheck
+        if not stuckcheck.evaluate(now=now):
+            return False
+        T.send_when_box_empty(s, stuck_text(s), ["Enter"])
+        return True
+    except T.InputBoxBusy:
+        release_wake(skey, now, STUCK_INTERVAL)
+        return False
+    except Exception as exc:                            # noqa: BLE001 - the check goes on
+        print("watchdog: %s: the stuck check could not run: %s: %s"
+              % (s.get("id"), type(exc).__name__, exc))
+        return False
 
 
 def stray_char(s, scr, now):

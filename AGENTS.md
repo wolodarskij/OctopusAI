@@ -27,7 +27,7 @@ The rules and the skills of this project live once, in `.agents/`. Every agent r
 
 **The skills** are in `.agents/skills/<name>/SKILL.md`. Codex finds them there; Claude Code finds them through `.claude/skills/`.
 
-Skills: `artifacts`, `co-writing`, `do-pause`, `manager-brief`, `manager-check`, `octopusmanager`, `todo`, `todo-groups`, `todo-run-group`, `update-projects`, `wait-for`.
+Skills: `artifacts`, `co-writing`, `do-pause`, `manager-brief`, `manager-check`, `manager-stuck`, `octopusmanager`, `todo`, `todo-groups`, `todo-run-group`, `update-projects`, `wait-for`.
 
 **The tickets:** `python .octopus/todo.py --help`.
 <!-- octopus:end -->

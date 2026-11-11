@@ -11,6 +11,9 @@
                                                   agent finished, waits or works; it launches
                                                   nothing; --watch: the fallback while the
                                                   board does not run
+    python octopus.py stuck [--json]              the manager's hourly evaluation: the running
+                                                  tickets and the blockers that are stuck, in
+                                                  every registered project; it launches nothing
     python octopus.py ai-filed [--dry-run]        move the open tickets that an AI filed without
                                                   an owner's request to AI-Pipeline, in every
                                                   registered project
@@ -221,6 +224,9 @@ def main(argv=None):
     if cmd == "check":
         import managercheck
         return managercheck.main(rest)
+    if cmd == "stuck":
+        import stuckcheck
+        return stuckcheck.main(rest)
     if cmd == "ai-filed":
         import aifiled
         return aifiled.main(rest)

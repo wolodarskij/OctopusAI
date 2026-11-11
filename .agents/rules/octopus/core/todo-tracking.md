@@ -749,6 +749,16 @@ the owner. It grants `projects`, so the session reaches every registered project
   or any line like it. It answers no agent.
   The manager ends each turn after its work and stays open for input. It never uses sleep
   or a polling loop to stay available. The board and the watcher share one wake per interval.
+- **Once an hour the engine evaluates whether running tickets and their blockers are
+  stuck** (`octopus stuck`), with no model, over every registered project. A session at a
+  dialog or idle for 30 minutes, a running session with no progress for an hour, a ticket in
+  InProgress that no agent runs, a blocker that nobody works, and a `blocked-by:` chain that
+  waits on a paused, cancelled, missing or outside-blocked ticket, or on a cycle, are stuck.
+  Only when it finds one does the engine type the skill call `/manager-stuck`, or its full
+  text, into the manager, while the manager's turn does not run. The manager prints the
+  findings, runs each command they name (it launches the blocker, sends the stuck session its
+  next step, resumes a ticket whose blockers landed), and leaves each finding that only the
+  owner can decide to the owner.
 
     python .octopus/todo.py manager                    the Octopus AI project's manager ticket, from the template when there is none
     python .octopus/todo.py manager --start            start it unless it runs
@@ -756,6 +766,7 @@ the owner. It grants `projects`, so the session reaches every registered project
     python octopus.py sessions --since-last            the manager's update, every project
     python octopus.py check                            the manager's check: the update while any agent finished, waits or works; it launches nothing
     python octopus.py check --watch                    the engine's watcher while the board does not run: types the check into the manager on news
+    python octopus.py stuck                            the hourly evaluation: the running tickets and the blockers that are stuck; it launches nothing
     python .octopus/todo.py watchdog                   every manager ticket of the Octopus AI project, alive or dead
 
 ## Parent and children

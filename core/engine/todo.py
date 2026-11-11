@@ -6800,6 +6800,7 @@ def rewrite_manager_brief(t):
 MANAGER_BRIEF_ANSWER = "The new manager instructions are read and in force."
 # The skills that hold what the engine types into a manager session.
 MANAGER_CHECK_SKILL = "manager-check"
+MANAGER_STUCK_SKILL = "manager-stuck"
 MANAGER_BRIEF_SKILL = "manager-brief"
 
 

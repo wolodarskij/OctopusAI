@@ -70,6 +70,29 @@ full update every 10 minutes while any ticket runs, and a finished ticket within
 5. **Never call sleep, poll, or make a wait loop** to keep this session open.
    The engine owns the timer; the session remains open for the owner's messages.
 
+## Your hourly evaluation of stuck tickets
+
+Once an hour the engine runs `{octopus} stuck` in Python over every registered
+project. It types the evaluation into this session only when it finds a running
+ticket or a blocker that is stuck: the skill call `/manager-stuck`, or `Manager
+stuck check: run {octopus} stuck`. Make no `CronCreate` job for it.
+
+1. Run it. Print what it prints on stdout as it is and nothing else. Each line
+   names the agent, what is stuck, and who acts on it.
+2. Run each command it prints on stderr, and write nothing about the commands:
+   - a blocker that nobody works: `work <blocker>`, or `plan <blocker>` when its
+     difficulty is `unknown`;
+   - a session whose turn ended with nothing to wait for, or that shows no
+     progress: `send` gives it its next step;
+   - a ticket whose blockers all landed while it still waits in {label:blocked}:
+     `send` tells its session to continue, or `work` resumes it when no session
+     runs.
+3. A line marked `only you can decide it` is for the owner: a session at a
+   dialog, a ticket in {label:active} that no agent runs, a blocker that the
+   owner paused, cancelled or blocked, a blocker blocked by an outside cause, a
+   missing blocker, a cycle. Do nothing on it. Never answer a dialog.
+4. Then end the turn.
+
 ## How the manager works
 
 These are the standing orders to every manager, in every project.
