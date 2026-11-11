@@ -2198,6 +2198,29 @@ def _requested(args, parent=None):
     return parent is not None and owner_asked(parent.ai_filed, parent.body)
 
 
+def part_of_requested(t, tickets=None):
+    """Whether ticket `t` is a part of a requested ticket: its parent is a ticket the owner
+    asked for or took. Such a part is requested too, with no check of the owner's words."""
+    if not t.parent:
+        return False
+    p = find(tickets if tickets is not None else load_all(), t.parent)
+    return p is not None and owner_asked(p.ai_filed, p.body)
+
+
+def _owner_names(targets, ordered):
+    """`(ids, why)`: the ids of `targets` that the owner's words name. A part of a requested
+    ticket is named with no model; the model judges the others. Raises ValueError when the
+    model gives no usable answer."""
+    tickets = load_all()
+    parts = [t.id for t in targets if part_of_requested(t, tickets)]
+    rest = [t for t in targets if t.id not in parts]
+    if not rest:
+        return parts, "each ticket is a part of a requested ticket"
+    named, why = owner_named([(t.id, t.title, first_section(t.body)) for t in rest],
+                             ordered, *owner_text())
+    return parts + named, why
+
+
 def _caller_session():
     """The session id of the AI session that runs this command, lower case, or ""."""
     return (os.environ.get("CLAUDE_CODE_SESSION_ID") or os.environ.get("OCTOPUS_SESSION")
@@ -2241,8 +2264,7 @@ def _guard_block(targets, status, ordered):
             print(line, file=sys.stderr)
         return 2
     try:
-        named, why = owner_named([(t.id, t.title, first_section(t.body)) for t in targets],
-                                 ordered, *owner_text())
+        named, why = _owner_names(targets, ordered)
     except ValueError as exc:
         print("The check of the owner's words has no verdict, so the move goes on: %s" % exc,
               file=sys.stderr)
@@ -2636,8 +2658,7 @@ def _guard_take(tickets, ordered):
             print(line, file=sys.stderr)
         return 2
     try:
-        named, why = owner_named([(t.id, t.title, first_section(t.body)) for t in tickets],
-                                 ordered, *owner_text())
+        named, why = _owner_names(tickets, ordered)
     except ValueError as exc:
         print("The check of the owner's words has no verdict, so the move goes on: %s" % exc,
               file=sys.stderr)
@@ -2951,7 +2972,12 @@ def cmd_new(args):
             print("Error: no ticket %r for --parent" % parent, file=sys.stderr)
             return 2
     requested = _requested(args, pt)
-    if requested and _in_ai_session() and not getattr(args, "by_owner", False):
+    part = pt is not None and owner_asked(pt.ai_filed, pt.body)
+    if part and _in_ai_session():
+        print("The parent %s is a requested ticket, so this part of it is requested too."
+              % pt.id)
+    if (requested and not part and _in_ai_session()
+            and not getattr(args, "by_owner", False)):
         if getattr(args, "requested", None) is True and not _claim(args):
             print("Error: --requested takes the owner's order that names this ticket's subject, "
                   "in neutral words:\n  --requested \"<the order, in neutral words>\"",

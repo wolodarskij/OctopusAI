@@ -383,10 +383,10 @@ def candidates(tickets, judged):
 
 def verdict(t, by_id, root, proof, followups, seen=()):
     """REQUESTED or AI for one ticket of the current project."""
-    if t.ai_filed:
-        return AI
     if _owner_ordered(t) or (root, t.id) in followups:
         return REQUESTED
+    if t.ai_filed:
+        return AI
     parent = by_id.get(t.parent) if t.parent else None
     if parent is not None and parent.id not in seen \
             and verdict(parent, by_id, root, proof, followups, seen + (t.id,)) == REQUESTED:
