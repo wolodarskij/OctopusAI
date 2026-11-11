@@ -423,7 +423,9 @@ within the last 2 hours.
 "<the question>" --mode <mode>`, then asks with the `AskUserQuestion` tool, never in plain text:
 the dialog stops the turn, and the session is `input` until the owner answers. The answer, the
 dialog's tool result in the transcript, removes that report, so the session goes on and can finish. An AI provider with no question dialog asks on
-the last line of its message, and the line ends with `?`.
+the last line of its message, and the line ends with `?`. **From 00:00 to 08:00 local time no
+session asks the owner:** it decides, or collects the question for the morning, and goes on
+(`night-mode.md`).
 **The transcript corrects the hook files.** A turn that began without the owner's prompt (a
 scheduled prompt, a call back after background work) runs, whatever the last `Stop` said. A turn
 that ended by its transcript and has no `Stop` marker gets the one the hook would have written.
@@ -724,7 +726,9 @@ the owner. It grants `projects`, so the session reaches every registered project
   the rest: an event, idle, stuck, and an agent whose ticket the owner paused, as `paused`. **Waiting for your input lists only an
   agent whose session is open and in the `input` state.** A finished, closed or idle agent never stands there, and nor does a decision
   that a finished ticket's result names: that agent stands only under Finished. The reply check
-  fails a Waiting line about any other agent.
+  fails a Waiting line about any other agent. Outside night mode, a sixth section, Questions
+  for the morning, follows Other when any open ticket holds an open question for the morning
+  (`night-mode.md`): each question word for word, until the manager records the owner's answer.
 - **The manager's check is always on, and it gives the full update every 10 minutes while
   any ticket runs.** The board's watchdog runs the check in Python every 10 minutes for each
   manager session, of every AI provider. It types the check into the session while any

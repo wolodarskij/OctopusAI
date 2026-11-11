@@ -3874,6 +3874,112 @@ def cmd_evidence(args):
     return 0
 
 
+# ── night mode ──────────────────────────────────────────────────────────────
+# From 00:00 to 08:00 local time no ticket waits for the owner's input (`nightmode.py`). A
+# session records each decision it took in place of the owner with `decide`, and collects a
+# question that only the owner can answer with `morning`.
+
+# One question of `## Questions for the morning`: `- [ ] <stamp>: <question>`, and once the
+# owner answered it, `- [x] <stamp>: <question> Answer (<stamp>): <answer>`.
+_MORNING_LINE = re.compile(r"^- \[( |x)\] (\d{4}-\d\d-\d\d \d\d:\d\d): (.*?)"
+                           r"(?: Answer \((\d{4}-\d\d-\d\d \d\d:\d\d)\): (.*))?$")
+
+
+def _stamp():
+    import datetime
+    return datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+
+
+def morning_questions(t):
+    """The questions for the morning of ticket `t`, in order: `{"n", "open", "when", "text",
+    "answer"}`, `n` counted from 1."""
+    m = re.search(r"^##[ \t]+%s[ \t]*\n(.*?)(?=^##\s|\Z)" % re.escape(nightmode.MORNING),
+                  t.body or "", re.M | re.S)
+    out = []
+    for line in (m.group(1) if m else "").splitlines():
+        q = _MORNING_LINE.match(line.strip())
+        if q:
+            out.append({"n": len(out) + 1, "open": q.group(1) == " ", "when": q.group(2),
+                        "text": q.group(3), "answer": q.group(5) or ""})
+    return out
+
+
+def open_morning(tickets=None):
+    """`(ticket, question)` of every open question for the morning of an open ticket."""
+    out = []
+    for t in load_all() if tickets is None else tickets:
+        if t.state == lane("closed"):
+            continue
+        out += [(t, q) for q in morning_questions(t) if q["open"]]
+    return out
+
+
+def cmd_decide(args):
+    """Night mode: record a decision that a session took in place of the owner under
+    `## Decisions in night mode`."""
+    t = find(load_all(), args.id)
+    if t is None:
+        print("Error: no ticket %r" % args.id, file=sys.stderr)
+        return 2
+    question = " ".join((args.question or "").split())
+    decision = " ".join((args.decision or "").split())
+    if not question or not decision:
+        print("Error: `decide` needs --question and --decision", file=sys.stderr)
+        return 2
+    t.body = add_section_line(t.body, nightmode.DECISIONS, "- %s: %s Decided: %s" % (
+        _stamp(), question, decision))
+    _write(t.path, render(t.meta, t.body))
+    print("%s  decision recorded under ## %s" % (t.id, nightmode.DECISIONS))
+    return 0
+
+
+def cmd_morning(args):
+    """Night mode: collect a question that only the owner can answer under `## Questions for
+    the morning`, record the owner's answer to one, or list the open ones."""
+    if not args.id:
+        rows = open_morning()
+        for t, q in rows:
+            print("%s  %d  %s  %s" % (t.id, q["n"], q["when"], q["text"]))
+        if not rows:
+            print("No open question for the morning.")
+        return 0
+    t = find(load_all(), args.id)
+    if t is None:
+        print("Error: no ticket %r" % args.id, file=sys.stderr)
+        return 2
+    question = " ".join((args.question or "").split())
+    if args.answer is None:
+        if not question:
+            print("Error: give --question, or --answer <n> with --text", file=sys.stderr)
+            return 2
+        t.body = add_section_line(t.body, nightmode.MORNING,
+                                  "- [ ] %s: %s" % (_stamp(), question))
+        _write(t.path, render(t.meta, t.body))
+        print("%s  question %d collected for the morning"
+              % (t.id, len(morning_questions(t))))
+        return 0
+    text = " ".join((args.text or "").split())
+    if not text:
+        print("Error: --answer needs --text: the owner's answer, in neutral words",
+              file=sys.stderr)
+        return 2
+    q = next((x for x in morning_questions(t) if x["n"] == args.answer), None)
+    if q is None:
+        print("Error: %s has no question %d for the morning" % (t.id, args.answer),
+              file=sys.stderr)
+        return 2
+    if not q["open"]:
+        print("Error: question %d of %s is answered already" % (args.answer, t.id),
+              file=sys.stderr)
+        return 2
+    old = "- [ ] %s: %s" % (q["when"], q["text"])
+    new = "- [x] %s: %s Answer (%s): %s" % (q["when"], q["text"], _stamp(), text)
+    t.body = t.body.replace(old, new, 1)
+    _write(t.path, render(t.meta, t.body))
+    print("%s  question %d answered" % (t.id, args.answer))
+    return 0
+
+
 def launch_new(tid, args):
     """Launch the session of a ticket `new` just filed, as a group run does: `plan` when its
     difficulty is `unknown`, `work` otherwise. A manager runs only as `work`."""
@@ -4690,7 +4796,7 @@ def build_brief(t, mode="work", note="", provider="claude"):
     if t.repeat == MANAGER:
         # A manager never finishes and never moves its own ticket, so it gets none of the
         # sections that tell a session to finish, to hand over, or to park on a blocker.
-        out = [sec("header"), sec("messages"), other,
+        out = [sec("header"), sec("messages"), sec("night"), other,
                sec("where") if vals["project_line"] else "",
                sec("repeat.%s" % MANAGER)] + permits + [sec("before")]
         out.append(vcs_sec(MANAGER))
@@ -4698,7 +4804,8 @@ def build_brief(t, mode="work", note="", provider="claude"):
             out.append(sec("note"))
         out.append(sec("ticket"))
         return "".join(out)
-    out = [sec("header"), sec("messages"), other, sec("where") if vals["project_line"] else "",
+    out = [sec("header"), sec("messages"), sec("night"), other,
+           sec("where") if vals["project_line"] else "",
            sec("boundary"), sec("blocked")]
     if t.repeat:
         out.append(sec("repeat"))
@@ -6033,6 +6140,11 @@ def live_sessions(tickets=None, recheck=False):
             s.setdefault("killed_shells", [])
         read_turn(s, recheck)
         s["wait"], s["why"] = wait_state(s, t)
+        if s["wait"] == "input" and t is not None:
+            try:
+                s["night_nudged"] = night_nudge(s, t)
+            except Exception:                           # noqa: BLE001 - the scan goes on
+                s["night_nudged"] = False
         if s["wait"] == "finished" and s.get("claude"):
             try:
                 reap_shells(s, procs, finished=True)
@@ -6182,6 +6294,37 @@ def _judge_needed(s):
                 or s.get("says_finished")
                 or s.get("reported") in ("input", "event", "finished")
                 or s.get("jobs") or work_tasks(s))
+
+
+def night_nudge(s, t, now=None):
+    """Night mode (`nightmode.is_night`): type the night order into the session entry `s` of
+    ticket `t`, whose state is `input` (a question on its last line, the judge's verdict
+    `input`, an `input` report from before 00:00), so it decides in place of the owner and
+    goes on. Only a Claude session whose turn ended, with no dialog, no API error and an
+    empty input box. Once per turn, and at most `nightmode.NUDGES` times a night per session:
+    `<key>.night` holds the night, the count and the stamp of the last turn typed into.
+    Returns whether it typed."""
+    import session_state
+    if not nightmode.is_night(now) or t is None:
+        return False
+    if (s.get("provider") or "claude") != "claude" or not s.get("claude") \
+            or not s.get("ended") or s.get("dialog") or s.get("error") or s.get("chat"):
+        return False
+    sid, shell = s["session"], s.get("mark_shell") or 0
+    turn = session_state._marker_time(sid, shell)
+    if not turn:
+        return False
+    path = session_state._dir() / ("%s.night" % session_state.key(sid, shell))
+    night = nightmode.night_of(now)
+    lines = session_state._first_text((path,)).splitlines() + ["", "", ""]
+    count = int(lines[1]) if lines[0].strip() == night and lines[1].strip().isdigit() else 0
+    if count >= nightmode.NUDGES or (lines[0].strip() == night and lines[2].strip() == turn):
+        return False
+    mode = s.get("mode") if s.get("mode") in MODES else "work"
+    send_when_box_empty(s, nightmode.nudge(P.cli, t.id, mode), ["Enter"])
+    session_state._dir().mkdir(parents=True, exist_ok=True)
+    path.write_text("%s\n%d\n%s\n" % (night, count + 1, turn), encoding="utf-8")
+    return True
 
 
 def read_turn(s, recheck=False, now=None):
@@ -7951,6 +8094,9 @@ def cmd_report(args):
         print("Error: `input` needs --why: the question the session asks the owner, which "
               "the board shows", file=sys.stderr)
         return 2
+    if args.word == "input" and nightmode.is_night():
+        print("Error: %s" % nightmode.order(P.cli, t.id, args.mode), file=sys.stderr)
+        return 2
     session_state.report(sid, session_state.owning_shell(), args.word, why)
     print("%s/%s  reported %s%s" % (t.id, args.mode, args.word, ": " + why if why else ""))
     return 0
@@ -8537,6 +8683,24 @@ def _main(argv):
     p.add_argument("id")
     p.add_argument("text", help="what you found: the file and line, or the command")
     p.set_defaults(fn=cmd_evidence)
+
+    p = sub.add_parser("decide", help="night mode: record a decision that the session took "
+                                      "in place of the owner")
+    p.add_argument("id")
+    p.add_argument("--question", required=True, help="the question the owner would answer")
+    p.add_argument("--decision", required=True, help="what the session decided, and why")
+    p.set_defaults(fn=cmd_decide)
+
+    p = sub.add_parser("morning", help="night mode: collect a question that only the owner "
+                                       "can answer for the morning, record the owner's "
+                                       "answer to one, or list the open ones")
+    p.add_argument("id", nargs="?", default=None)
+    p.add_argument("--question", default="", help="the question for the morning")
+    p.add_argument("--answer", type=int, default=None, metavar="N",
+                   help="the number of the question that the owner answered")
+    p.add_argument("--text", default="", help="with --answer: the owner's answer, in "
+                                              "neutral words")
+    p.set_defaults(fn=cmd_morning)
 
     p = sub.add_parser("chat", help="open a terminal with a read-only session that answers "
                                     "questions about the codebase and edits nothing")

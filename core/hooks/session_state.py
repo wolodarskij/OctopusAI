@@ -2450,6 +2450,14 @@ def ask_owner_end(session_id, shell, payload, text, launch=None):
     if not waiting:
         return None
     p = project.current()
+    import nightmode
+    if nightmode.is_night():
+        # Night mode: no ticket waits for the owner's input, so the session asks nothing.
+        return {"decision": "block", "reason": "%s for ticket %s, and the work of %s is not "
+                "shown done: %s.\n%s" % (
+                    ("Ticket %s waits" if len(waiting) == 1 else "Tickets %s wait")
+                    % ", ".join(waiting), t.id, t.id, undone,
+                    nightmode.order(p.cli, t.id, mode))}
     return {"decision": "block", "reason": ASK_OWNER_REASON % {
         "waiting": ("Ticket %s waits" if len(waiting) == 1 else "Tickets %s wait")
         % ", ".join(waiting), "id": t.id, "undone": undone,

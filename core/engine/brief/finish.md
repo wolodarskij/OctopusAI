@@ -1,6 +1,6 @@
 - Report the files this ticket changed. Name a problem only if one prevented
   the ticket from being executed.
-- **When you need the owner's answer:** run `{cli} report {id} input --why "<the question>" --mode {mode}`,
+- **When you need the owner's answer** (from 00:00 to 08:00, night mode applies instead): run `{cli} report {id} input --why "<the question>" --mode {mode}`,
   then ask with the `AskUserQuestion` tool, never in plain text. The board then keeps this
   terminal open, wherever the ticket is, and shows the question and its options.
   - One dialog holds up to 4 questions. Put a longer list into several dialogs, one after the

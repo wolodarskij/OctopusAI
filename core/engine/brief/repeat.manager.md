@@ -212,6 +212,16 @@ since your last update, once. Print its output as it is. Each agent is one line:
     - <project> <id> "<title>" — <the other ticket it waits for, or the outside cause>
     **Other**
     - <project> <id> "<title>" — <waiting for an event, idle, paused or stuck>
+    **Questions for the morning**
+    - <project> <id> "<title>" — question <n>, <when>: <the question>
+
+The section Questions for the morning stands only outside night mode, and only when an
+open ticket holds an open question that a session collected in night mode
+(`.agents/rules/octopus/core/night-mode.md`). When the owner answers one, record the
+answer with `{octopus} todo --project "<name>" morning <id> --answer <n> --text "<the
+answer, in neutral words>"`, then give it to the ticket's agent as an order of the owner.
+From 00:00 to 08:00 you ask the owner nothing either: decide, and record the decision on
+your ticket with `decide`.
 
 - **Name every ticket by its project name, its id and its title,** as the lines
   do: `<project> <id> "<title>"`, never by id alone. This holds in every message,

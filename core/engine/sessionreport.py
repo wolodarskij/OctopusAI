@@ -60,6 +60,15 @@ done, it stands under Other as `finished`, or under Blocked when its ticket is b
 and its ticket stays where it is. Without `--since-last`, Finished holds the sessions that are finished and still open,
 and no snapshot is read or written.
 
+QUESTIONS FOR THE MORNING. In night mode, from 00:00 to 08:00 local time, a session collects
+a question that only the owner can answer under `## Questions for the morning` of its ticket
+(`todo.py morning`). Outside night mode a sixth section follows Other, only when it holds a
+row: each open question of an open ticket, word for word, on every update until the manager
+records the owner's answer (`morning <id> --answer <n> --text "..."`):
+
+    **Questions for the morning**
+    - <project> <id> "<title>" — question <n>, <when>: <the question>
+
 ONLY WHEN AN AGENT IS THERE. `--if-any` is `--since-last` that prints nothing only when the
 update has no row: no agent finished since that call, none waits for the owner, none works and
 none waits for anything else. Otherwise it prints all five sections, every run, and a waiting
@@ -88,7 +97,10 @@ SECTIONS = (("finished", "Finished since the last update"),
             ("input", "Waiting for your input"),
             ("working", "Working"),
             ("blocked", "Blocked"),
-            ("other", "Other"))
+            ("other", "Other"),
+            ("morning", "Questions for the morning"))
+# The sections that stand only when they hold a row.
+OPTIONAL = ("morning",)
 TEXT_WIDTH = 200
 # The most words of what a working agent does now.
 DOING_WORDS = 10
@@ -363,6 +375,19 @@ def _launched_since(name, T, tickets, alive, snap):
     return out
 
 
+def morning_rows(name, T, tickets, now=None):
+    """Outside night mode, one row per open question for the morning of an open ticket of
+    the project `name` (`todo.open_morning`): the question, word for word. In night mode
+    none: the owner gives no answer then."""
+    import nightmode
+    if nightmode.is_night(now):
+        return []
+    return [{"key": "%s|%s|morning|%d" % (name, t.id, q["n"]), "project": name,
+             "id": t.id, "title": t.title, "mode": "", "section": "morning",
+             "text": "question %d, %s: %s" % (q["n"], q["when"], q["text"])}
+            for t, q in T.open_morning(tickets)]
+
+
 def collect(since_last=False, registry=None):
     """The rows of the report, and the rows of the live sessions for the next snapshot."""
     import todo as T
@@ -406,6 +431,7 @@ def collect(since_last=False, registry=None):
                         (x["launched"] for x in (t.sessions if t else ())
                          if x["session"] == e["session"]), "")))
             rows += _launched_since(name, T, tickets, {s["session"] for s in sessions}, snap)
+            rows += morning_rows(name, T, tickets)
             live += here
         except Exception as exc:                        # noqa: BLE001 - the report goes on
             rows.append({"key": name, "project": name, "id": None, "title": "", "mode": "-",
@@ -428,11 +454,15 @@ def line(r):
 
 def render(rows):
     """The five sections as Markdown, every section present, an empty one as `none`, one
-    line per agent, and under a finished agent the lines of its answer."""
+    line per agent, and under a finished agent the lines of its answer. An `OPTIONAL`
+    section stands only when it holds a row."""
     out = []
     for key, heading in SECTIONS:
         mine = sorted((r for r in rows if r["section"] == key),
-                      key=lambda r: (r["project"], r.get("id") or "", r.get("mode") or ""))
+                      key=lambda r: (r["project"], r.get("id") or "", r.get("mode") or "",
+                                     r.get("key") or ""))
+        if key in OPTIONAL and not mine:
+            continue
         out.append("**%s**" % heading)
         if not mine:
             out.append("none")

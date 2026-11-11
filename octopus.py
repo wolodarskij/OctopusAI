@@ -21,6 +21,8 @@
                                                   UserPromptSubmit, Stop, Notification,
                                                   PreToolUse and PostToolUse; PreToolUse also
                                                   runs the README guard (readme_guard.py)
+                                                  and, from 00:00 to 08:00, the question
+                                                  guard of night mode (night_guard.py)
     python octopus.py status-hook codex           the Codex hook: the status reminder
                                                   once every 5 minutes (status_reminder.py),
                                                   and the README guard on PreToolUse
@@ -144,6 +146,21 @@ def cmd_hook(argv):
                 break
     if root is None:
         return 0
+    if event == "PreToolUse":
+        try:
+            import night_guard
+            if payload.get("tool_name") == night_guard.TOOL:
+                tok = project.use(root)
+                try:
+                    out = night_guard.decide(payload)
+                finally:
+                    project.reset(tok)
+                if out:
+                    sys.stdout.write(json.dumps(out) + "\n")
+                    sys.stdout.flush()
+                    return 0
+        except Exception:                               # noqa: BLE001 - a hook never raises
+            pass
     if event == "SessionStart":
         try:
             import log_session

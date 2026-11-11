@@ -8,7 +8,8 @@ disable-model-invocation: true
 
 1. Run `python "./octopus.py" check`.
 2. Print its output as it is, and nothing else: the five sections Finished since the last update,
-   Waiting for your input, Working, Blocked and Other. When it prints nothing, write nothing.
+   Waiting for your input, Working, Blocked and Other, and Questions for the morning when it
+   prints that section. When it prints nothing, write nothing.
 3. Decide each notice it lists with the command it names. Write nothing about the notices.
 4. End this turn immediately. Keep the session open for the owner.
 

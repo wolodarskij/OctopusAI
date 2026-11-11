@@ -7,7 +7,8 @@ files in this directory, in this order:
 |---|---|---|
 | 1 | `header` | always |
 | 2 | `messages` | always |
-| 2a | `provider` | the launch starts an AI provider other than Claude Code, such as Codex |
+| 2a | `night` | always: night mode, from 00:00 to 08:00 local time (`nightmode.py`) |
+| 2b | `provider` | the launch starts an AI provider other than Claude Code, such as Codex |
 | 3 | `where` | the project has a description |
 | 4 | `boundary` | always |
 | 5 | `blocked` | always |
@@ -30,7 +31,7 @@ files in this directory, in this order:
 | 17 | `ticket` | always |
 
 A `manager` ticket never finishes and never moves its own ticket, so its brief is only
-`header`, `messages`, `provider`, `where`, `repeat.manager`, the `permits.*` sections and `dirs` (never `projects` or `projects.octopus`: `repeat.manager` carries the projects), `before`, `vcs.<kind>.manager` (on the
+`header`, `messages`, `night`, `provider`, `where`, `repeat.manager`, the `permits.*` sections and `dirs` (never `projects` or `projects.octopus`: `repeat.manager` carries the projects), `before`, `vcs.<kind>.manager` (on the
 same condition as `vcs.<kind>.<mode>`), `note` and `ticket`.
 It leaves out `boundary`, `blocked`, `repeat`, `job.*`, `readme.*`, `renders.*`, `artifact.*`, `finish.*` and `close.*`.
 
