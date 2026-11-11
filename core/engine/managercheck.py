@@ -35,8 +35,9 @@ One check, `check` alone, does three things. It launches no ticket and no follow
    owner's request and that sits outside AI-Pipeline with no `filed-by: ai` moves there
    (`aifiled.sweep`). It writes nothing to the update.
 
-THE HOURLY EVALUATION. Once every `STUCK_INTERVAL` seconds per manager session, `wake_home`
-also runs `stuckcheck.evaluate`: is a running ticket or a blocker stuck. Only when it finds
+THE HOURLY EVALUATION. While its switch is on (`octopus stuck --switch on`, off by default),
+once every `STUCK_INTERVAL` seconds per manager session, `wake_home` also runs
+`stuckcheck.evaluate`: is a running ticket stuck. Only when it finds
 something does it type `stuck_text()` into the session (`wake_stuck`), and only while the
 manager's turn does not run and no check was typed into it in the same tick. Its own key in
 `claim_wake` lets one evaluation per hour through across the board and the watcher.
@@ -90,8 +91,8 @@ def wake_text(s=None):
 
 
 def stuck_text(s=None):
-    """What the board and the watcher type into a manager session `s` once an hour when a
-    running ticket or a blocker is stuck: the skill call `/manager-stuck`, or the full text
+    """What the board and the watcher type into a manager session `s` once an hour when
+    a running ticket is stuck: the skill call `/manager-stuck`, or the full text
     when the session cannot call the skill."""
     import todo as T
     return T.skill_call(s, T.MANAGER_STUCK_SKILL) or (
@@ -208,18 +209,18 @@ def wake_home(now, note=None, mark=False):
 
 
 def wake_stuck(s, key, now):
-    """Type the hourly evaluation into manager session `s` when a running ticket or a
-    blocker is stuck (`stuckcheck.evaluate`). It runs at most once every `STUCK_INTERVAL`
-    seconds per session, and never while the manager's turn runs. Returns whether it typed.
-    Never raises."""
+    """Type the hourly evaluation into manager session `s` when a running ticket is
+    stuck (`stuckcheck.evaluate`). It runs at most once every `STUCK_INTERVAL`
+    seconds per session, never while the manager's turn runs, and never while the switch
+    `stuckcheck.switched_on` is off. Returns whether it typed. Never raises."""
     import todo as T
-    if s.get("running"):
+    import stuckcheck
+    if s.get("running") or not stuckcheck.switched_on():
         return False
     skey = (key[0], "%s|stuck" % key[1])
     try:
         if not claim_wake(skey, now, STUCK_INTERVAL):
             return False
-        import stuckcheck
         if not stuckcheck.evaluate(now=now):
             return False
         T.send_when_box_empty(s, stuck_text(s), ["Enter"])

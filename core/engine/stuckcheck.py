@@ -1,41 +1,46 @@
-"""stuckcheck.py - the manager's hourly evaluation: is a running ticket or a blocker stuck.
+"""stuckcheck.py - the manager's hourly evaluation: which running ticket is stuck.
 
     python octopus.py stuck [--json]
+    python octopus.py stuck --switch on|off
 
-The evaluation reads every registered project with no model, and finds:
+The evaluation reads every registered project with no model, and reports only what is stuck.
 
-1. A STUCK AGENT: a live session of a ticket that
-   - waits at a dialog for `QUIET` seconds or more: only the owner answers it;
-   - ended its turn and waits for nothing (`idle`), or is `finished` while its Claude runs
-     and its ticket's order is not carried out to the end, for `QUIET` seconds or more: the
-     manager sends it its next step;
-   - runs or works and wrote nothing to its transcript for `NO_PROGRESS` seconds or more:
-     the manager sends it its next step.
-2. A TICKET WITH NO AGENT: a ticket in the active lane as `implementing`, `planning` or
-   `investigating` that no live session runs: the owner decides.
-3. A STUCK CHAIN: the `blocked-by:` chain of a ticket that a live session runs, that is in
-   the active lane, or that is blocked as `blocked by other task`. A blocker
-   - in the start or the AI lane with no session is not worked: the manager launches it,
-     `work`, or `plan` when its difficulty is `unknown`;
-   - in the active lane with no session, blocked by an outside cause or by the owner,
-     paused, cancelled, or missing from the project waits on something that will not come
-     by itself: the owner decides;
-   - that closes a cycle: the owner decides.
-   A ticket in the blocked lane as `blocked by other task` whose blockers all landed in the
-   verify or the closed lane still waits: the manager sends its session its next step, or
-   launches `work` on it when no session runs.
+A RUNNING TICKET is a ticket whose session is open, and that the owner did not set aside: not
+paused, not `blocked by user`, not `cancelled`. Only a running ticket, and a ticket in the
+`blocked-by:` chain of a running ticket, is ever named. A ticket that does not run and blocks
+no running ticket is never named.
 
-Each finding is one line for the owner: `<project> <id> "<title>" - <what is stuck>`, with a
-sub-line that says who acts. A finding the manager acts on carries the command it runs.
-`report` prints the lines on `out` and the commands on `err`, and nothing at all when
-nothing is stuck. The engine types the evaluation into the manager once an hour, only when
-`evaluate` finds something (`managercheck.wake_stuck`).
+STUCK means only: the work waits for something that cannot happen without the owner's
+intervention, or cannot happen at all, or the chain is circular. A running ticket is stuck when
+- its session ended its turn and waits for nothing for `QUIET` seconds or more, while the
+  ticket does not show its work done: nothing starts its next turn;
+- it is `blocked by outside cause`: the cause goes only by the owner's intervention;
+- it waits in the blocked lane for blockers that all landed, and its session holds no job,
+  subagent or turn that resumes it;
+- a ticket in its `blocked-by:` chain does not exist, was cancelled, was paused or
+  `blocked by user` by the owner, is `blocked by outside cause`, sits in the start or the AI
+  lane with no session, or sits in the active lane with no session: nothing works it;
+- its `blocked-by:` chain is circular.
+A session at a dialog or one that waits for the owner's answer is no finding: the manager's
+update shows it already.
+
+Each finding is one short line: `<project> <id> "<title>" - <why it is stuck>`. A finding the
+manager can act on also carries a command: the next step to the session, or the launch of the
+blocker. `report` prints the lines on `out` and the commands on `err`, and nothing at all when
+nothing is stuck.
+
+THE SWITCH. The engine types the evaluation into the manager once an hour, only when
+`evaluate` finds something (`managercheck.wake_stuck`), and only while the switch is on. The
+switch is off by default, and only the owner's order turns it on: `stuck --switch on`. It
+lives outside every repository (`SWITCH_FILE` beside the registry).
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -47,45 +52,85 @@ for _d in (HERE, HERE.parent / "win", HERE.parent / "hooks", HERE.parent / "posi
 
 import project  # noqa: E402
 
-# How long a session waits at a dialog, or waits for nothing after its turn, before it is stuck.
+# How long a session waits for nothing after its turn before it is stuck.
 QUIET = 30 * 60
-# How long a running or working session writes nothing to its transcript before it is stuck.
-NO_PROGRESS = 60 * 60
-HEADING = "Stuck agents and blockers"
+HEADING = "Stuck"
 DASH = "—"
-OWNER = "only you can decide it"
-MANAGER = "the manager acts on it"
+TITLE_WIDTH = 60
+CAUSE_WIDTH = 60
+# The time stamp before a cause under `## Blocked`.
+_STAMP = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\s*")
+SWITCH_FILE = "stuck-check.json"
+# The session states in which a job, a subagent or a turn of the session still runs.
+BUSY = ("running", "subagent", "blocker")
 
+
+# ── the switch ─────────────────────────────────────────────────────────────
+
+def switched_on():
+    """Whether the engine types the hourly evaluation into the manager. Off by default."""
+    try:
+        data = json.loads((project.home() / SWITCH_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(data, dict) and data.get("on") is True
+
+
+def switch(on):
+    """Turn the hourly evaluation on or off."""
+    path = project.home() / SWITCH_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name("%s.%d.tmp" % (path.name, os.getpid()))
+    tmp.write_text(json.dumps({"on": bool(on)}) + "\n", encoding="utf-8")
+    os.replace(str(tmp), str(path))
+
+
+# ── the findings ───────────────────────────────────────────────────────────
 
 def _cmd(name, rest):
     return 'python "%s" todo --project "%s" %s' % (
         (project.OCTOPUS / "octopus.py").as_posix(), name, rest)
 
 
-def _minutes(span):
-    return "%d minutes" % max(1, int(span // 60))
+def _cut(text, width):
+    text = " ".join(str(text or "").split())
+    return text if len(text) <= width else text[:width - 3].rstrip() + "..."
 
 
 def _send(name, tid, mode, text):
     return _cmd(name, 'send %s --mode %s --text "%s" --keys Enter' % (tid, mode, text))
 
 
-def _launch(name, T, t, why):
+def _launch(name, t, why):
     mode = "plan" if t.difficulty == "unknown" else "work"
     return _cmd(name, '%s %s --note "%s"' % (mode, t.id, why))
 
 
 def _finding(name, t, text, command=""):
-    return {"project": name, "id": t.id if t else "", "title": t.title if t else "",
-            "text": text, "command": command}
+    return {"project": name, "id": t.id, "title": t.title, "text": text, "command": command}
 
 
-def _next_step(T, tid):
-    return ("The manager's hourly check finds you stuck. Continue %s from where it stopped "
-            "and carry out its order to the end. When an outside cause stops the work, run "
-            "python .octopus/todo.py report %s blocked. When you need the owner, run "
-            "python .octopus/todo.py report %s input and ask with the question dialog."
-            % (tid, tid, tid))
+def _cause(T, t):
+    import sessionreport
+    found = sessionreport._section(t.body, "Blocked")
+    text = (found[-1] if found else "") if isinstance(found, list) else found
+    for ln in text.splitlines():
+        ln = _STAMP.sub("", ln.strip().lstrip("-* "))
+        if ln:
+            return _cut(ln, CAUSE_WIDTH)
+    return ""
+
+
+def set_aside(T, t):
+    """Whether the owner set ticket `t` aside: paused, `blocked by user`, or cancelled."""
+    return (t.state == T.P.PAUSED
+            or (t.state == T.lane("blocked") and t.status == T.S("blocked by user"))
+            or (t.state == T.lane("closed") and t.status == T.S("cancelled")))
+
+
+def _next_step(tid):
+    return ("Your turn ended, and nothing starts your next one. Continue %s from where it "
+            "stopped and carry out its order to the end." % tid)
 
 
 def _landed_step(T, tid):
@@ -95,89 +140,59 @@ def _landed_step(T, tid):
                           T.S("implementing")))
 
 
-def agent_findings(name, T, s, t, now):
-    """The findings of the live session `s` of ticket `t`."""
-    import sessionreport
+def session_finding(name, T, s, t, now):
+    """The finding of the open session `s` of running ticket `t`, or None: its turn ended,
+    it waits for nothing, and its ticket does not show its work done."""
+    if s.get("dialog") or T.state_word(s) not in ("idle", "finished"):
+        return None
+    if not s.get("claude") or T.session_ended(s):
+        return None
     mode = s.get("mode") or "work"
-    word = T.state_word(s)
-    last = max(float(s.get("updated") or 0), float(s.get("idle_since") or 0)) \
-        or float(s.get("created") or 0)
-    quiet = now - last if last else 0
-    if s.get("dialog"):
-        if quiet >= QUIET:
-            return [_finding(name, t, "a dialog waits for %s: %s" % (
-                _minutes(quiet), sessionreport._question(s)))]
-        return []
-    if word == "idle" and quiet >= QUIET:
-        return [_finding(name, t, "its turn ended %s ago, and it waits for nothing"
-                         % _minutes(quiet), _send(name, t.id, mode, _next_step(T, t.id)))]
-    if word == "finished" and s.get("claude") and not T.session_ended(s) and quiet >= QUIET:
-        undone = T.finish_undone(t, mode)
-        if undone:
-            return [_finding(name, t, "its turn ended %s ago, and its order is not carried "
-                             "out: %s" % (_minutes(quiet), undone),
-                             _send(name, t.id, mode, _next_step(T, t.id)))]
-    if word in ("running", "subagent") and s.get("updated") \
-            and now - float(s["updated"]) >= NO_PROGRESS:
-        span = now - float(s["updated"])
-        doing = s.get("doing") or s.get("why") or "its turn runs"
-        return [_finding(name, t, "no progress for %s: %s" % (_minutes(span), doing),
-                         _send(name, t.id, mode, _next_step(T, t.id)))]
-    return []
+    last = max(float(s.get("updated") or 0), float(s.get("idle_since") or 0))
+    if not last or now - last < QUIET or not T.finish_undone(t, mode):
+        return None
+    return _finding(name, t, "its session waits for nothing",
+                    _send(name, t.id, mode, _next_step(t.id)))
 
 
 def chain_findings(name, T, t, by_id, live):
-    """The findings of the `blocked-by:` chain of ticket `t`. `live` maps a ticket id to its
-    live sessions."""
-    settled = (T.lane("verify"), T.lane("closed"))
+    """The findings of the `blocked-by:` chain of running ticket `t`. `live` maps a ticket id
+    to its open sessions."""
     out = []
+    settled = (T.lane("verify"), T.lane("closed"))
 
     def walk(x, path):
         for b in x.blocked_by:
-            waits = "the chain %s waits for it" % " -> ".join(path + [b])
             if b in path:
-                out.append(("cycle:" + ",".join(sorted(path)), _finding(
-                    name, t, "its blocked-by chain is a cycle: %s -> %s"
-                    % (" -> ".join(path), b))))
+                out.append(_finding(name, t, "circular dependency: %s"
+                                    % " -> ".join(path + [b])))
                 continue
             bt = by_id.get(b)
             if bt is None:
-                out.append((b, _finding(name, t, "it waits for %s, which this project does "
-                                                 "not hold" % b)))
+                out.append(_finding(name, t, "waits for %s, which does not exist" % b))
+            elif bt.state == T.lane("closed") and bt.status == T.S("cancelled"):
+                out.append(_finding(name, t, "waits for %s, which is cancelled" % b))
+            elif bt.state in settled or live.get(b):
                 continue
-            if bt.state == T.lane("closed"):
-                if bt.status == T.S("cancelled"):
-                    out.append((b, _finding(name, bt, "cancelled, and %s: it never lands"
-                                            % waits)))
-                continue
-            if bt.state in settled or live.get(b):
-                continue
-            if bt.state in (T.lane("start"), T.lane("ai")):
-                out.append((b, _finding(name, bt, "nobody works it, and %s; it sits in %s "
-                                        "with no session" % (waits, bt.state),
-                                        _launch(name, T, bt, "%s waits for it" % path[-1]))))
-            elif bt.state == T.lane("active"):
-                out.append((b, _finding(name, bt, "no agent runs it in %s / %s, and %s"
-                                        % (bt.state, bt.status, waits))))
             elif bt.state == T.P.PAUSED:
-                out.append((b, _finding(name, bt, "the owner paused it, and %s" % waits)))
-            elif bt.state == T.lane("blocked"):
-                if bt.status == T.S("blocked by other task") and bt.blocked_by:
-                    walk(bt, path + [b])
-                    continue
-                cause = _first_line(bt.body, "Blocked")
-                out.append((b, _finding(name, bt, "%s%s, and %s" % (
-                    bt.status, (": " + cause) if cause else "", waits))))
+                out.append(_finding(name, t, "waits for %s, which is paused" % b))
+            elif bt.state == T.lane("blocked") and bt.status == T.S("blocked by user"):
+                out.append(_finding(name, t, "waits for %s, which you blocked" % b))
+            elif bt.state == T.lane("blocked") and bt.status == T.S("blocked by outside cause"):
+                cause = _cause(T, bt)
+                out.append(_finding(name, t, "waits for %s, blocked by an outside cause%s"
+                                    % (b, (": " + cause) if cause else "")))
+            elif bt.state == T.lane("blocked") and bt.blocked_by:
+                walk(bt, path + [b])
+            elif bt.state in (T.lane("start"), T.lane("ai")):
+                out.append(_finding(name, t, "waits for %s, which nobody works" % b,
+                                    _launch(name, bt, "%s waits for it" % t.id)))
+            elif bt.state == T.lane("active"):
+                out.append(_finding(name, t, "waits for %s, which no agent runs" % b,
+                                    _cmd(name, 'work %s --note "%s waits for it"'
+                                         % (b, t.id))))
     walk(t, [t.id])
     return out
-
-
-def _first_line(body, heading):
-    import sessionreport
-    for ln in sessionreport._section(body, heading).splitlines():
-        if ln.strip():
-            return " ".join(ln.strip().lstrip("-* ").split())[:160]
-    return ""
 
 
 def project_findings(name, T, now):
@@ -185,87 +200,84 @@ def project_findings(name, T, now):
     tickets = T.load_all()
     by_id = {t.id: t for t in tickets}
     live = {}
-    found = []
     for s in T.live_sessions(tickets):
         t = by_id.get(s.get("id"))
-        if t is None or t.repeat == T.MANAGER or T._is_own_session(s):
+        if t is None or not t.id or t.repeat == T.MANAGER or T._is_own_session(s):
             continue
         live.setdefault(t.id, []).append(s)
-        found += [(t.id, f) for f in agent_findings(name, T, s, t, now)]
-    running = (T.S("implementing"), T.S("planning"), T.S("investigating"))
-    settled = (T.lane("verify"), T.lane("closed"))
-    for t in tickets:
-        if not t.id or t.repeat == T.MANAGER or t.state in settled or t.state == T.P.PAUSED:
+    found = []
+    for tid, sessions in live.items():
+        t = by_id[tid]
+        if set_aside(T, t) or t.state in (T.lane("verify"), T.lane("closed")):
             continue
-        if t.state == T.lane("active") and t.status in running and not live.get(t.id):
-            found.append((t.id, _finding(name, t, "no agent runs it in %s / %s"
-                                         % (t.state, t.status))))
+        for s in sessions:
+            f = session_finding(name, T, s, t, now)
+            if f:
+                found.append(f)
+                break
+        if t.state == T.lane("blocked") and t.status == T.S("blocked by outside cause"):
+            cause = _cause(T, t)
+            found.append(_finding(name, t, "blocked by an outside cause%s"
+                                  % ((": " + cause) if cause else "")))
+            continue
         waiting = t.state == T.lane("blocked") and t.status == T.S("blocked by other task")
-        if not (live.get(t.id) or t.state == T.lane("active") or waiting) or not t.blocked_by:
-            continue
-        if waiting and all(b in by_id and by_id[b].state in settled
-                           and by_id[b].status != T.S("cancelled") for b in t.blocked_by):
-            s = next(iter(live.get(t.id) or ()), None)
-            if s is None:
-                cmd = _cmd(name, 'work %s --note "Every ticket it waits for landed."' % t.id)
-            elif s.get("dialog"):
-                cmd = ""
-            else:
-                cmd = _send(name, t.id, s.get("mode") or "work", _landed_step(T, t.id))
-            found.append((t.id, _finding(name, t, "every ticket it waits for landed, and it "
-                                                  "still waits in %s" % t.state, cmd)))
+        if waiting and t.blocked_by and all(
+                b in by_id and by_id[b].state in (T.lane("verify"), T.lane("closed"))
+                and by_id[b].status != T.S("cancelled") for b in t.blocked_by):
+            s = next((x for x in sessions if not x.get("dialog")), None)
+            if s is not None and not any(T.state_word(x) in BUSY for x in sessions):
+                found.append(_finding(name, t, "its blockers landed, and nothing resumes it",
+                                      _send(name, tid, s.get("mode") or "work",
+                                            _landed_step(T, tid))))
             continue
         found += chain_findings(name, T, t, by_id, live)
     out, seen = [], set()
-    for key, f in found:
-        k = (key, f["text"])
-        if k not in seen:
-            seen.add(k)
+    for f in found:
+        key = (f["id"], f["text"])
+        if key not in seen:
+            seen.add(key)
             out.append(f)
     return out
 
 
 def evaluate(registry=None, now=None):
-    """Every finding of every registered project, in the order of the registry."""
+    """Every finding of every registered project, in the order of the registry. A project
+    whose tickets or sessions cannot be read gives none."""
     import todo as T
     now = time.time() if now is None else now
     findings = []
     for r in (project.load_registry() if registry is None else registry):
-        name = r["name"]
         try:
             tok = project.use(Path(r["path"]))
         except Exception:                               # noqa: BLE001 - an unreachable project
             continue
         try:
-            findings += project_findings(name, T, now)
+            findings += project_findings(r["name"], T, now)
         except Exception as exc:                        # noqa: BLE001 - the evaluation goes on
-            findings.append({"project": name, "id": "", "title": "", "command": "",
-                             "text": "its tickets cannot be read: %s: %s"
-                                     % (type(exc).__name__, exc)})
+            sys.stderr.write("stuck: %s cannot be read: %s: %s\n"
+                             % (r["name"], type(exc).__name__, exc))
         finally:
             project.reset(tok)
     return findings
 
 
+# ── the report ─────────────────────────────────────────────────────────────
+
 def line(f):
-    cell = ('%s %s "%s"' % (f["project"], f["id"], " ".join(f["title"].split()))
-            if f["id"] else f["project"])
-    return "%s %s %s" % (cell, DASH, f["text"])
+    return '%s %s "%s" %s %s' % (f["project"], f["id"], _cut(f["title"], TITLE_WIDTH), DASH,
+                                 f["text"])
 
 
 def render(findings):
-    """The findings as Markdown for the owner, or "" when there is none."""
+    """The findings as Markdown, one line each, or "" when nothing is stuck."""
     if not findings:
         return ""
-    rows = ["**%s**" % HEADING]
-    for f in findings:
-        rows.append("- %s" % line(f))
-        rows.append("  - %s" % (MANAGER if f["command"] else OWNER))
-    return "\n".join(rows) + "\n"
+    return "\n".join(["**%s**" % HEADING] + ["- %s" % line(f) for f in findings]) + "\n"
 
 
 def report(registry=None, as_json=False, out=None, err=None, now=None):
-    """Print the findings on `out`, and the commands the manager runs on `err`. Returns 0."""
+    """Print the findings on `out`, and the commands the manager runs on `err`. Prints
+    nothing when nothing is stuck. Returns 0."""
     out = sys.stdout if out is None else out
     err = sys.stderr if err is None else err
     findings = evaluate(registry, now)
@@ -273,7 +285,10 @@ def report(registry=None, as_json=False, out=None, err=None, now=None):
         out.write(json.dumps(findings, indent=1) + "\n")
         return 0
     out.write(render(findings))
-    cmds = [f["command"] for f in findings if f["command"]]
+    cmds = []
+    for f in findings:
+        if f["command"] and f["command"] not in cmds:
+            cmds.append(f["command"])
     if cmds:
         err.write("stuck: run each command below, and write nothing about it:\n")
         for c in cmds:
@@ -284,10 +299,17 @@ def report(registry=None, as_json=False, out=None, err=None, now=None):
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="octopus stuck",
                                  description="the manager's hourly evaluation: the running "
-                                             "tickets and the blockers that are stuck, in "
-                                             "every registered project. It launches nothing")
+                                             "tickets that are stuck, in every registered "
+                                             "project. It launches nothing")
     ap.add_argument("--json", action="store_true", help="the findings as JSON")
+    ap.add_argument("--switch", choices=("on", "off"),
+                    help="turn the hourly evaluation on or off; only on the owner's order. "
+                         "It is off by default")
     a = ap.parse_args(argv)
+    if a.switch:
+        switch(a.switch == "on")
+        print("stuck: the hourly evaluation is %s" % a.switch)
+        return 0
     return report(as_json=a.json)
 
 

@@ -1,6 +1,6 @@
 ---
 name: manager-stuck
-description: The manager's hourly evaluation. The engine types `/manager-stuck` into the Octopus AI manager session once an hour when a running ticket or a blocker is stuck. Run the evaluation, print its findings, run the commands it names, and end the turn.
+description: The manager's hourly evaluation. While its switch is on, the engine types `/manager-stuck` into the Octopus AI manager session once an hour when a running ticket is stuck. Run the evaluation, print its findings, run the commands it names, and end the turn.
 disable-model-invocation: true
 ---
 <!-- octopus:skill-pointer -->

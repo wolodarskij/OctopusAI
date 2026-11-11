@@ -12,8 +12,10 @@
                                                   nothing; --watch: the fallback while the
                                                   board does not run
     python octopus.py stuck [--json]              the manager's hourly evaluation: the running
-                                                  tickets and the blockers that are stuck, in
-                                                  every registered project; it launches nothing
+                                                  tickets that are stuck, in every registered
+                                                  project; it launches nothing
+    python octopus.py stuck --switch on|off       turn the hourly evaluation on or off, only on
+                                                  the owner's order; it is off by default
     python octopus.py ai-filed [--dry-run]        move the open tickets that an AI filed without
                                                   an owner's request to AI-Pipeline, in every
                                                   registered project

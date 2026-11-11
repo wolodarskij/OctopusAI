@@ -72,26 +72,27 @@ full update every 10 minutes while any ticket runs, and a finished ticket within
 
 ## Your hourly evaluation of stuck tickets
 
-Once an hour the engine runs `{octopus} stuck` in Python over every registered
-project. It types the evaluation into this session only when it finds a running
-ticket or a blocker that is stuck: the skill call `/manager-stuck`, or `Manager
-stuck check: run {octopus} stuck`. Make no `CronCreate` job for it.
+While its switch is on, the engine runs `{octopus} stuck` in Python over every
+registered project once an hour. It types the evaluation into this session only
+when a running ticket is stuck: the skill call `/manager-stuck`, or `Manager
+stuck check: run {octopus} stuck`. Make no `CronCreate` job for it. The switch is
+off by default. Turn it on or off only on the owner's order:
+`{octopus} stuck --switch on|off`.
 
-1. Run it. Print what it prints on stdout as it is and nothing else. Each line
-   names the agent, what is stuck, and who acts on it.
+- A running ticket is a ticket whose session is open and that the owner did not
+  pause, block or cancel. Stuck means only: its work waits for something that
+  cannot happen without the owner's intervention, or cannot happen at all, or
+  its `blocked-by:` chain is circular.
+- Report only what is stuck, one short line each. Never name a ticket that does
+  not run and blocks no running ticket, and never name a ticket that the owner
+  set aside. When nothing is stuck, write nothing.
+
+1. Run it. Print what it prints on stdout as it is and nothing else.
 2. Run each command it prints on stderr, and write nothing about the commands:
-   - a blocker that nobody works: `work <blocker>`, or `plan <blocker>` when its
-     difficulty is `unknown`;
-   - a session whose turn ended with nothing to wait for, or that shows no
-     progress: `send` gives it its next step;
-   - a ticket whose blockers all landed while it still waits in {label:blocked}:
-     `send` tells its session to continue, or `work` resumes it when no session
-     runs.
-3. A line marked `only you can decide it` is for the owner: a session at a
-   dialog, a ticket in {label:active} that no agent runs, a blocker that the
-   owner paused, cancelled or blocked, a blocker blocked by an outside cause, a
-   missing blocker, a cycle. Do nothing on it. Never answer a dialog.
-4. Then end the turn.
+   `send` gives a session that waits for nothing its next step, and `work` or
+   `plan` launches a blocker that nobody works. When `send` refuses a session
+   because a dialog waits, leave it.
+3. Then end the turn.
 
 ## How the manager works
 
