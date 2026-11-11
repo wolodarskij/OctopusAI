@@ -98,10 +98,17 @@ class RemoteControl(FixtureCase):
                      "key": "%s/work" % self.tid},
                     {"id": self.tid, "mode": "plan", "claude": 2, "running": True,
                      "key": "%s/plan" % self.tid}]
-            with mock.patch.object(T, "send_session", return_value=1) as send:
+            with mock.patch.object(T, "send_session", return_value=1) as send, \
+                    mock.patch.object(T, "input_box_busy", return_value=""):
                 typed = T.apply_remote_control(t, live)
             self.assertEqual(typed, ["%s/work" % self.tid])
             send.assert_called_once_with(live[0], T.RC_COMMAND, ["Enter"])
+            # Text that nobody sent stays in the box: the command waits for the next launch.
+            with mock.patch.object(T, "send_session") as send, \
+                    mock.patch.object(T, "input_box_busy",
+                                      return_value="the input box holds unsent text"):
+                self.assertEqual(T.apply_remote_control(t, live), [])
+            send.assert_not_called()
             T.set_remote_control(t, "off")
             with mock.patch.object(T, "send_session") as send:
                 self.assertEqual(T.apply_remote_control(T.find(T.load_all(), self.tid), live),

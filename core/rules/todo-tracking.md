@@ -729,6 +729,8 @@ the owner. It grants `projects`, so the session reaches every registered project
   else, and when a notice that was not reported yet arrived. A Claude Code session gets the
   skill call `/manager-check`, and `/manager-brief <path>` when its brief changed; a session
   whose project holds no such skill, or of another AI provider, gets the full text of each.
+  The engine reads the session's input box first. While the box holds text that nobody
+  sent, the engine types nothing into the session, and reads the box again at its next tick.
   A finished ticket reaches the
   owner within one interval. The manager makes no `CronCreate` job for the check. While the
   board does not run, the engine's watcher, `octopus check --watch`, does the same. The

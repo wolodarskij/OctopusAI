@@ -4804,7 +4804,10 @@ def apply_remote_control(t, sessions=None):
     for s in (sessions if sessions is not None else live_sessions([t])):
         if s.get("id") != t.id or not s.get("claude") or s.get("running"):
             continue
-        send_session(s, RC_COMMAND, ["Enter"])
+        try:
+            send_when_box_empty(s, RC_COMMAND, ["Enter"])
+        except InputBoxBusy:
+            continue
         done.append(s["key"])
     return done
 
@@ -6837,9 +6840,9 @@ def screen_session(s):
     return scr
 
 
-# The prompt of Claude Code's input box, at the start of its line: `❯` or `>`, then a space
-# or a no-break space.
-_PROMPT_LINE = re.compile("^([\u276f>])[ \u00a0]")
+# The prompt of Claude Code's input box, at the start of its line: `❯` or `>`, then a space,
+# a no-break space, or the end of the line of an empty box.
+_PROMPT_LINE = re.compile("^([\u276f>])(?:[ \u00a0]|$)")
 
 
 def suggested_prompt(scr):
@@ -6866,6 +6869,61 @@ def suggested_prompt(scr):
             return {"row": y, "col": col, "text": text}
         return None
     return None
+
+
+def typed_input(scr):
+    """The text that somebody typed into Claude Code's input box and did not send: the lines
+    of the box from its prompt down to the line of `─` under it. "" when the box is empty or
+    shows only the suggested prompt, `None` when the screen shows no input box.
+
+    A suggested prompt is one line of dim cells, or one line with the cursor on its first
+    cell: Claude Code keeps the cursor at the end of typed text, and at the start of a
+    suggestion. The screen of a pseudoconsole does not carry SGR 2 (faint) in `dim`, so a
+    faint suggestion shows there as plain text."""
+    lines = scr.get("lines") or []
+    for y in range(len(lines) - 1, 0, -1):
+        m = _PROMPT_LINE.match(lines[y])
+        if not m or not lines[y - 1].lstrip().startswith("\u2500"):
+            continue
+        col = m.end()
+        rows = [lines[y][col:]]
+        for line in lines[y + 1:]:
+            if line.lstrip().startswith("\u2500"):
+                break
+            rows.append(line)
+        text = "\n".join(r.rstrip() for r in rows).strip()
+        if not text:
+            return ""
+        if not any(r.strip() for r in rows[1:]) and (
+                suggested_prompt(scr) or list(scr.get("cursor") or ()) == [col, y]):
+            return ""
+        return text
+    return None
+
+
+class InputBoxBusy(ValueError):
+    """The input box of a session holds text that nobody sent yet."""
+
+
+def input_box_busy(s):
+    """Why the engine may not type into session `s` now, or "": its input box holds unsent
+    text, or a Claude session's screen shows no input box. Raises OSError when the screen
+    cannot be read."""
+    typed = typed_input(screen_session(s))
+    if typed:
+        return "the input box holds unsent text"
+    if typed is None and (s.get("provider") or "claude") == "claude":
+        return "the screen shows no input box"
+    return ""
+
+
+def send_when_box_empty(s, text="", keys=()):
+    """`send_session`, only while the session's input box holds no unsent text: text typed
+    into it would cut into the owner's message. Raises `InputBoxBusy` when it does."""
+    busy = input_box_busy(s)
+    if busy:
+        raise InputBoxBusy("%s: %s" % (s.get("key") or s.get("id"), busy))
+    return send_session(s, text, keys)
 
 
 def send_session(s, text="", keys=()):
@@ -7266,6 +7324,16 @@ def cmd_send(args):
             print("Error: the input box of %s shows Claude Code's suggested prompt, which "
                   "nobody typed: %r. %s would take it as typed text. Give --text"
                   % (s["key"], sug["text"], keys[0]), file=sys.stderr)
+            return 1
+    if args.text:
+        # Text typed into a box that holds the owner's unsent text cuts into it.
+        try:
+            typed = typed_input(screen_session(s))
+        except OSError:
+            typed = None
+        if typed:
+            print("Error: the input box of %s holds unsent text: %r. Send again when it is "
+                  "empty" % (s["key"], typed[:80]), file=sys.stderr)
             return 1
     try:
         n = send_session(s, args.text or "", keys)

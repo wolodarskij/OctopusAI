@@ -24,6 +24,20 @@ SID_A = str(uuid.UUID(int=11))
 SID_B = str(uuid.UUID(int=12))
 
 
+def box(text="", dim=None, cursor=None):
+    """A Claude Code screen whose input box holds `text`, one line per row. The cursor stands
+    after the text, as after typing, unless `cursor` names it."""
+    rows = text.split("\n")
+    lines = ["output", "─" * 20, "❯ " + rows[0]] + ["  " + r for r in rows[1:]]
+    lines += ["─" * 20, "  ? for shortcuts"]
+    return {"cols": 80, "rows": len(lines), "lines": lines,
+            "cursor": cursor or [2 + len(rows[-1]), 1 + len(rows)],
+            "dim": dim if dim is not None else [[] for _ in lines]}
+
+
+SUGGESTION = dict(dim=[[], [], [2, 10], [], []], cursor=[2, 2])
+
+
 def sess(sid, tid, wait=None, mode="work", **kw):
     s = {"session": sid, "id": tid, "mode": mode, "running": wait is None, "wait": wait,
          "why": "", "claude": 1, "shell": 2, "waits_for": [], "key": "%s-%s" % (tid, mode)}
@@ -306,9 +320,11 @@ class Wake(FixtureCase):
         self.live = [sess(SID_A, self.mid, None)]
         self.send = mock.Mock()
         self.news = (True, {"notices": []})
+        self.screen = box()
         self.patches = [mock.patch.object(T, "live_sessions",
                                           lambda tickets=None: self.live),
                         mock.patch.object(T, "send_session", self.send),
+                        mock.patch.object(T, "screen_session", lambda s: self.screen),
                         mock.patch.object(C, "evaluate", lambda **kw: self.news),
                         mock.patch.dict(todo_server._CHECK,
                                         {"since": 0.0, "managers": False, "skip": ""})]
@@ -353,6 +369,43 @@ class Wake(FixtureCase):
         self.live = [sess(SID_A, self.mid, "input", why="judge: input")]
         todo_server._wake_project(self.root, 1e9)
         self.assertEqual(len(todo_server._wake_project(self.root, 1e9 + C.INTERVAL)), 1)
+
+    def test_a_manager_whose_input_box_holds_text_is_not_typed_into(self):
+        todo_server._wake_project(self.root, 1e9)
+        self.screen = box("Documentation bug is always filed as")
+        self.assertEqual(todo_server._wake_project(self.root, 1e9 + C.INTERVAL), [])
+        self.assertFalse(self.send.called)
+        self.assertIn("unsent text", todo_server._CHECK["skip"])
+        # The box is empty again: the next tick types the check, with no new interval.
+        self.screen = box()
+        self.assertEqual(len(todo_server._wake_project(self.root, 1e9 + C.INTERVAL + 30)), 1)
+
+    def test_a_box_that_fills_before_the_check_is_typed_gives_the_wake_back(self):
+        todo_server._wake_project(self.root, 1e9)
+        screens = iter([box(), box("s")])
+        with mock.patch.object(T, "screen_session", lambda s: next(screens)):
+            self.assertEqual(todo_server._wake_project(self.root, 1e9 + C.INTERVAL), [])
+        self.assertFalse(self.send.called)
+        self.assertEqual(len(todo_server._wake_project(self.root, 1e9 + C.INTERVAL + 30)), 1)
+
+    def test_a_suggested_prompt_does_not_hold_the_check(self):
+        todo_server._wake_project(self.root, 1e9)
+        self.screen = box("try this", **SUGGESTION)
+        self.assertEqual(len(todo_server._wake_project(self.root, 1e9 + C.INTERVAL)), 1)
+
+    def test_a_manager_with_an_old_brief_and_text_in_its_box_gets_no_brief(self):
+        t, _brief = self.stale_brief()
+        self.screen = box("half a message")
+        todo_server._wake_project(self.root, 1e9)
+        self.assertFalse(self.send.called)
+        self.assertTrue(T.manager_brief_stale(t))
+
+    def test_a_claude_screen_with_no_input_box_holds_the_check(self):
+        todo_server._wake_project(self.root, 1e9)
+        self.screen = {"cols": 80, "rows": 1, "cursor": [0, 0], "lines": ["output"],
+                       "dim": [[]]}
+        self.assertEqual(todo_server._wake_project(self.root, 1e9 + C.INTERVAL), [])
+        self.assertFalse(self.send.called)
 
     def test_the_board_writes_its_heartbeat(self):
         todo_server._wake_project(self.root, 1e9)
@@ -412,6 +465,31 @@ class Wake(FixtureCase):
         self.assertEqual(view["why"], "the manager waits for your answer")
         C.update_state(checked=late - 5)
         self.assertFalse(todo_server.manager_check_view(late)["late"])
+
+
+class TypedInput(unittest.TestCase):
+    def test_an_empty_box_holds_nothing(self):
+        self.assertEqual(T.typed_input(box()), "")
+
+    def test_typed_text_is_read_over_every_line_of_the_box(self):
+        self.assertEqual(T.typed_input(box("first\nsecond")), "first\n  second")
+
+    def test_a_suggested_prompt_is_no_typed_text(self):
+        self.assertEqual(T.typed_input(box("try this", **SUGGESTION)), "")
+
+    def test_a_faint_suggestion_with_no_dim_is_known_by_the_cursor_at_its_start(self):
+        self.assertEqual(T.typed_input(box("granted, run it", cursor=[2, 2])), "")
+
+    def test_typed_text_with_the_cursor_after_it_is_typed(self):
+        self.assertEqual(T.typed_input(box("#")), "#")
+
+    def test_the_empty_prompt_line_with_no_space_is_an_empty_box(self):
+        scr = box()
+        scr["lines"][2] = "❯"
+        self.assertEqual(T.typed_input(scr), "")
+
+    def test_a_screen_with_no_box_gives_none(self):
+        self.assertIsNone(T.typed_input({"lines": ["output", "more"]}))
 
 
 class Restart(unittest.TestCase):

@@ -95,6 +95,17 @@ def claim_wake(key, now, interval=INTERVAL):
             return row is not None and now >= row[0]
 
 
+def release_wake(key, now, interval=INTERVAL):
+    """Give back the wake that `claim_wake(key, now)` reserved and did not use: the next
+    claim of `key` goes through."""
+    import sqlite3
+    path = project.home() / "manager-wakes.sqlite3"
+    with contextlib.closing(sqlite3.connect(str(path), timeout=1)) as db:
+        with db:
+            db.execute("UPDATE wakes SET at=? WHERE root=? AND session=? AND at=?",
+                       (now - interval, *key, now))
+
+
 # ── the wake ───────────────────────────────────────────────────────────────
 
 def wake_home(now, note=None, mark=False):
@@ -126,23 +137,37 @@ def wake_home(now, note=None, mark=False):
         if s.get("dialog") or s.get("hooked") is False:
             note(now, managers, "the manager waits for your answer")
             continue
+        # Text typed into a box that holds the owner's unsent message cuts into it. The
+        # session waits, unclaimed, and the next tick reads the box again.
+        try:
+            busy = T.input_box_busy(s)
+        except OSError as exc:
+            busy = "its screen could not be read: %s" % exc
+        if busy:
+            note(now, managers, "the check waits: %s" % busy)
+            continue
         t = managers[s["id"]]
         if T.manager_brief_stale(t):
             brief = T.rewrite_manager_brief(t)
             try:
-                T.send_session(s, T.manager_brief_text(brief, s), ["Enter"])
+                T.send_when_box_empty(s, T.manager_brief_text(brief, s), ["Enter"])
             except (OSError, ValueError) as exc:
                 os.utime(str(brief), ns=(0, 0))         # stale again: the next tick tries again
                 print("watchdog: %s %s: the new brief could not be typed: %s"
                       % (root.name, s["id"], exc))
             continue
-        if not claim_wake((os.path.normcase(str(root.resolve())), s["session"]), now):
+        key = (os.path.normcase(str(root.resolve())), s["session"])
+        if not claim_wake(key, now):
             continue
         news, seen = evaluate(now=now)
         if not news:
             continue
         try:
-            T.send_session(s, wake_text(s), ["Enter"])
+            T.send_when_box_empty(s, wake_text(s), ["Enter"])
+        except T.InputBoxBusy:
+            release_wake(key, now)
+            note(now, managers, "the check waits: the input box holds unsent text")
+            continue
         except (OSError, ValueError) as exc:
             print("watchdog: %s %s: the check could not be typed: %s" % (root.name, s["id"], exc))
             continue

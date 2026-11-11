@@ -583,7 +583,8 @@ def _watch_project(root, now):
 # The board runs the manager's check in Python (`managercheck.evaluate`) for each live
 # manager session of the home project, of every AI provider: every `managercheck.INTERVAL`
 # seconds, never for a session that waits for the owner's answer. It types
-# `managercheck.wake_text()` into the session only on news. The first check comes one
+# `managercheck.wake_text()` into the session only on news, and only while the session's
+# input box holds no unsent text; else each tick reads the box again. The first check comes one
 # interval after the watchdog first sees the session. Every tick writes the board's
 # heartbeat, which keeps the engine's watcher (`check --watch`) idle. While the board does
 # not run, that watcher types the check the same way; `managercheck.wake_home` serves both,
