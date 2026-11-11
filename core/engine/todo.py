@@ -414,10 +414,16 @@ def _result_texts(t):
             if own.match(m.group(1).strip())]
 
 
+def git_root():
+    """Whether git holds the project tree: the project's `vcs` is git, or its root holds a git
+    repository whatever its `vcs` says."""
+    return P.vcs == "git" or (P.ROOT / ".git").exists()
+
+
 def commit_files(t):
     """The files that the git commits `<id>:` of ticket `t` change, as paths from the project
-    root, sorted; [] in a project without git."""
-    if P.vcs != "git":
+    root, sorted; [] when git does not hold the project tree."""
+    if not git_root():
         return []
     import vcs as _vcs
     st = _vcs._git(P.ROOT, "log", "--format=", "--name-only", "--grep", "^%s:" % t.id,
@@ -3676,8 +3682,9 @@ def _owner_record(records, key, claim, judged, named, why):
 # THE ORDER CHECK: an AI session's move of a ticket to the verify lane is refused while a part
 # of the ticket's order is not done. The order is the ticket's title, its first section, its
 # `## Owner's orders` and the note of its last launch. The duplicate check's model compares it
-# with the result (the outcome, `## Result`, `## Verified`) and the changed files (the files of
-# the ticket's commits, and the files of the tree that are not committed), and names each part
+# with the result (the outcome, `## Result`, `## Verified`) and the changed files (in a git tree
+# the files of the ticket's commits and the files of the tree that are not committed, else the
+# files that the result names and that changed on disk since the launch), and names each part
 # of the order that the work did not do, in words copied from the order. An answer whose words
 # do not stand in the order is rejected, and the model is asked once more. With no verdict the
 # move goes on.
@@ -3714,23 +3721,87 @@ ORDER
 RESULT
 %(result)s
 
-CHANGED FILES: the git commits of the ticket
-%(committed)s
-
-CHANGED FILES: the tree, not committed (any session's or the owner's)
-%(uncommitted)s"""
+%(changed)s"""
 
 
 def tree_changes():
     """The files of the project tree that git shows changed and not committed, as paths from
-    the project root; [] in a project without git."""
-    if P.vcs != "git":
+    the project root; [] when git does not hold the project tree."""
+    if not git_root():
         return []
     import vcs as _vcs
     st = _vcs._git(P.ROOT, "status", "--porcelain", "--untracked-files=all",
                    timeout=_vcs.COMMIT_TIMEOUT)
     return sorted({ln[3:].split(" -> ")[-1].strip().strip('"') for ln in _vcs._lines(st)
                    if len(ln) > 3})
+
+
+RESULT_PATH = re.compile(r"`([^`\n]+)`|([^\s`'\"()<>\[\]|]+)")
+RESULT_WALK = 20000
+
+
+def _launch_since(t):
+    """The time of the first launch that ticket `t` records, as a POSIX timestamp, or None."""
+    import datetime
+    times = []
+    for e in t.sessions:
+        try:
+            times.append(datetime.datetime.strptime(e["launched"].strip()[:16],
+                                                    "%Y-%m-%d %H:%M").timestamp())
+        except ValueError:
+            pass
+    return min(times) if times else None
+
+
+def result_changes(t):
+    """The files that the result sections of ticket `t` name and that changed on disk since its
+    first recorded launch, as the ticket writes them (from the project root when they are in
+    it), sorted. A named directory or glob gives each of its files that changed. For a project
+    tree that git does not hold."""
+    import glob as _glob
+    since = _launch_since(t)
+    root = P.ROOT.resolve()
+    out = set()
+
+    def changed(f):
+        try:
+            return f.is_file() and (since is None or f.stat().st_mtime >= since)
+        except OSError:
+            return False
+
+    def add(f):
+        try:
+            out.add(f.resolve().relative_to(root).as_posix())
+        except ValueError:
+            out.add(str(f))
+
+    for text in _result_texts(t):
+        for m in RESULT_PATH.finditer(text):
+            name = (m.group(1) or m.group(2) or "").strip().rstrip(".,;:")
+            name = re.sub(r":\d+(?:-\d+)?$", "", name)
+            if (not name or "://" in name or len(out) >= ORDER_FILES
+                    or not re.search(r"[/\\]|\.\w+$", name)):
+                continue
+            path = Path(name)
+            if not path.is_absolute():
+                path = P.ROOT / name
+            if re.search(r"[*?\[]", name):
+                found = [Path(x) for x in _glob.glob(str(path), recursive=True)]
+            else:
+                found = [path]
+            for f in found:
+                try:
+                    if f.is_dir():
+                        for n, sub in enumerate(f.rglob("*")):
+                            if len(out) >= ORDER_FILES or n >= RESULT_WALK:
+                                break
+                            if changed(sub):
+                                add(sub)
+                    elif changed(f):
+                        add(f)
+                except OSError:
+                    continue
+    return sorted(out)
 
 
 def _order_norm(text):
@@ -3753,10 +3824,17 @@ def order_undone(t, said=None):
     def listing(files):
         return "\n".join(files[:ORDER_FILES]) or "(none)"
 
+    if git_root():
+        changed = ("CHANGED FILES: the git commits of the ticket\n%s\n\n"
+                   "CHANGED FILES: the tree, not committed (any session's or the owner's)\n%s"
+                   % (listing(commit_files(t)), listing(tree_changes())))
+    else:
+        changed = ("CHANGED FILES: the files that the RESULT names and that changed on disk "
+                   "since the launch of the ticket (the project keeps no git history)\n%s"
+                   % listing(result_changes(t)))
     prompt = ORDER_PROMPT % {
         "project": P.name, "verify": lane("verify"), "order": order[:ORDER_CHARS],
-        "result": result[:ORDER_CHARS] or "(none)", "committed": listing(commit_files(t)),
-        "uncommitted": listing(tree_changes())}
+        "result": result[:ORDER_CHARS] or "(none)", "changed": changed}
     known = _order_norm(order)
     for _try in range(DUP_TRIES):
         d = _dup_json(_ask_dup_model(prompt))
