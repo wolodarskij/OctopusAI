@@ -59,6 +59,7 @@ ONE ENGINE, MANY PROJECTS. Every path and every rule is read from the current pr
     octopus todo manager --start              the Octopus AI project's manager, from the template when there is none, started
     octopus todo manager --claim              this Claude session, in any project, becomes the manager
     octopus todo remote-control T0001 off     Remote Control of a ticket's launches: on, off, default
+    octopus todo model T0001 fable            the model of every launch of a ticket; `default` clears it
     octopus todo groups                       the groups; `--table`, `--set`, `--run`
     octopus todo group <slug> --title "..."   create, retitle, rename or delete a group
     octopus todo regroup T0001 <slug>         put tickets in a group
@@ -92,9 +93,13 @@ become that session's `--disallowedTools`, so a ticket that was never granted a 
 cannot reach what the permit guards. A launch carries `--remote-control`, named
 `<title> - <ticket> - <short ticket title> - <mode>`, while remote control is on for the ticket
 (`remote-control: on|off` on the ticket, else `remoteControl` in project.json), and `--name`
-with the same name when it is off. The model and the effort are the defaults of the provider the
-launch starts; `--model` and `--effort` override them with one of that provider's own, and a
-launch naming a model or an effort its provider cannot run is refused. Every launch runs `--permission-mode auto`, except a
+with the same name when it is off. The model is the ticket's `model:`, else the default of the
+provider the launch starts; the effort is that provider's default. `--model` and `--effort`
+override them with one of that provider's own, and a launch naming a model or an effort its
+provider cannot run is refused. A launch whose `--model` differs from the model the ticket runs
+otherwise writes it into `model:`, and every later launch of the ticket runs it, until `--model`
+or `model <id> <model>|default` changes it. A child never takes its parent's `model:`.
+Every launch runs `--permission-mode auto`, except a
 `plan` asked for by name, which runs `--permission-mode plan`. Each mode gets its own session
 id, derived from the project's session namespace and the ticket id, so `claude --resume
 <uuid>` reattaches to that mode's agent, and two projects never share one.
@@ -249,6 +254,9 @@ RC_VALUES = ("on", "off")
 # line's old name.
 PROVIDER_FIELD = "provider"
 OLD_PROVIDER_FIELD = "agent"
+# The model every launch of the ticket runs when the launch names none: a key or an id of the
+# models of the provider the launch starts. Only the owner's order sets it.
+MODEL_FIELD = "model"
 
 
 def manager_lane_problem(t, state, status=None):
@@ -980,7 +988,7 @@ def render(meta, body):
             "created", "filed-by", "claim", "session", "launched", "sessions", "blocked-by",
             "parent",
             "group", "related",
-            "permits", "remote-control", "tags", "repeat", "run", "last-run", "last-result"]
+            "permits", "remote-control", "model", "tags", "repeat", "run", "last-run", "last-result"]
     keys += [k for k in meta if k not in keys]
     out = ["---"]
     for k in keys:
@@ -4974,9 +4982,48 @@ def cmd_brief(args):
 
 def session_model(t, provider=None, model=None, effort=None):
     """The model id and the effort a session on this ticket runs, as (model, effort): the
-    `--model` and `--effort` named, else the defaults of the provider the launch starts. Raises
-    ValueError for a model or an effort that provider cannot run."""
-    return P.choose(launch_provider(t, provider), model, effort)
+    `--model` and `--effort` named, else the ticket's `model:` and the defaults of the provider
+    the launch starts. Raises ValueError for a model or an effort that provider cannot run."""
+    provider = launch_provider(t, provider)
+    if not model and ticket_model(t):
+        try:
+            return P.choose(provider, ticket_model(t), effort)
+        except ValueError as exc:
+            raise ValueError("%s: the ticket's `%s: %s`. Name another with --model, or clear it: "
+                             "%s model %s default" % (exc, MODEL_FIELD, ticket_model(t), P.cli, t.id))
+    return P.choose(provider, model, effort)
+
+
+def ticket_model(t):
+    """The model every launch of the ticket runs when the launch names none, or ""."""
+    return str(t.meta.get(MODEL_FIELD) or "").strip()
+
+
+def remember_model(t, provider, model):
+    """Write `model` into the ticket's `model:` when it differs from the model the ticket runs
+    otherwise: its own `model:`, else the provider's default. The provider's default named on a
+    ticket with no `model:` writes nothing. Changes `t.meta` only; True when it changed."""
+    if not model:
+        return False
+    chosen = P.choose(provider, model, None)[0]
+    try:
+        current = P.choose(provider, ticket_model(t) or None, None)[0]
+    except ValueError:
+        current = None
+    if chosen == current:
+        return False
+    t.meta[MODEL_FIELD] = model
+    return True
+
+
+def set_model(t, value, provider=None):
+    """Write a model of the ticket's provider into `model:`, or clear it with `default`."""
+    if value == "default":
+        t.meta.pop(MODEL_FIELD, None)
+    else:
+        P.choose(provider or ticket_provider(t) or P.provider, value, None)
+        t.meta[MODEL_FIELD] = value
+    _write(t.path, render(t.meta, t.body))
 
 
 def launch_session_id(ticket_id, mode="work", run=1):
@@ -5256,6 +5303,8 @@ def _launch_argv(t, mode="work", model=None, no_fable=False, auto=False, effort=
                  provider=None):
     provider = launch_provider(t, provider)
     prompt = launch_prompt(t, mode)
+    # A launch that names no model runs the ticket's own.
+    model = model or ticket_model(t) or None
     if provider != "claude":
         return _provider_argv(t, mode, provider, prompt, model, effort, auto)
     # The prompt is the first argument, before every option. `--disallowedTools` and
@@ -5286,7 +5335,7 @@ def _launch_argv(t, mode="work", model=None, no_fable=False, auto=False, effort=
     dirs = launch_dirs(granted)
     if dirs:
         argv += ["--add-dir"] + dirs
-    # An explicit --model and --effort win; otherwise Claude's defaults in this project.
+    # An explicit --model and --effort win; then the ticket's model; then Claude's defaults.
     model, effort = P.choose(provider, model, effort)
     if model:
         argv += ["--model", model]
@@ -5786,6 +5835,8 @@ def cmd_work(args):
         tab = "set %s=%s&& %s" % (P.verify_env, P.verify_token(t.id), line)
     if _open_terminal(line, title, terminal, tab=tab, env=env, ticket=t.id, mode=mode) != 0:
         return 2
+    # The model the owner named stays the ticket's for every later launch; record_launch writes it.
+    kept = remember_model(t, provider, getattr(args, "model", None))
     record_launch(t, mode, provider)
     was_paused = t.state == P.PAUSED
     moved = start_lane(t, mode)
@@ -5797,6 +5848,9 @@ def cmd_work(args):
     print("%s  %s  launched in a new terminal%s"
           % (t.id, mode.upper(), "" if provider == "claude" else " on %s" % provider))
     print("  lane    %s" % moved)
+    if ticket_model(t):
+        print("  model   %s%s" % (ticket_model(t), ", the ticket's model from now on" if kept
+                                  else ", the ticket's model"))
     print("  brief   %s/.briefs/%s.md" % (P.todo_dir, t.id))
     if provider == "claude":
         print("  resume  claude --resume %s   (written to the ticket under `sessions:`)"
@@ -7130,6 +7184,32 @@ def cmd_remote_control(args):
         print("%s  remote control %s; %s" % (t.id, "on" if remote_control(t) else "off",
                                              "typed into %s" % ", ".join(typed) if typed
                                              else "from its next launch"))
+    write_index(quiet=True)
+    return 0
+
+
+def cmd_model(args):
+    """Set the model every launch of tickets runs, or clear it with `default`. Only the owner's
+    order sets it; it reaches the next launch."""
+    tickets = load_all()
+    found = []
+    for tid in args.ids:
+        t = find(tickets, tid)
+        if t is None:
+            print("Error: no ticket %r" % tid, file=sys.stderr)
+            return 2
+        found.append(t)
+    try:
+        for t in found:
+            if args.value != "default":
+                P.choose(ticket_provider(t) or P.provider, args.value, None)
+    except ValueError as exc:
+        print("Error: %s" % exc, file=sys.stderr)
+        return 2
+    for t in found:
+        set_model(t, args.value)
+        print("%s  model %s from its next launch"
+              % (t.id, ticket_model(t) or "the provider's default"))
     write_index(quiet=True)
     return 0
 
@@ -8727,7 +8807,8 @@ def _main(argv):
     p.add_argument("--no-launch", dest="no_launch", action="store_true",
                    help="return it to Pipeline and start no session")
     p.add_argument("--note", help="what you want this run's session to know")
-    p.add_argument("--model", help="a model of the provider the launch starts; absent is its default")
+    p.add_argument("--model", help="a model of the provider the launch starts; it stays the ticket's model. "
+                        "Absent: the ticket's model, else the provider's default")
     p.add_argument("--effort", help="override the effort; one of the provider's efforts")
     p.add_argument("--no-fable", action="store_true",
                    help="Fable is not available: run Opus at max effort instead")
@@ -8768,6 +8849,13 @@ def _main(argv):
     p.add_argument("ids", nargs="+", metavar="id")
     p.add_argument("value", choices=list(RC_VALUES) + ["default"])
     p.set_defaults(fn=cmd_remote_control)
+
+    p = sub.add_parser("model", help="the model every launch of tickets runs, on the owner's "
+                                     "order; `default` clears it")
+    p.add_argument("ids", nargs="+", metavar="id")
+    p.add_argument("value", metavar="model", help="a model of the provider the ticket launches, "
+                                                  "or `default`")
+    p.set_defaults(fn=cmd_model)
 
     p = sub.add_parser("epic", help="create an epic directory")
     p.add_argument("name")
@@ -8812,7 +8900,8 @@ def _main(argv):
 
     p = sub.add_parser("work", help="launch a Claude session on this ticket: plan, then execute")
     p.add_argument("id")
-    p.add_argument("--model", help="a model of the provider the launch starts; absent is its default")
+    p.add_argument("--model", help="a model of the provider the launch starts; it stays the ticket's model. "
+                        "Absent: the ticket's model, else the provider's default")
     p.add_argument("--effort", help="override the effort; one of the provider's efforts")
     p.add_argument("--no-fable", action="store_true",
                    help="Fable is not available: run Opus at max effort instead")
@@ -8834,7 +8923,8 @@ def _main(argv):
 
     p = sub.add_parser("plan", help="launch a Claude session that only produces the plan")
     p.add_argument("id")
-    p.add_argument("--model", help="a model of the provider the launch starts; absent is its default")
+    p.add_argument("--model", help="a model of the provider the launch starts; it stays the ticket's model. "
+                        "Absent: the ticket's model, else the provider's default")
     p.add_argument("--effort", help="override the effort; one of the provider's efforts")
     p.add_argument("--no-fable", action="store_true",
                    help="Fable is not available: run Opus at max effort instead")
@@ -8856,7 +8946,8 @@ def _main(argv):
     p = sub.add_parser("review", help="a session that re-evaluates the ticket, not the code")
     p.add_argument("id")
     p.add_argument("--note", help="state explicitly what to reconsider")
-    p.add_argument("--model", help="a model of the provider the launch starts; absent is its default")
+    p.add_argument("--model", help="a model of the provider the launch starts; it stays the ticket's model. "
+                        "Absent: the ticket's model, else the provider's default")
     p.add_argument("--effort", help="override the effort; one of the provider's efforts")
     p.add_argument("--no-fable", action="store_true",
                    help="Fable is not available: run Opus at max effort instead")
@@ -8878,7 +8969,8 @@ def _main(argv):
                                       "only one that may close it")
     p.add_argument("id")
     p.add_argument("--note", help="what the owner wants proved, in neutral words")
-    p.add_argument("--model", help="a model of the provider the launch starts; absent is its default")
+    p.add_argument("--model", help="a model of the provider the launch starts; it stays the ticket's model. "
+                        "Absent: the ticket's model, else the provider's default")
     p.add_argument("--effort", help="override the effort; one of the provider's efforts")
     p.add_argument("--no-fable", action="store_true",
                    help="Fable is not available: run Opus at max effort instead")
@@ -8969,7 +9061,8 @@ def _main(argv):
                    help="put fine group slugs or ticket ids into a Todo group")
     p.add_argument("--table", action="store_true", help="print every Todo group as a table")
     p.add_argument("--json", action="store_true", help="the groups as data")
-    p.add_argument("--model", help="a model of the provider the launch starts; absent is its default")
+    p.add_argument("--model", help="a model of the provider the launch starts; it stays the ticket's model. "
+                        "Absent: the ticket's model, else the provider's default")
     p.add_argument("--effort", help="one of the provider's efforts; absent is its default")
     p.add_argument("--run", metavar="NAME",
                    help="launch a session on every Pipeline ticket of a Todo group")
@@ -9072,7 +9165,8 @@ def _main(argv):
     p.add_argument("--timeout", type=int, default=3600,
                    help="seconds a batch may take; 0 waits for ever")
     p.add_argument("--note", help="what every review should reconsider")
-    p.add_argument("--model", help="a model of the provider the launch starts; absent is its default")
+    p.add_argument("--model", help="a model of the provider the launch starts; it stays the ticket's model. "
+                        "Absent: the ticket's model, else the provider's default")
     p.add_argument("--effort", help="override the effort; one of the provider's efforts")
     p.add_argument("--no-fable", action="store_true",
                    help="Fable is not available: run Opus at max effort instead")

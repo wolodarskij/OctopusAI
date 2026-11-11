@@ -168,6 +168,7 @@ def snapshot():
             "remoteControlSet": t.meta.get(T.RC_FIELD, ""),
             "remoteControlAvailable": T.remote_control_available(t),
             "provider": T.ticket_provider(t) or P.provider,
+            "model": ticket_model_key(t),
             "lastRun": t.meta.get("last-run", ""),
             "lastResult": t.meta.get("last-result", ""),
             "created": str(t.meta.get("created") or ""),
@@ -376,6 +377,16 @@ def provider_choices():
                 "headless": providers.dialect(a) in ("claude", "codex"),
                 "effort": bool(project.PROVIDER_FEATURES.get(a, {}).get("effort"))}
             for a, spec in P.providers.items()}
+
+
+def ticket_model_key(t):
+    """The ticket's `model:` as a key of its provider's models, the way the launch dialog names
+    it, or "" when the ticket has none."""
+    model = T.ticket_model(t)
+    models = P.providers.get(T.ticket_provider(t) or P.provider, {}).get("models", {})
+    if model in models:
+        return model
+    return next((k for k, mid in models.items() if mid == model), model)
 
 
 def _model_effort(body, provider=None):

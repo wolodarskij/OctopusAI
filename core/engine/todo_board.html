@@ -2733,6 +2733,8 @@ function fillChoices(provider, keep, prefix = "d") {
 function askNote(t, mode) {
   pending = {id: t.id, mode};
   fillModelEffort(true);
+  /* the ticket's own model stays chosen, so a launch from here keeps it */
+  if (t.model && $("#dProvider").value === t.provider) fillChoices(t.provider, {model: t.model});
   $("#dlgT").textContent = {work: "Work", plan: "Plan", review: "Re-evaluate",
                             restart: "Restart"}[mode] + "  ·  " + t.id
     + (mode === "restart" ? `  ·  run ${t.state === laneOf("start") ? t.run : t.run + 1}` : "");

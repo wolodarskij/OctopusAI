@@ -484,6 +484,13 @@ and `defaultEffort` in `project.json`, another's are `providers.<id>`. `--model`
 override them, only on the owner's order, and only with a model and an effort of that AI
 provider; any other is refused and never reaches its command line.
 
+**A ticket keeps the model the owner chose for it.** A launch whose `--model` differs from the
+model the ticket runs otherwise writes it into the ticket's `model:`. Every later launch of the
+ticket runs that model when it names none: a relaunch by the manager or the watchdog, a resume,
+a reopen, a restart and a launch from the board. Only the owner's order changes it: `--model`
+on a launch, or `model <id> <model>|default`. A child never takes its parent's `model:`. A
+launch whose AI provider cannot run the ticket's model is refused.
+
 ### The outcome line
 
 **Every ticket that leaves a `work` or a `verify` session carries `outcome:`**, one line its
@@ -875,7 +882,7 @@ owner's order frees it: `doc-artifact <id> no --owner-order "<the order>"`.
   is wrong. `check` renames no ticket.
 - `new`, the board's `New task` and its `Process with AI` write the section that the title names.
 
-Other fields: `category`, `filed-by`, `parent`, `group`, `related`, `repeat`, `run`, `visual`, `artifact`.
+Other fields: `category`, `filed-by`, `parent`, `group`, `related`, `repeat`, `run`, `visual`, `artifact`, `model`.
 
 **`visual` says whether a ticket does visual work** on textures, 3D meshes or the materials
 that show them: `yes`, or `no` with its reason under `## Not visual work` (`visual <id> yes|no

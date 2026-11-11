@@ -123,6 +123,9 @@ file alone refuses nothing. A ticket that differs from each named ticket takes `
   the work. Never copy the owner's message into it.
 - The model and the effort come from `defaultModel` and `defaultEffort` in `.octopus/project.json`.
   `--model` and `--effort` (`low` `medium` `high` `xhigh` `max`) override them on the owner's order.
+  A ticket's `model:` wins over `defaultModel`. A `--model` that differs from the model the ticket
+  runs otherwise is written into `model:`, and every later launch runs it.
+  `model <id> <model>|default` sets or clears it, on the owner's order.
 - The ticket's `permits` limit the session. If the work needs a permit, grant it on the ticket
   first and say so.
 - In a project with `vcs: git`, a `work` session commits its own files and hunks before it moves

@@ -17,8 +17,9 @@ The name is a group from `python .octopus/todo.py groups --table` (map store) or
 | `small`, `medium`, `large` | `work` |
 | `unknown` | `plan` |
 
-- The model and the effort are the project's `defaultModel` and `defaultEffort`. `--model` and
-  `--effort` override them on the owner's order.
+- The model is the ticket's `model:`, else the project's `defaultModel`; the effort is the
+  project's `defaultEffort`. `--model` and `--effort` override them on the owner's order, and the
+  `--model` stays each ticket's model.
 - A ticket in any other board is printed with its board, and nothing is launched for it.
 - `--note` goes into every brief, above the generic steps.
 - `--dry-run` prints the launch lines and starts nothing.
